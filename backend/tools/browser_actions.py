@@ -148,7 +148,7 @@ class BrowserFillTool(Tool):
                       minutes: Any = None, **kwargs: Any) -> str:
         thread_id, _project_id = _execution_context(kwargs)
         if saved_login is not None or minutes is not None:
-            from tools import browser_saved_login
+            import tools.browser_saved_login as browser_saved_login
 
             if selector is not None or text is not None:
                 return browser_saved_login.EXCLUSIVE

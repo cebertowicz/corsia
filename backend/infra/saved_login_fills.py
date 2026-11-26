@@ -248,11 +248,11 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         login = saved_logins.get_login(login_id)
     except KeyStoreError as exc:
         raise FillApprovalError(str(exc)) from None
-    if login.status != saved_logins.STATUS_OK:
-        raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     user_id, root, agent = thread_record(clean_thread)
     if login.saved_by != user_id:
         raise FillApprovalError(_NOT_THEIRS)
+    if login.status != saved_logins.STATUS_OK:
+        raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     now_iso = utc_now_iso()
     with _lock:
         expired = _prune(time.monotonic())

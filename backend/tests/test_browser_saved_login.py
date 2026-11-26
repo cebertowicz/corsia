@@ -13,7 +13,7 @@ from host_access import browser_login_fill as fill
 from infra import product_events, saved_login_fills, saved_logins
 from infra.database import get_db
 from test_browser_login_fill import SITE, USER, world  # noqa: F401 - the fixture
-from tools import browser_saved_login as choice
+import tools.browser_saved_login as choice
 from tools.browser_actions import BrowserFillTool
 
 THREAD = "thread-fill"
@@ -116,11 +116,16 @@ async def test_a_grant_for_a_login_now_saved_by_someone_else_fills_nothing(agent
     assert agent.typed == []
 
 
-def test_a_request_for_another_persons_login_is_refused_on_the_server(agent):
+@pytest.mark.parametrize("out_of_date", [False, True])
+def test_a_request_for_another_persons_login_is_refused_on_the_server(agent, out_of_date):
     theirs = saved_logins.save_login(site=SITE, username="other@example.com", password="Another-secret-1",
                                      saved_by="someone")
-    with pytest.raises(saved_login_fills.FillApprovalError):
+    if out_of_date:
+        saved_logins.mark_out_of_date(theirs)
+    with pytest.raises(saved_login_fills.FillApprovalError) as refused:
         saved_login_fills.request_fill(THREAD, theirs, requested_seconds=60)
+    # Ownership is checked first, so the refusal names neither their site nor their username.
+    assert SITE not in str(refused.value) and "other@example.com" not in str(refused.value)
     assert _requests() == []
 
 

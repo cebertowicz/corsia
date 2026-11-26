@@ -190,7 +190,7 @@ async def test_without_a_live_approval_the_person_is_asked_and_nothing_is_filled
 @pytest.mark.asyncio
 async def test_an_out_of_date_login_gives_the_person_its_sign_in_with_the_approved_refusal(world, caplog):
     world.grants = [False]
-    saved_logins.mark_out_of_date(world.login_id)
+    _out_of_date_for_own_agent(world)
     text = await fill.fill_saved_login(THREAD, world.login_id)
     refusal = f"The saved login for {SITE} ({USER}) is out of date. The person has a step to sign in to {SITE} themselves."
     assert text == f"{refusal} {browser_control.PERSON_STEP}{browser_control.seen_by_person(THREAD)}"
@@ -203,7 +203,7 @@ async def test_an_out_of_date_login_gives_the_person_its_sign_in_with_the_approv
                                      BrowserSessionError(browser_control.PASSWORD_PAGE_UNRECORDED), RuntimeError("down")])
 async def test_a_person_step_that_cant_be_recorded_says_so(world, failure):
     world.grants = [False]
-    saved_logins.mark_out_of_date(world.login_id)
+    _out_of_date_for_own_agent(world)
     world.owner.declare = failure
     assert await fill.fill_saved_login(THREAD, world.login_id) == browser_control.DECLARATION_NOT_RECORDED
 
@@ -211,7 +211,7 @@ async def test_a_person_step_that_cant_be_recorded_says_so(world, failure):
 @pytest.mark.asyncio
 async def test_a_step_already_open_on_the_sign_in_page_counts_as_the_persons_step(world):
     world.grants = [False]
-    saved_logins.mark_out_of_date(world.login_id)
+    _out_of_date_for_own_agent(world)
     world.owner.declare = BrowserSessionError(browser_control.PASSWORD_PAGE + " The page is open.")
     text = await fill.fill_saved_login(THREAD, world.login_id)
     assert text.endswith(browser_control.PERSON_STEP + browser_control.seen_by_person(THREAD))
@@ -266,6 +266,16 @@ async def test_a_result_the_page_never_showed_records_it_as_unknown(world, monke
     world.outcome = "unknown"
     assert await fill.fill_saved_login(THREAD, world.login_id) == fill.UNKNOWN.format(site=SITE, username=USER)
     assert called == ["fill_unknown"]
+
+
+def _out_of_date_for_own_agent(w) -> None:
+    """Mark the login out of date, called from its person's own agent thread (ownership is checked first)."""
+    db = get_db()
+    db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES (?,?,?,?,?)",
+               (THREAD, "person", "Bookkeeper", "t", "t"))
+    db.commit()
+    db.close()
+    saved_logins.mark_out_of_date(w.login_id)
 
 
 def _audit(login_id: str) -> list[str]:
