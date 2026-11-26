@@ -42,10 +42,6 @@ USERNAME_MAX = 320
 #: Longest host name as text: 255 octets on the wire (RFC 1035 section 2.3.4). With the shape check and a port of at most five
 #: digits, it also bounds the whole site address.
 _HOST_MAX = 253
-#: Set by the output-blanking requirement (C6): saved values under 8 characters are not blanked,
-#: since they would match ordinary text in what the browser returns.
-BLANKING_MIN = 8
-
 #: ``https://host`` with an optional port and an optional trailing slash, and nothing else:
 #: no user, path, query or fragment. The host is a name or IPv4 address, or an IPv6 address in brackets.
 _ORIGIN = re.compile(r"(?i:https)://(?P<host>[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::(?P<port>[0-9]{1,5}))?/?")
@@ -264,7 +260,7 @@ def password_matches(login_id: object, password: object, *, db: sqlite3.Connecti
 
 
 def blanking_values(*, db: sqlite3.Connection | None = None) -> frozenset[str]:
-    """Every saved password of ``BLANKING_MIN`` or more characters, to blank wherever the browser returns one."""
+    """Every saved password, to blank wherever the browser returns one."""
     conn = _db(db)
     names = [entry_name(row[0]) for row in conn.execute("SELECT id FROM saved_logins").fetchall()]
-    return frozenset(value for value in key_store_values.resolve(conn, names).values() if len(value) >= BLANKING_MIN)
+    return frozenset(key_store_values.resolve(conn, names).values())

@@ -2,14 +2,14 @@
 
 Every agent browser command's text comes back through ``tools.browser_runtime._run_owned``: its result,
 and the text of any error it raised. That one place calls :func:`blank_output` once per command, which reads
-the saved passwords once (``infra.saved_logins.blanking_values``: each saved password of 8 or more characters)
-and replaces each one wherever it appears, raw, URL-encoded, HTML-escaped or JSON-encoded, and with its
-whitespace as a snapshot or page text shows it, with :data:`BLANK`.
+the saved passwords once (``infra.saved_logins.blanking_values``) and replaces each whole-token form, raw,
+URL-encoded, HTML-escaped or JSON-encoded, and with its whitespace as a snapshot or page text shows it,
+with :data:`BLANK`. Number-shaped values also match other digit groupings.
 That covers snapshots, page text, `get` results (get html too), eval and script results, console and network
 logs, and error text.
 
 A result that can't be checked, because the saved passwords couldn't be read, is withheld rather than returned
-unchecked. Nothing here logs, keeps or returns a password: the values live only in this call's locals.
+unchecked. Nothing here logs or returns a password: the values may remain in Python's regex cache.
 """
 from __future__ import annotations
 
@@ -109,8 +109,7 @@ def _html_forms(value: str) -> set[str]:
 def _whitespace_forms(value: str) -> set[str]:
     """The value as a snapshot or page text shows it (Chrome 152, checked on a real page): a snapshot's page text
     drops U+00A0; page text collapses a run of spaces to one and trims spaces at either end; a snapshot line's
-    end is trimmed of U+00A0 too. Any mix of these. A form shorter than a blanked value could be is left out,
-    so a value that is mostly spaces doesn't blank short ordinary text."""
+    end is trimmed of U+00A0 too. Any mix of these."""
     forms, todo = {value}, [value]
     while todo:
         text = todo.pop()
@@ -118,7 +117,7 @@ def _whitespace_forms(value: str) -> set[str]:
             if form not in forms:
                 forms.add(form)
                 todo.append(form)
-    return {form for form in forms if form == value or len(form) >= saved_logins.BLANKING_MIN}
+    return forms
 
 
 def encodings(value: str) -> set[str]:
@@ -129,18 +128,37 @@ def encodings(value: str) -> set[str]:
     return {form for text in plain for form in {text} | _json_forms(text) if form}
 
 
-def blank(text: str, values: Iterable[str]) -> str:
-    """The text with every form of each value replaced by BLANK, the longest forms first.
+def _bounded(form: str, pattern: str) -> str:
+    # Python's Unicode word characters except underscore are precisely letters and digits.
+    return pattern + (r"(?![^\W_])" if form[-1].isalnum() else "")
 
-    One str.replace per form, deliberately: measured on a 200 KB snapshot with 16-character passwords (Nov 25,
-    with every URL form), about 37 ms at 100 saved logins and 425 ms at 1000. A single compiled alternation was 4
-    to 8 times slower on the earlier, smaller form set, and a trie-shaped one is faster only when kept between
-    commands, which would hold every saved password's forms in memory.
-    """
-    forms = sorted({form for value in values for form in encodings(value)}, key=len, reverse=True)
+
+def _digit_forms(digits: str) -> set[tuple[str, ...]]:
+    transforms = (lambda char: char, lambda char: quote(char, safe=""),
+                  lambda char: quote(char, safe="").lower(), lambda char: json.dumps(char)[1:-1],
+                  lambda char: json.dumps(json.dumps(char)[1:-1])[1:-1])
+    return {tuple(transform(char) for char in digits) for transform in transforms}
+
+
+def blank(text: str, values: Iterable[str]) -> str:
+    """Hide whole-token forms and alternate groupings of numeric values, longest first."""
+    forms = {form for value in values for form in encodings(value)}
+    patterns: dict[bool, set[tuple[int, str]]] = {True: set(), False: set()}
     for form in forms:
-        text = text.replace(form, BLANK)
-    return text
+        patterns[form[0].isalnum()].add((len(form), _bounded(form, re.escape(form))))
+        if all(char.isdigit() or char in " -./" for char in form):
+            digits = "".join(char for char in form if char.isdigit())
+            if digits:
+                for encoded in _digit_forms(digits):
+                    pattern = r"(?: *|[-./]|\++|(?:%20)+|%2[fF]|\\{1,2}/)".join(map(re.escape, encoded))
+                    edge = encoded[0] + encoded[-1]
+                    patterns[edge[0].isalnum()].add((len("".join(encoded)), _bounded(edge, pattern)))
+    groups = []
+    for bounded, entries in patterns.items():
+        if entries:
+            prefix = r"(?<![^\W_])" if bounded else ""
+            groups.append(prefix + "(?:" + "|".join(p for _, p in sorted(entries, reverse=True)) + ")")
+    return re.sub("|".join(groups), lambda _: BLANK, text) if groups else text
 
 
 def _saved_values() -> frozenset[str]:
