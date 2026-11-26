@@ -208,11 +208,9 @@ def _mutation_operation(
     try:
         import tools.workflow_task_fields as workflow_task_fields
         actor = _thread_actor(thread_id, actor_row, turn_identity, call_ids)
-        workflow_version, workflow_steps = None, ()
-        if operation in {"add", "insert"}:
-            workflow_task_fields.validate_creation_reference(params, workflows, db, plan_id)
-            workflow_version = workflow_task_fields.creation_version(params, workflows)
-            workflow_steps = workflow_task_fields.creation_run(params, workflows)
+        workflow_version, workflow_steps = workflow_task_fields.prepare_mutation(
+            operation, params, workflows, db, plan_id, actor,
+        )
         in_later = public.titles_in_later(db, plan_id, params)
         result = mutate(
             plan_id,

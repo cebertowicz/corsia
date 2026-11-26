@@ -16,6 +16,7 @@ from infra.guidance_git import GitFault, file_version, workspace_repository
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from infra.system_package import system_package_dir
 from plans.public import PlanInputError
+from tools import workflow_run_parent
 
 
 @dataclass(frozen=True)
@@ -151,11 +152,8 @@ def _skill_body(name: str, step_id: str, skill) -> str:
         raise PlanInputError(f"step {step_id}'s instruction can't be read from {name}'s SKILL.md") from exc
 
 
-def validate_creation_reference(
-    params: dict[str, Any], workflows: dict[str, Workflow], db, plan_id: str,
-) -> None:
-    """Require a supplied workflow reference to name an effective workflow skill, and a run
-    it starts to sit under a parent (``validate_run_parent``)."""
+def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Workflow]) -> None:
+    """Require a supplied workflow reference to name an effective workflow skill."""
 
     reference = params.get("workflow_ref")
     if reference is None or not isinstance(reference, str):
@@ -166,35 +164,20 @@ def validate_creation_reference(
             f"workflow_ref {reference!r} is not an effective workflow skill; "
             f"effective workflow refs: {available}"
         )
-    validate_run_parent(params, db, plan_id)
 
 
-RUN_PARENT_REFUSAL = (
-    "A workflow run starts under the plain phase (no workflow_ref) that holds its piece of "
-    "work: set parent_id to that phase, or add the phase first if the work has none."
-)
+def prepare_mutation(
+    operation: str, params: dict[str, Any], workflows: dict[str, Workflow], db, plan_id: str, actor,
+) -> tuple[str | None, tuple[dict[str, Any], ...]]:
+    """Check a mutation against the workflow rules: the reference an add or insert names, then
+    where a run sits (``workflow_run_parent``). Returns the version and steps an add builds."""
 
-
-def validate_run_parent(params: dict[str, Any], db, plan_id: str) -> None:
-    """Refuse an agent's run (a phase with workflow_ref) that would land at the top level.
-
-    An insert takes its parent from its ``before_node_id`` sibling, so only a parent that
-    resolves to none is refused. A sibling that can't be read is left to the mutation's own
-    error.
-    """
-
-    if params.get("kind") != "phase" or not isinstance(params.get("workflow_ref"), str):
-        return
-    if params.get("parent_id") is not None:
-        return
-    before = params.get("before_node_id")
-    if before is not None:
-        sibling = db.execute(
-            "SELECT parent_id FROM plan_nodes WHERE id=? AND plan_id=?", (before, plan_id),
-        ).fetchone()
-        if sibling is None or sibling["parent_id"] is not None:
-            return
-    raise PlanInputError(RUN_PARENT_REFUSAL)
+    if operation in {"add", "insert"}:
+        validate_creation_reference(params, workflows)
+    workflow_run_parent.validate(operation, params, db, plan_id, actor)
+    if operation not in {"add", "insert"}:
+        return None, ()
+    return creation_version(params, workflows), creation_run(params, workflows)
 
 
 def creation_version(params: dict[str, Any], workflows: dict[str, Workflow]) -> str | None:

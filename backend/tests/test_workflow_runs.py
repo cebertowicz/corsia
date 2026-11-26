@@ -16,7 +16,7 @@ from plans.workflow_fields import STEPS_CREATED
 from tests.event_routing_helpers import mk_session
 from tests.plan_execution_helpers import execute_as, open_turn, registry_of
 from tests.skill_sidecar_helpers import POINTER
-from tools import workflow_task_fields
+from tools import workflow_run_parent, workflow_task_fields
 from tools.plans import PlanUpdateTool
 
 pytestmark = pytest.mark.asyncio
@@ -259,7 +259,7 @@ async def test_a_run_with_no_parent_is_refused_naming_the_fix(isolated_db, tmp_p
     refused = await run.start("ship", parent_id=None)
 
     assert refused == (
-        f"Error: invalid request, fix and resend - {workflow_task_fields.RUN_PARENT_REFUSAL}"
+        f"Error: invalid request, fix and resend - {workflow_run_parent.RUN_PARENT_REFUSAL}"
     )
     assert run.node_count() == 0
 
@@ -278,7 +278,7 @@ async def test_an_insert_refuses_a_top_level_run_and_takes_one_beside_a_nested_s
     refused = await run.update("insert", {**params, "before_node_id": work})
     nested = await run.update("insert", {**params, "before_node_id": first["id"]})
 
-    assert refused.endswith(workflow_task_fields.RUN_PARENT_REFUSAL)
+    assert refused.endswith(workflow_run_parent.RUN_PARENT_REFUSAL)
     assert nested["node"]["parent_id"] == work
     assert [step["title"] for step in nested["steps"]] == ["Draft it", "review", "polish"]
 
@@ -303,3 +303,73 @@ async def test_track_is_no_longer_offered_and_names_the_kinds_left(isolated_db, 
 
     assert isinstance(refused, str) and "must be one of ['phase', 'task']" in refused
     assert run.node_count() == 0
+
+
+async def test_an_edit_refuses_lifting_a_run_to_the_top_level_and_moves_plain_work(
+    isolated_db, tmp_path, monkeypatch,
+):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    work = await run.work()
+    first = (await run.start("ship"))["node"]
+    task = (await run.update("add", {
+        "kind": "task", "title": "Check links", "acceptance_criteria": "Links work", "size": "S",
+        "intent": "Notes link to the right pages", "parent_id": work,
+    }))["node"]
+
+    single = await run.update("edit", {
+        "node_id": first["id"], "expected_revision": run.revision(first["id"]), "parent_id": None,
+    })
+    bulk = await run.update("edit", {"node_ids": [task["id"], first["id"]], "parent_id": None})
+    plain = await run.update("edit", {
+        "node_id": task["id"], "expected_revision": run.revision(task["id"]), "parent_id": None,
+    })
+
+    assert single.endswith(workflow_run_parent.RUN_PARENT_REFUSAL)
+    assert bulk.endswith(workflow_run_parent.RUN_PARENT_REFUSAL)
+    assert plain["node"]["parent_id"] is None
+    assert run.rows("SELECT parent_id FROM plan_nodes WHERE id=?", first["id"]) == [{"parent_id": work}]
+
+
+async def test_the_run_checks_read_named_nodes_only_on_a_plan_the_caller_may_reach(
+    isolated_db, tmp_path, monkeypatch,
+):
+    from plans.boundary import PlanActor
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    work = await run.work()
+    first = (await run.start("ship"))["node"]
+    params = {"kind": "phase", "workflow_ref": "ship", "before_node_id": work}
+    owner = PlanActor(run.thread_id, "user-1", None)
+    stranger = PlanActor("stranger", "user-2", None)
+    db = get_db()
+    try:
+        with pytest.raises(workflow_run_parent.PlanInputError):
+            workflow_run_parent.validate_run_parent(params, db, run.plan_id, owner)
+        workflow_run_parent.validate_run_parent(params, db, run.plan_id, stranger)
+        workflow_run_parent.validate_run_move(
+            {"node_id": first["id"], "parent_id": None}, db, run.plan_id, stranger,
+        )
+    finally:
+        db.close()
+
+
+async def test_a_coordinator_top_level_run_on_a_lane_plan_is_refused_like_any_other(
+    isolated_db, tmp_path, monkeypatch,
+):
+    """A coordinator may add only top-level work to a lane's plan; a run there would be a
+    fragment, so it adds a plain phase or task and the lane starts the run under it."""
+    from plans.boundary import PlanActor
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    conductor = PlanActor(mk_session("conductor-for-runs"), "user-1", None)
+    db = get_db()
+    try:
+        with pytest.raises(workflow_run_parent.PlanInputError, match="plain phase"):
+            workflow_run_parent.validate_run_parent(
+                {"kind": "phase", "workflow_ref": "ship"}, db, run.plan_id, conductor,
+            )
+        workflow_run_parent.validate_run_parent(
+            {"kind": "phase", "title": "Release notes"}, db, run.plan_id, conductor,
+        )
+    finally:
+        db.close()
