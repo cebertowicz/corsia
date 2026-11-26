@@ -260,6 +260,8 @@ export function createPlanTreeReorder(options: Options) {
 				press = null; geometry = null; cancelAnimationFrame(scrollFrame); scrollFrame = 0; movePending = false;
 				if (!drag) return;
 				const next = draft, count = drag.count, visualPosition = drag.position;
+				const element = options.element();
+				const snapshot = next && next.id !== next.targetId && element && !prefersReducedMotion() ? captureFold(element, []) : null;
 				drag = null;
 				if (!next || next.id === next.targetId) {
 					// The row gliding back is the visible answer; only a reader needs words.
@@ -268,6 +270,8 @@ export function createPlanTreeReorder(options: Options) {
 					return;
 				}
 				await tick();
+				const tree = options.element();
+				if (snapshot && tree) playFold(tree, snapshot);
 				if (!(await saveMove(current.node, next.position, false))) announcement = `${node.title} moved to ${visualPosition + 1} of ${count}`;
 			},
 			onpointercancel() { menu.onpointercancel(); if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); scrollFrame = 0; movePending = false; press = null; geometry = null; drag = null; draft = null; },
