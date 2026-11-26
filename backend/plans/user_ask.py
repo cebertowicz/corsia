@@ -5,12 +5,11 @@ queue is empty, so the plan looks stalled and no one moves it. An agent's
 ``block_node`` on the user therefore names its ask. A choice someone with no
 history could make from the card alone is a raised decision, which already holds
 its source task (``plans.wait_causes``), so a block beside one is refused.
-Anything else the user must decide or judge (a choice that needs its background,
-a draft, a design) is a brief: a registered artifact the plan's thread owns. The
-block links it to the task with the existing
-``attention`` role and raises it in the user's one attention pile. When the
-user clears that ask, the holds it placed clear and the agent is told
-(``cleared``). ``shared/planning/plans-simplify-2026-09-29.md``.
+Anything else the user must decide or judge is a brief, a registered artifact the
+plan's thread owns: the block links it to the task with the existing ``attention``
+role and raises it in the user's one attention pile. When the user clears that
+ask, the holds it placed clear and the agent is told (``cleared``).
+``shared/planning/plans-simplify-2026-09-29.md``.
 """
 
 from __future__ import annotations
