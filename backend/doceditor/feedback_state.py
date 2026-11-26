@@ -280,8 +280,8 @@ def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
     return [(str(row["root_id"]), str(row["item_id"])) for row in rows]
 
 
-# Documents per unread query, well under SQLite's bound-parameter limit (three IN lists each).
-_SCOPE_CHUNK = 300
+# Documents per unread query: four IN lists each bind 4*N + 5 values, under SQLite's oldest default limit of 999.
+_SCOPE_CHUNK = 240
 
 
 def unread_item_ids(db, user_id: str, artifact_ids: list[str] | None = None) -> set[str]:
