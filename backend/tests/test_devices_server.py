@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import os
 import socket
 import ssl
 import time
@@ -354,7 +356,8 @@ async def _upgraded_silent_peer(port: int):
     reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=_tls(["http/1.1"]))
     writer.write(
         b"GET /ws HTTP/1.1\r\nhost: devices\r\nupgrade: websocket\r\nconnection: Upgrade\r\n"
-        b"sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+        b"sec-websocket-key: " + base64.b64encode(os.urandom(16))
+        + b"\r\nsec-websocket-version: 13\r\n\r\n"
     )
     await writer.drain()
     head = await reader.readuntil(b"\r\n\r\n")
