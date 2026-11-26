@@ -28,6 +28,14 @@ def diagram_changed() -> CommentSelectionChanged:
     return CommentSelectionChanged('Place the pin on the current diagram. Your draft is kept.', 'diagram_changed')
 
 
+def passage_gone() -> CommentSelectionChanged:
+    """A comment sent again from a kept draft whose passage is no longer in the document with both its sides."""
+    return CommentSelectionChanged(
+        'The text this comment was on changed before it sent, so it isn’t placed. Your draft is kept.',
+        'passage_gone',
+    )
+
+
 def not_active_message(artifact_id: str) -> str:
     """The sentence every caller gives an artifact_id that no longer names an active document."""
     return f"artifact_id does not resolve to an active artifact: {artifact_id}"

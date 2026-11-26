@@ -6,12 +6,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
-from doceditor.comment_action_errors import CommentSelectionChanged
+from doceditor.comment_action_errors import CommentSelectionChanged, passage_gone
 from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.live_text import utf16_slice
-from doceditor.quote_anchor import anchor_context, resolve_quote
+from doceditor.quote_anchor import anchor_context, kept_place, resolve_quote
 import infra.app_loop as app_loop
 from infra import write_effects
 from infra.db_async import run_in_db
@@ -50,10 +50,30 @@ class CreateReceipt:
                 self.rolled_back = True
 
 
-def browser_anchor(live, identifier: str | None) -> Anchor:
-    """The span this comment's own capture reserved, anchored on the text the live document holds there now."""
+def kept_sides(request) -> bool:
+    """A person's new comment sent with its kept draft's sides, which place it when no capture is held for it."""
+    return (request.browser and bool(request.quote) and not request.parent_id and not request.review
+            and request.kept_prefix is not None and request.kept_suffix is not None)
+
+
+def kept_anchor(text: str, request) -> Anchor:
+    """The kept draft's passage in ``text``, found by its quote with both kept sides, or a refusal."""
+    place = kept_place(text, request.quote, from16=request.start, prefix=request.kept_prefix, suffix=request.kept_suffix)
+    if place is None:
+        raise passage_gone()
+    return Anchor(request.quote, place[0], place[1], request.kept_prefix, request.kept_suffix, text)
+
+
+def browser_anchor(live, identifier: str | None, request=None) -> Anchor:
+    """The span this comment's own capture reserved, anchored on the text the live document holds there now.
+
+    With no capture held (the page that made it reloaded or went), a ``request`` carrying its kept draft's
+    sides is placed by them instead (`kept_anchor`).
+    """
     text = live.text
     span = live.held_span(identifier)
+    if span is None and request is not None and kept_sides(request):
+        return kept_anchor(text, request)
     quote = utf16_slice(text, *span) if span is not None else None
     context = anchor_context(text, *span, quote) if span is not None and quote else None
     if span is None or not quote or context is None:
@@ -153,7 +173,7 @@ async def create_validated_comment(request, client_id):
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:
-            prepare = lambda live: browser_anchor(live, client_id)
+            prepare = lambda live: browser_anchor(live, client_id, request)
         elif request.region is not None:
             prepare = lambda live: image_anchor(live, request.quote, request.near)
         else:

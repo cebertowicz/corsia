@@ -140,7 +140,7 @@ async def create_comment(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
-        region=region, diagram_source=body.diagram_source,
+        region=region, diagram_source=body.diagram_source, kept_prefix=body.anchor_prefix, kept_suffix=body.anchor_suffix,
         delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
         tagged_agent_mentions=mentions,
     )
