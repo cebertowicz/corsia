@@ -1,5 +1,7 @@
 """Activity chat replies share chat's own unread projection and read marks."""
 
+import pytest
+
 from doceditor.activity_chat_reply_rows import chat_detail, chat_rows, mark_chat_read
 from doceditor.reply_attention import chat_reply_items
 from infra.database import get_db
@@ -28,6 +30,37 @@ def test_chat_row_detail_and_read_through_existing_state(isolated_db):
         mark_chat_read(db, 'person', 'thread', 'w')
         assert chat_rows(db, 'person') == []
         assert chat_reply_items(db, 'person', 'thread') == []
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize('state', ['archived_at', 'purged_at', 'lifecycle', 'project'])
+def test_inactive_chat_is_not_listed_or_accessible(isolated_db, monkeypatch, state):
+    from tests.test_activity_notifications import _client
+
+    db = get_db()
+    try:
+        _seed_root_and_reply(db)
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('answer','thread','assistant','[c1.1] because','v',4)")
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','answer','v')")
+        if state == 'project':
+            db.execute("INSERT INTO projects(id,name,status,created_at,updated_at) VALUES ('project','Project','archived','t','t')")
+            db.execute("UPDATE threads SET project_id='project' WHERE id='thread'")
+        elif state == 'lifecycle':
+            db.execute("UPDATE threads SET lifecycle_state='archived' WHERE id='thread'")
+        else:
+            db.execute(f"UPDATE threads SET {state}='t' WHERE id='thread'")
+        db.commit()
+        assert chat_rows(db, 'person') == []
+        client = _client(monkeypatch, 'person')
+        notifications = client.get('/api/attention/queue?view=activity').json()['notifications']
+        assert notifications['count'] == 0
+        assert notifications['items'] == []
+        assert client.get('/api/attention/notifications/chats/thread').status_code == 404
+        response = client.post('/api/attention/notifications/read', json={
+            'documents': [], 'chats': [{'thread_id': 'thread', 'through': 'v'}],
+        })
+        assert response.status_code == 404
     finally:
         db.close()
 

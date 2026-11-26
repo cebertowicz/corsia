@@ -124,7 +124,20 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
     if (action === 'overflow') await expect(page.locator('[data-doc-jump]')).toContainText('3 new');
     await capture(page, info.outputPath('chat-open.png'));
     if (width === 1440) await expect(dismiss).toHaveCSS('opacity', '0');
-    if (action === 'overflow') return;
+    if (action === 'overflow') {
+      await page.locator('[data-unread-answer]').nth(1).evaluate(el => el.scrollIntoView({ block: 'start' }));
+      await expect(page.getByLabel('Replies to your comments')).toContainText('2 of 4 replies to your comments');
+      await capture(page, info.outputPath('chat-second-reply.png'));
+      await page.locator('.chat-pane .scroll').evaluate(el => { el.scrollTop = el.scrollHeight; });
+      const lastReply = page.locator('.chat-pane .thread .text').last();
+      const pill = page.locator('.chat-pane [data-doc-jump]');
+      await expect(pill).toBeVisible();
+      await capture(page, info.outputPath('chat-bottom.png'));
+      const replyBox = await lastReply.boundingBox();
+      const pillBox = await pill.boundingBox();
+      expect(replyBox && pillBox && replyBox.y + replyBox.height <= pillBox.y).toBe(true);
+      return;
+    }
     if (action === 'close') {
       const refresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/attention/queue' && response.ok());
       await page.getByRole('button', { name: `Close Reply agent ${width}` }).click();

@@ -151,11 +151,11 @@
 		? press('send', 'send this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED))
 		: press('dont_send', 'decline this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED));
 	const markTaskDone = () => press('done', 'mark this task done', async () => (task ? markTaskDonePress(task) : SUCCEEDED));
-	/** Done marks the document read up to the latest reply its row showed; one that lands after stays unread. */
-	function markDocumentRead() {
-		if (!document) return;
+	/** Mark only the replies represented by the displayed content. */
+	function markRepliesRead(through?: string) {
+		if (!document && !(chat && through)) return;
 		return press('done', 'mark these replies read', async () => {
-			await markDocumentsRead([{ artifact_id: document.artifact_id, through_reply_id: document.latest_reply_id }]);
+			await markDocumentsRead(document ? [{ artifact_id: document.artifact_id, through_reply_id: document.latest_reply_id }] : [], chat && through ? [{ thread_id: chat.thread_id, through }] : []);
 			return SUCCEEDED;
 		});
 	}
@@ -205,7 +205,7 @@
 			<div class="doc-line">
 				<span class="doc-at" role="status">{barLabel}</span>
 				<span class="doc-done">
-					{#if !repliesRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void markDocumentRead()}>{labelFor('done', 'Done')}</Button>{/if}
+					{#if !repliesRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void markRepliesRead()}>{labelFor('done', 'Done')}</Button>{/if}
 				</span>
 			</div>
 			{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{/if}
@@ -220,7 +220,7 @@
 {/snippet}
 
 {#if chat}
-	<ActivityChatPane {item} detail={chat} {allRead} {onActed} {onOpenChat} onClose={onCloseChat} />
+	<ActivityChatPane {item} detail={chat} {allRead} {sending} readFailed={failure?.retry === 'done'} onDone={markRepliesRead} {onOpenChat} onClose={onCloseChat} />
 {:else if doc}
 	{#if lookupFailed}
 		<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>

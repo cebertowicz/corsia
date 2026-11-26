@@ -5,6 +5,7 @@ import json
 
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE
 from infra.chat_comment_index import attach_comments
+from infra.thread_visibility import VISIBLE_THREAD_SQL
 
 
 def chat_rows(db, user_id: str) -> list[dict]:
@@ -14,7 +15,7 @@ def chat_rows(db, user_id: str) -> list[dict]:
                COUNT(*) AS unread, MAX(a.answered_at) AS newest_at
         {UNREAD_FROM}
         LEFT JOIN projects p ON p.id=t.project_id
-        WHERE {UNREAD_WHERE}
+        WHERE {UNREAD_WHERE} AND {VISIBLE_THREAD_SQL}
         GROUP BY a.thread_id
     """, (user_id, user_id)).fetchall()
     return [{
@@ -37,7 +38,8 @@ def chat_detail(db, user_id: str, thread_id: str) -> list[dict]:
                COALESCE(c.root_user_message_id,c.user_message_id) AS root_user_message_id,
                COALESCE(c.root_cid,c.cid) AS root_cid
         {UNREAD_FROM}
-        WHERE {UNREAD_WHERE} AND a.thread_id=?
+        LEFT JOIN projects p ON p.id=t.project_id
+        WHERE {UNREAD_WHERE} AND {VISIBLE_THREAD_SQL} AND a.thread_id=?
         ORDER BY target.seq
     """, (user_id, user_id, thread_id)).fetchall()
     targets: dict[str, dict] = {}
@@ -61,8 +63,9 @@ def mark_chats_read(db, user_id: str, chats: list[dict]) -> None:
         INSERT INTO chat_comment_views(user_id,user_message_id,cid,seen_at)
         SELECT ?, a.user_message_id, a.cid, MAX(a.answered_at)
         {UNREAD_FROM}
+        LEFT JOIN projects p ON p.id=t.project_id
         JOIN json_each(?) requested ON a.thread_id=json_extract(requested.value,'$.thread_id')
-        WHERE {UNREAD_WHERE} AND a.answered_at<=json_extract(requested.value,'$.through')
+        WHERE {UNREAD_WHERE} AND {VISIBLE_THREAD_SQL} AND a.answered_at<=json_extract(requested.value,'$.through')
         GROUP BY a.user_message_id,a.cid
         ON CONFLICT(user_message_id,cid,user_id) DO UPDATE
           SET seen_at=MAX(seen_at,excluded.seen_at)

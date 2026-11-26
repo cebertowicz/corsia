@@ -7,10 +7,11 @@ from pydantic import BaseModel
 
 from api.doc_comment_access import _artifact_for_read
 from doceditor import comment_thread_views
-from infra.auth import owns_thread, require_user_header_only
+from infra.auth import require_user_header_only
 from infra.database import get_db, write_transaction
 from doceditor.activity_chat_reply_rows import chat_detail, mark_chats_read
 from infra.db_async import run_in_db
+from infra.thread_visibility import VISIBLE_THREAD_SQL
 
 router = APIRouter()
 
@@ -30,17 +31,22 @@ class NotificationsReadBody(BaseModel):
     chats: list[NotificationChat] = []
 
 
+def _require_visible_chats(db, user_id: str, ids: set[str]) -> None:
+    if ids:
+        count = db.execute(f'''SELECT COUNT(*) FROM threads t
+            LEFT JOIN projects p ON p.id=t.project_id
+            WHERE t.user_id=? AND t.id IN (SELECT value FROM json_each(?)) AND {VISIBLE_THREAD_SQL}''',
+            (user_id, json.dumps(list(ids)))).fetchone()[0]
+        if count != len(ids):
+            raise HTTPException(status_code=404, detail='chat not found')
+
+
 def _mark_notifications_read(user_id: str, documents: list[NotificationDocument], chats: list[NotificationChat]) -> None:
     db = get_db()
     try:
         # Authorize every document before anything is written.
         live = [(_artifact_for_read(doc.artifact_id, user_id, db), doc.through_reply_id) for doc in documents]
-        ids = {chat.thread_id for chat in chats}
-        if ids:
-            count = db.execute('SELECT COUNT(*) FROM threads WHERE user_id=? AND id IN (SELECT value FROM json_each(?))',
-                               (user_id, json.dumps(list(ids)))).fetchone()[0]
-            if count != len(ids):
-                raise HTTPException(status_code=404, detail='chat not found')
+        _require_visible_chats(db, user_id, {chat.thread_id for chat in chats})
     finally:
         db.close()
     try:
@@ -59,8 +65,7 @@ def _mark_notifications_read(user_id: str, documents: list[NotificationDocument]
 def _chat_detail(user_id: str, thread_id: str) -> dict:
     db = get_db()
     try:
-        if not owns_thread(thread_id, user_id, db=db):
-            raise HTTPException(status_code=404, detail='chat not found')
+        _require_visible_chats(db, user_id, {thread_id})
         return {'messages': chat_detail(db, user_id, thread_id)}
     finally:
         db.close()
