@@ -93,8 +93,7 @@
 	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.closeAll(), columnShown: () => (commentUI.state?.kind === 'list' || commentUI.state?.kind === 'thread') && columnFits(), showColumn: () => { if (listedComments.length > 0 && columnFits()) commentUI.openOnLoad(); }, root: () => docRoot, liveText: () => liveSession?.text.toString() ?? null });
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
-	let liveGeneration = $state(0);
-	let legacyAwaitingSave = $state(false);
+	let liveGeneration = $state(0), legacyAwaitingSave = $state(false);
 	bindViewerSession(() => liveSession, (state) => {
 		if (!state) { liveConnection = null; return; }
 		editText = state.text.toString();

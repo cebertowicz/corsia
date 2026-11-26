@@ -21,11 +21,13 @@
 /* A 16ch ask needs more room than the prior 48px floor. When the header cannot hold the review line at its floors (avatar, name down to its floor, a 16-character ask, chevron, gaps) beside the tools as drawn, the header is marked `rb-stack` (actions/headerStack.ts): the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. The point is read from the tools as drawn, not from a fixed width. An ask with no one-line text (the person step) has no third row. */
 /* The tools own the preceding header row; their intrinsic height needs no reserved spacer here. */
 .document-header.desk:where(.rb-stack) .review-bar.ask { grid-template-rows: 0 var(--space-7) auto; }
-.document-header.desk:where(.rb-stack) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; row-gap: 0; }
 .document-header.desk:where(.rb-stack) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 .document-header.desk:where(.rb-stack) .review-bar.ask .rb-who { max-width: none; }
 .document-header.desk:where(.rb-stack) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
 .document-header.desk:where(.rb-stack) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-content: center; }
+/* The answer row's empty status is a zero-width flex item that still takes one row gap, which pushed the note 8px right of the question above it; here its margin takes that gap back so the note starts at the same edge. */
+.document-header.desk:where(.rb-stack) .review-bar.ask .rb-row2 > .rb-status:empty { margin-right: calc(-1 * var(--space-2)); }
 .document-header.desk:where(.rb-stack) .review-bar.ask.static { grid-template-rows: 0 minmax(var(--space-7), auto); }
 .document-header.desk:where(.rb-stack) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
 
