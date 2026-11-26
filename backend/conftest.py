@@ -86,10 +86,12 @@ def _browser_sweep_test_root(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def _isolate_browser_startup_sweep(monkeypatch, _browser_sweep_test_root):
     from functools import partial
-    from host_access import browser_orphan
+    from host_access import browser_copy_sweep, browser_orphan
 
     monkeypatch.setattr(browser_orphan, "close_dead_sessions",
                         partial(browser_orphan.close_dead_sessions, root=_browser_sweep_test_root))
+    monkeypatch.setattr(browser_copy_sweep, "sweep",
+                        partial(browser_copy_sweep.sweep, socket_root=_browser_sweep_test_root))
 
 
 @pytest.fixture

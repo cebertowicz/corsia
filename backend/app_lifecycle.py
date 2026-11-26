@@ -115,6 +115,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"oMLX startup reconciliation failed: {exc}")
         try:
             await asyncio.to_thread(close_dead_sessions, PROCESS_OWNER.browser_sessions().socket_dir)
+            from host_access.browser_copy_sweep import sweep
+            await asyncio.to_thread(sweep)
         except Exception:
             logger.warning("browser orphan cleanup failed; startup continues", exc_info=True)
         await remove_startup_leftovers()

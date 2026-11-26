@@ -116,6 +116,8 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
         record=(owner.socket_dir, runtime.record.session))
     runtime.chrome.release_stream()
     if runtime.record.profile:
+        from host_access.browser_grant_cleanup import recover_launch
+        await recover_launch(runtime)
         await apply_kept_signins(runtime)
     runtime.attempt_started_at = time.time()
     runtime.attempt = browser_cli.CommandResult(-1, "", "", completion="unknown")
@@ -247,7 +249,11 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
             # Read in place, never agent-browser's `state save`: it loads each visited site in a new tab of
             # the holder's browser and can stall there past its limit.
             state = await asyncio.wait_for(browser_copy_state.read(holder.chrome.endpoint), _COPY_READ_TIMEOUT)
-        await asyncio.to_thread(_write_private_json, target, state)
+        from host_access.browser_grant_copy import write_state
+        profile, _notice = await resolve_profile(record.thread_id)
+        if profile is None:
+            raise RuntimeError("browser profile unavailable")
+        await asyncio.to_thread(write_state, profile, target, state)
     except Exception:
         logger.warning("browser sign-in copy failed", exc_info=True)
         with contextlib.suppress(OSError):
@@ -317,10 +323,8 @@ async def keep_copy_signins(owner: Any, runtime: Any) -> None:
                   and seeded.get(_cookie_key(cookie), object()) != cookie.get("value")]
         if not gained:
             return
-        kept = kept_signins_path(profile)
-        # One synchronous read-merge-write, so copies closing together cannot drop each other's cookies.
-        _write_cookies(kept, list({_cookie_key(cookie): cookie
-                                   for cookie in [*_read_cookies(kept), *gained]}.values()))
+        from host_access.browser_grant_copy import merge
+        merge(profile, gained)
     except Exception:
         logger.warning("browser sign-in made on a copy could not be kept", exc_info=True)
         return
@@ -334,7 +338,8 @@ async def apply_kept_signins(runtime: Any) -> None:
     """Write kept cookies into the saved profile's browser; Storage.setCookies never navigates a page."""
     from host_access.browser_cdp import CdpClient
     kept = kept_signins_path(runtime.record.profile)
-    cookies = await asyncio.to_thread(_read_cookies, kept)
+    from host_access.browser_grant_copy import kept as filtered_kept
+    cookies = await asyncio.to_thread(filtered_kept, runtime.record.profile)
     if not cookies or runtime.chrome is None:
         return
     params = [{key: cookie[key] for key in _COOKIE_PARAMS if key in cookie

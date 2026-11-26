@@ -10,7 +10,7 @@ import time
 from typing import Literal, Sequence, TypeAlias
 
 from host_access import (
-    browser_cli, browser_identity as identity, browser_orphan, browser_reporting,
+    browser_cli, browser_grant_records, browser_identity as identity, browser_orphan, browser_reporting,
     browser_session_commands, browser_session_launch as launch,
 )
 from host_access.browser_session_io import BrowserSessionIO
@@ -53,6 +53,8 @@ class BrowserSessionOwner(BrowserSessionIO):
         self._user_agent: str | None = None
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
+        self._grant_cleanup_lock = asyncio.Lock()
+        self._pending_sites: set[tuple[str, str]] = set()
         self._sessions: dict[str, BrowserRuntime] = {}
         self._closed_leases: set[str] = set()
         self._restart_notices: dict[str, str] = {}
@@ -143,6 +145,9 @@ class BrowserSessionOwner(BrowserSessionIO):
                                 isinstance(exc, BrowserSessionCleanupError) and runtime.record.terminal_state != "running"):
                 raise  # Admission rejection has no new session effects.
             if launching and await self._close_one(runtime) is None:
+                from host_access.browser_grant_cleanup import PendingClearError
+                if isinstance(exc, PendingClearError):
+                    raise BrowserSessionError("browser session unavailable") from exc
                 logger.warning("managed browser startup failed: %s: %s", type(exc).__name__, browser_orphan.startup_message(exc))
                 detail = "; saved sign-in could not be restored" if isinstance(exc, launch.CopyRestoreError) else ""
                 raise BrowserSessionError(str(exc) if isinstance(exc, browser_orphan.BrowserProfileInUse) else f"managed browser startup failed; its processes were closed{detail}") from exc
@@ -159,7 +164,7 @@ class BrowserSessionOwner(BrowserSessionIO):
         resolved = thread_id not in self._sessions
         profile, notice = await launch.resolve_profile(thread_id) if resolved else (None, None)
         async with self._owner_lock:
-            if self._shutting_down or lease_id in self._closed_leases:
+            if self._shutting_down or lease_id in self._closed_leases or self._pending_sites or browser_grant_records.in_transition():
                 raise BrowserSessionError("browser session admission is closed")
             runtime = self._sessions.get(thread_id)
             if runtime is None and session == "existing":
@@ -185,6 +190,7 @@ class BrowserSessionOwner(BrowserSessionIO):
     def _assert_admitted(self, runtime: BrowserRuntime, lease_id: str | None) -> None:
         record = runtime.record
         if (self._shutting_down or self._sessions.get(record.thread_id) is not runtime
+                or self._pending_sites or browser_grant_records.in_transition()
                 or lease_id in self._closed_leases or record.lease_id in self._closed_leases):
             raise BrowserSessionError("browser session admission is closed")
         if record.terminal_state != "running":
