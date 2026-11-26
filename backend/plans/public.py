@@ -263,7 +263,9 @@ from plans.artifact_links import link as link_node_artifact
 # The task a PR's review starts from (Agent Substrate's review start, with intent_of).
 from plans.artifact_links import linked_node_for_artifact
 from plans.approved_versions import approved_versions_for_pr
-from plans.approval_records import record_approval as record_artifact_approval, record_saved_version
+from plans.approval_records import (
+    ApprovalChangedDuringSave, record_approval as record_artifact_approval, record_saved_version,
+)
 from plans.approval_copies import prepare_bar as prepare_bar_approval, prepare_save as prepare_save_approval
 from plans.user_step_instructions import read_for_artifact as person_step_instructions
 from plans.feedback_items import feedback_display, feedback_item_counts, load_feedback_items

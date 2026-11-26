@@ -8,7 +8,6 @@ from infra.database import get_db
 
 def write_with_approval(body, resolved, direct_user, expected_sha256, reports, suppress_feedback, accepted, write):
     from plans import public as plans_public
-    from plans.approval_records import ApprovalChangedDuringSave
 
     plain_state: dict = {}
     for attempt in range(2):
@@ -26,7 +25,7 @@ def write_with_approval(body, resolved, direct_user, expected_sha256, reports, s
         try:
             result = write(body, resolved, direct_user, expected_sha256, reports,
                            suppress_feedback, approval_hook if direct_user else None, plain_state)
-        except ApprovalChangedDuringSave as exc:
+        except plans_public.ApprovalChangedDuringSave as exc:
             if prepared is not None:
                 prepared.discard()
             if attempt:

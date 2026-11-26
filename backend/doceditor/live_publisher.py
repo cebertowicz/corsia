@@ -72,7 +72,6 @@ def publish_one(store: LiveStore, row: OwedPublication, *, db=None,
 def register_publication(publication: Publication, text: str, result_hash: str, *,
                          stamp: dict | None, db) -> None:
     from plans import public as plans_public
-    from plans.approval_records import ApprovalChangedDuringSave
 
     for attempt in range(2):
         prepared = plans_public.prepare_save_approval(
@@ -82,7 +81,7 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
         try:
             _register_publication(publication, text, result_hash, stamp=stamp, db=db,
                                   approval_copy=prepared, recorded=recorded, retry=attempt > 0)
-        except ApprovalChangedDuringSave:
+        except plans_public.ApprovalChangedDuringSave:
             if prepared is not None:
                 prepared.discard()
             if attempt:
