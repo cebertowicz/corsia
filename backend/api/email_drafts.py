@@ -4,6 +4,7 @@
   which email it answers and that email's addresses, the files it attaches and its quiet notes
 - ``POST /api/email-drafts/{artifact_id}/send`` — Send now: send the exact text on the person's screen
 - ``POST /api/email-drafts/{artifact_id}/discard`` — Don't send: mark the draft not to send
+- ``DELETE /api/email-drafts/{artifact_id}/attachments/{index}`` — remove one attachment from the draft
 
 Only the signed-in person reads or acts, and only on a draft in a thread they own; anything else is a 404. The
 account is the one the draft was saved with, never one the request names. Which recipients the send refuses rides

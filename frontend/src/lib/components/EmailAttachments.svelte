@@ -37,7 +37,7 @@
 		{#each attachments as item, i (i)}
 			<li class="attachment">
 				<AttachmentRow card={card(item)} {threadId} variant="chip" middleEllipsis chipAside={item.unavailable ? CARD_STATE_LABELS.unavailable : size(item.size)} />
-				{#if removable}<IconButton class="attachment-remove" variant="ghost" size="sm" ariaLabel={`Remove ${item.name}`} disabled={busy} onclick={() => void remove(i, item.path)}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton>{/if}
+				{#if removable}<IconButton class="email-attachment-remove" variant="ghost" size="sm" ariaLabel={`Remove ${item.name}`} disabled={busy} onclick={() => void remove(i, item.path)}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton>{/if}
 			</li>
 		{/each}
 	</ul>
@@ -65,8 +65,8 @@
 	.attachment :global(button.tile.chip:focus-visible) { outline: none; }
 	@media (pointer: coarse) {
 		.attachment { min-height: calc(var(--space-6) + var(--space-3)); }
-		.attachment :global(.attachment-remove) { width: var(--touch-target); flex: 0 0 var(--touch-target); }
-		.attachment :global(.attachment-remove::after) { content: ''; position: absolute; inset: auto; left: 0; top: 50%; width: 100%; height: var(--touch-target); transform: translateY(-50%); }
+		.attachment :global(.email-attachment-remove) { width: var(--touch-target); flex: 0 0 var(--touch-target); }
+		.attachment :global(.email-attachment-remove::after) { content: ''; position: absolute; inset: auto; left: 0; top: 50%; width: 100%; height: var(--touch-target); transform: translateY(-50%); }
 	}
 	@media (max-width: 48rem) {
 		.attachment { max-width: 100%; }

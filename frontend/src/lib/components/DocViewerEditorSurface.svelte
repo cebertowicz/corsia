@@ -150,7 +150,7 @@
 		await tick();
 		requestAnimationFrame(() => {
 			const view = editor?.editorView();
-			const buttons = view?.dom.querySelectorAll<HTMLButtonElement>('.attachment-remove');
+			const buttons = view?.dom.querySelectorAll<HTMLButtonElement>('.email-attachment-remove');
 			const next = buttons?.[Math.min(index, buttons.length - 1)];
 			if (next) next.focus(); else view?.focus();
 		});

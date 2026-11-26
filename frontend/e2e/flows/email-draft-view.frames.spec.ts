@@ -534,12 +534,12 @@ test.describe('@surface:email-draft-view attachment removal', () => {
 	test.beforeEach(async ({ request }) => { await setFocusMode(request, false); });
 	test.afterEach(async ({ request }) => { await setFocusMode(request, true); });
 
-	for (const mode of ['unavailable', 'available', 'stale', 'touch', 'sent'] as const) {
+	for (const mode of ['unavailable', 'available', 'stale', 'touch', 'failed-touch', 'sent'] as const) {
 		test(`removes or retains attachments: ${mode}`, async ({ request, browser }, testInfo) => {
 			const tree = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 			const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
 			const scenario = SCENARIOS.find((item) => item.name === (mode === 'unavailable' || mode === 'stale' ? '14-attachment-unavailable' : '5c-attachments'))!;
-			const { page, context, threadId, artifactId } = await seedAndOpen(request, browser, testInfo, scenario, workspace, Date.now(), VIEWPORTS[mode === 'touch' ? 1 : 0], 'light');
+			const { page, context, threadId, artifactId } = await seedAndOpen(request, browser, testInfo, scenario, workspace, Date.now(), VIEWPORTS[mode === 'touch' || mode === 'failed-touch' ? 1 : 0], 'light');
 			if (mode === 'sent') {
 				await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent' } });
 				await clickSend(page);
@@ -552,13 +552,26 @@ test.describe('@surface:email-draft-view attachment removal', () => {
 				await page.route(/\/api\/email-drafts\/[^/]+\/attachments\/\d+$/, async (route) => {
 					expect(route.request().postDataJSON()).toEqual({ path: shown.attachments[index].path });
 					if (mode === 'stale') return route.fulfill({ status: 409, json: { detail: { state: 'stale' } } });
+					if (mode === 'failed-touch') return route.fulfill({ status: 500, json: { detail: 'failed' } });
 					return route.fulfill({ json: { target_version: 'after-remove', attachments: shown.attachments.filter((_: unknown, i: number) => i !== index) } });
 				});
 				const name = shown.attachments[index].name as string;
 				const button = page.getByRole('button', { name: `Remove ${name}` });
 				await expect(button).toBeVisible();
 				if (mode === 'unavailable') await expect(page.getByText('Remove it to send.', { exact: false })).toBeVisible();
-				if (mode === 'touch') {
+				if (mode === 'failed-touch') {
+					await button.tap();
+					await expect(button).toBeEnabled();
+					const colors = await button.evaluate((el) => {
+						const sample = document.createElement('span');
+						sample.style.backgroundColor = 'var(--red)';
+						el.appendChild(sample);
+						const result = [getComputedStyle(el).backgroundColor, getComputedStyle(sample).backgroundColor];
+						sample.remove();
+						return result;
+					});
+					expect(colors[0]).not.toBe(colors[1]);
+				} else if (mode === 'touch') {
 					const open = chipFor(page, name).getByRole('button').first();
 					const hitArea = await button.evaluate((el) => {
 						const rect = el.getBoundingClientRect();
@@ -594,6 +607,7 @@ test.describe('@surface:email-draft-view attachment removal', () => {
 					await page.keyboard.press('Enter');
 				}
 				if (mode === 'stale') await expect.poll(() => reads).toBeGreaterThan(0);
+				else if (mode === 'failed-touch') await expect(button).toBeVisible();
 				else {
 					await expect(chipFor(page, name)).toHaveCount(0);
 					const remaining = shown.attachments[index === 0 ? 1 : 0].name as string;
