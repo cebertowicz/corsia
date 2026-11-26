@@ -121,10 +121,11 @@ function isActivityQueue(value: unknown): value is QueueBody {
 	return notifications === undefined || isList(notifications);
 }
 
-export async function fetchActivityQueue(projectId: string | null): Promise<ActivityQueue> {
+export async function fetchActivityQueue(projectId: string | null, signal?: AbortSignal): Promise<ActivityQueue> {
 	const query = new URLSearchParams({ view: 'activity' });
 	if (projectId) query.set('project_id', projectId);
-	const res = await apiFetch(`/api/attention/queue?${query.toString()}`);
+	const url = `/api/attention/queue?${query.toString()}`;
+	const res = await (signal ? apiFetch(url, { signal }) : apiFetch(url));
 	if (!res.ok) throw new ActivityQueueError(res.status);
 	const data: unknown = await res.json().catch(() => null);
 	// Anything else is not this view (an older server's queue, or a broken body): it shows as a failed read, never as

@@ -188,14 +188,14 @@ def _eligible_top_level(alias: str) -> str:
 
     A tag of the viewing account makes the comment eligible on its own: the noise rules that keep an
     agent's suggestions and review notes out of the unread set decide what needs the person *without*
-    an ask. Alias is an internal SQL identifier.
+    an ask. Alias is an internal SQL identifier. ``first_person`` is the document's earliest
+    comment by the person, joined once per document by ``unread_comment_rows``: a per-comment
+    EXISTS re-scanned every earlier comment of a document the person never commented in.
     """
     return f"""{alias}.parent_id IS NULL AND {alias}.author_kind='agent'
                AND ({_person_tagged(alias)}
                     OR ({alias}.replacement IS NULL AND {alias}.review=0
-                        AND EXISTS (SELECT 1 FROM doc_comments person
-                                    WHERE person.artifact_id={alias}.artifact_id AND person.author_kind='user'
-                                      AND person.created_at<{alias}.created_at)))"""
+                        AND first_person.first_at<{alias}.created_at))"""
 
 
 def directed_sql(alias: str) -> str:
@@ -246,6 +246,11 @@ def unread_comment_rows(
                WHERE author_kind='user' AND parent_id IS NOT NULL
                  {f"AND artifact_id {within}" if scoped else ""}
            ) touched ON touched.parent_id=root.id
+           LEFT JOIN (
+               SELECT artifact_id, MIN(created_at) AS first_at FROM doc_comments
+               WHERE author_kind='user' {f"AND artifact_id {within}" if scoped else ""}
+               GROUP BY artifact_id
+           ) first_person ON first_person.artifact_id=item.artifact_id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE item.author_kind<>'user'
@@ -255,9 +260,9 @@ def unread_comment_rows(
                   OR ({_eligible_top_level('item')})
                   OR {directed_sql('item')})
              AND {past_watermark_sql('item', 'thread_view')}"""
-    # Text order: touched, thread_view, the scope, the two person-tag tests, then the directed set.
+    # Text order: touched, first_person, thread_view, the scope, the two person-tag tests, then the directed set.
     directed = (USER_AUTHOR_ID, user_id)
-    return sql, ((*scope, user_id, *scope, *scope, user_id, user_id, *directed) if scoped
+    return sql, ((*scope, *scope, user_id, *scope, *scope, user_id, user_id, *directed) if scoped
                  else (user_id, user_id, user_id, *directed))
 
 
@@ -275,8 +280,8 @@ def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
     return [(str(row["root_id"]), str(row["item_id"])) for row in rows]
 
 
-# Documents per unread query, well under SQLite's bound-parameter limit (three IN lists each).
-_SCOPE_CHUNK = 300
+# Documents per unread query: four IN lists each bind 4*N + 5 values, under SQLite's oldest default limit of 999.
+_SCOPE_CHUNK = 240
 
 
 def unread_item_ids(db, user_id: str, artifact_ids: list[str] | None = None) -> set[str]:
