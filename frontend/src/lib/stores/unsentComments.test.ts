@@ -357,3 +357,55 @@ describe('a pressed comment on an image goes on its own', () => {
 		expect(get(page.toast.toasts).map((toast) => toast.message)).toEqual([expect.stringMatching(/^Your comment on flow\.png, “Label this arrow”: /)]);
 	});
 });
+
+describe('a pressed reply on a document’s or an image’s thread goes on its own', () => {
+	const REPLY_SEND: DraftSend = { artifactId: 'artifact-1', threadId: 'thread-1' };
+	const replyKey = (page: Page, scope = KEY(page)) => page.drafts.replyDraftKey(scope, 'parent-1');
+	/** Typed in its thread's field, then Send pressed on it, as the viewer's reply does. */
+	function pressedReply(page: Page, { key = replyKey(page), send = REPLY_SEND as DraftSend | null } = {}) {
+		const body = 'Agreed, Monday works', tags = page.tags.createMentionSelection(body), drafts = page.drafts.keptCommentDrafts;
+		drafts.keepReply(key, body, tags);
+		return { key, press: send ? drafts.claim(key, body, tags, undefined, send) : null };
+	}
+
+	it.each([['a reload', connect], ['a return to the app', returnToApp]] as const)('after %s, to its thread under the id its press used', async (_name, trigger) => {
+		const { key, press } = pressedReply(await open());
+		const page = await open();
+		await trigger(page);
+		expect(wire.posts).toHaveLength(1);
+		expect(wire.posts[0]).toMatchObject({ artifactId: 'artifact-1', body: { client_id: press!.clientId, parent_id: 'parent-1', body: 'Agreed, Monday works', thread_id: 'thread-1' } });
+		expect(wire.posts[0].body).not.toHaveProperty('anchor_text');
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	it('on an image’s thread too', async () => {
+		const page = await open(), key = replyKey(page, page.drafts.imageDraftKey('image-1'));
+		pressedReply(page, { key, send: { artifactId: 'image-1', threadId: null } });
+		await connect(page);
+		expect(wire.posts.map((post) => [post.artifactId, post.body.parent_id])).toEqual([['image-1', 'parent-1']]);
+	});
+
+	it('a reply typed and never pressed, or a chat’s, never goes', async () => {
+		const page = await open();
+		const { key } = pressedReply(page, { send: null });
+		const chat = pressedReply(page, { key: page.drafts.replyDraftKey(page.drafts.CHAT_REPLY_SCOPE, 'parent-1') });
+		await connect(page);
+		await returnToApp(page);
+		page.queue.unsentComments.open(key);
+		await page.queue.unsentComments.settled();
+		expect(wire.posts).toHaveLength(0);
+		expect(page.queue.unsentComments.sending(key)).toBe(false);
+		expect(page.queue.unsentComments.sending(chat.key)).toBe(false);
+	});
+
+	it('its thread was deleted (404): refused, kept with its words, and a notice names the document', async () => {
+		const page = await open(), { key } = pressedReply(page);
+		wire.answer.push(refusal(page, 404, null, 'Comment not found'));
+		await connect(page);
+		await connect(page);
+		expect(wire.posts).toHaveLength(1);
+		expect(page.drafts.keptCommentDrafts.get(key)).toMatchObject({ body: 'Agreed, Monday works' });
+		expect(page.drafts.keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(get(page.toast.toasts).map((toast) => toast.message)).toEqual([expect.stringMatching(/^Your comment on notes\.md, “Agreed, Monday works”: /)]);
+	});
+});

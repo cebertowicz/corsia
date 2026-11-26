@@ -256,3 +256,60 @@ it('a document that is not live: a comment on a passage it can be told by reads 
 		user.set(null);
 	}
 });
+
+it('a document that is not live: the box\'s own press reads "Posting…", never "Sending…", while its post is out', async () => {
+	await openSaved('alpha beta gamma'); await compose('Too vague');
+	let answer!: (row: Record<string, unknown>) => void;
+	api.postComment.mockImplementationOnce((_artifact: string, fields: Record<string, any>) => new Promise((resolve) => {
+		answer = () => resolve({ id: fields.client_id, artifact_id: 'artifact', body: fields.body, anchor_text: fields.anchor_text, from_off: fields.from_off, to_off: fields.to_off,
+			author: 'you', author_kind: 'user', created_at: '2026-11-18T00:00:00Z', parent_id: null, review: false, resolved: false, replies: [], tagged_agent_ids: [] });
+	}));
+	await press(false);
+	await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+	// The press keeps what its post needs, so the draft would go on its own if this post failed; the box still reads its own press.
+	await vi.waitFor(() => expect(keptCommentDrafts.pressed()).toHaveLength(1));
+	flushSync();
+	expect(submit().textContent).toBe('Posting…');
+	answer({}); await vi.waitFor(() => expect(field()).toBeNull());
+});
+
+it('a document that is not live: typing in a "Sending…" box makes it read Comment, and nothing goes on its own', async () => {
+	user.set({ id: 'person-1', name: 'person-1' } as never);
+	try {
+		await openSaved('alpha beta gamma'); await compose('Too vague');
+		store.unanswered = true; store.lookupFails = true;
+		await press(false);
+		await vi.waitFor(() => expect(posting(posted()[0].client_id)).toBe(false));
+		flushSync();
+		expect(submit().textContent).toBe('Sending…');
+		expect(field()!.readOnly).toBe(false);
+		type('Too vague, and long');
+		expect(submit().textContent).toBe('Comment');
+		store.lookupFails = false;
+		connectionState.set('disconnected'); connectionState.set('connected');
+		await unsentComments.settled();
+		expect(api.postComment).toHaveBeenCalledOnce();
+	} finally {
+		user.set(null);
+	}
+});
+
+it('a document that is not live: Cancel on a "Sending…" box with nothing out drops it, and nothing goes on its own after', async () => {
+	user.set({ id: 'person-1', name: 'person-1' } as never);
+	try {
+		await openSaved('alpha beta gamma'); await compose('Too vague');
+		store.unanswered = true; store.lookupFails = true;
+		await press(false);
+		await vi.waitFor(() => expect(posting(posted()[0].client_id)).toBe(false));
+		flushSync();
+		expect(submit().textContent).toBe('Sending…');
+		document.querySelector<HTMLButtonElement>('.composer .cancel')!.click(); flushSync();
+		expect(keptCommentDrafts.pressed()).toEqual([]);
+		connectionState.set('disconnected'); connectionState.set('connected');
+		document.dispatchEvent(new Event('visibilitychange'));
+		await unsentComments.settled();
+		expect(api.postComment).toHaveBeenCalledOnce();
+	} finally {
+		user.set(null);
+	}
+});

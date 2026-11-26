@@ -10,9 +10,11 @@ import { posting } from './commentPostTiming';
 import { connectionState } from './connection';
 import { keptCommentDrafts } from './keptCommentDrafts.svelte';
 import { toasts } from './toast';
-import { sendable, sendUnsent } from '$lib/unsentCommentSend';
+import { replyOf, sendable, sendUnsent } from '$lib/unsentCommentSend';
 import { unsentOutcome, unsentReason } from '$lib/unsentCommentOutcome';
 
+/** What a pressed comment's box, or a pressed reply's line, reads while it goes on its own. */
+export const SENDING = 'Sending…';
 /** A return to the app tries a draft again only this long after its last try, so quick tab switching does not resend it. */
 export const RETURN_THROTTLE_MS = 10_000;
 
@@ -24,9 +26,14 @@ const waiting: string[] = [];
 const lastTry = new Map<string, number>();
 let pumping: Promise<void> | null = null;
 
-/** The name of the draft's document or image, for a notice when no box of it is on screen: the one its press kept, else its key's path. */
+/**
+ * The name of the draft's document or image, for a notice when no box of it is on screen: the one its press kept, else its
+ * key's path; a reply's, the document or image its thread is on.
+ */
 function nameOf(key: string, kept: string | undefined): string {
 	if (kept) return kept;
+	const reply = replyOf(key);
+	if (reply) return nameOf(reply.scope, undefined);
 	if (!key.startsWith('document:')) return 'an image';
 	try {
 		const [, path] = JSON.parse(key.slice(key.indexOf(':') + 1)) as [string, string];

@@ -165,7 +165,6 @@ async def post_live(entry, passage: dict, client_id: str):
 
 @pytest.mark.asyncio
 async def test_an_open_document_with_no_capture_held_places_a_kept_draft_by_its_sides(ownership_scope, tmp_path, monkeypatch):
-    from infra import app_loop
     import asyncio
     manager, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
     app_loop.capture(asyncio.get_running_loop())

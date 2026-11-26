@@ -1,7 +1,8 @@
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 import { DIAGRAM_CHANGED_MESSAGE, isDiagramChanged, postFailureMessage } from '$lib/commentFailureMessage';
-import { createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
+import { submitDocumentComment } from '$lib/docViewerOperations';
+import { createThreadActions } from '$lib/threadActions';
 import { createImagePicks } from '$lib/imageCommentPicks.svelte';
 import { regionLabel, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';

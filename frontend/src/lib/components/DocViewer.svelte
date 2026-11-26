@@ -27,7 +27,8 @@
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
 	import { bindViewerSession, reloadAfterLegacySave, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
-	import { createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { createThreadActions } from '$lib/threadActions';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';

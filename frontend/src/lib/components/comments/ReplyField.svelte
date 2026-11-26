@@ -9,9 +9,10 @@
 	import RecipientLine from './RecipientLine.svelte';
 	import { recipientNames, type Recipient } from './recipients';
 	import { showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
+	import { SENDING } from '$lib/stores/unsentComments.svelte';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection(), shownKey = '' }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, sending = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection(), shownKey = '' }: {
 		/** The reply's text. The field grows with it and never scrolls itself; the card's outer scroller keeps the caret in view. */
 		value?: string;
 		selection?: [number, number] | null;
@@ -19,6 +20,8 @@
 		/** The card this field belongs to: kept whole in view whenever the scroller can hold it, so revealing the field never cuts its author and quote. */
 		wholeCard?: HTMLElement;
 		posting?: boolean;
+		/** It was pressed and goes on its own (`unsentComments`): Send is held, the field stays editable, and an edit stops it. */
+		sending?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onSend: () => void;
 		/** The agents this reply wakes, from the server's reply rule; absent where the caller does not know (chat comments). */
@@ -68,13 +71,13 @@
 		if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.repeat) return;
 		if (!(e.metaKey || e.ctrlKey) && window.matchMedia?.('(pointer: coarse)').matches) return;
 		e.preventDefault();
-		onSend();
+		if (!sending) onSend();
 	}
 	// Send leaves with the text it sent, so focus goes back to the field, where Enter leaves it, rather than to the page;
 	// on a touch screen that would raise the keyboard, so there the field stays as the tap left it.
 	function sendClicked(e: MouseEvent) {
 		e.stopPropagation();
-		if (posting) return;
+		if (posting || sending) return;
 		if (!window.matchMedia?.('(pointer: coarse)').matches) input?.focus({ preventScroll: true });
 		onSend();
 	}
@@ -86,7 +89,7 @@
 		<textarea use:keepTyped id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard, clearAfter: lineHeight ? lineHeight + gap() : undefined }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<span class="ct-send-slot">
-				<Button variant="primary" size="sm" ariaLabel="Send reply" title="Reply" loading={posting} onclick={sendClicked}>
+				<Button variant="primary" size="sm" ariaLabel={sending ? SENDING : 'Send reply'} title="Reply" disabled={sending} loading={posting} onclick={sendClicked}>
 					{#if !posting}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
 				</Button>
 			</span>

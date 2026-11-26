@@ -2,7 +2,7 @@
 // press makes, under the draft's one id, so the server stores it once whichever sends it.
 import type { MentionOccurrence } from '$lib/components/comments/mentionSelection';
 import type { KeptCommentDraft } from '$lib/stores/keptCommentDrafts.svelte';
-import { commentFields, postTop } from '$lib/stores/docComments';
+import { addReply, commentFields, postTop } from '$lib/stores/docComments';
 import { keptSides } from '$lib/keptPlace';
 
 /** What a press of the draft sends: its text trimmed, and its tags counted from that text, as its box sends them. */
@@ -15,6 +15,16 @@ export function pressedVersion(draft: KeptCommentDraft): PressedVersion {
 }
 
 const isDocument = (key: string) => key.startsWith('document:');
+/** A reply key's scope and thread (`replyDraftKey`), or null for a key that is no reply's. */
+export function replyOf(key: string): { scope: string; parentId: string } | null {
+	if (!key.startsWith('reply:')) return null;
+	try {
+		const [scope, parentId] = JSON.parse(key.slice('reply:'.length)) as [string, string];
+		return typeof scope === 'string' && typeof parentId === 'string' && parentId ? { scope, parentId } : null;
+	} catch {
+		return null;
+	}
+}
 /** An image key's image inside a document (`imageDraftKey`): '' for an image artifact, null for a key that is no image's. */
 function imageIn(key: string): string | null {
 	if (!key.startsWith('image:')) return null;
@@ -29,10 +39,13 @@ function imageIn(key: string): string | null {
 /**
  * Whether the draft goes without the person: it was pressed (`send`) under its id, and it has where it goes. A document's
  * draft needs its passage (`place`); an image's, its area (`region`), and an image inside a document the image's markdown
- * as well (`place`). A draft whose passage could not be told apart when kept is never sent this way.
+ * as well (`place`). A draft whose passage could not be told apart when kept is never sent this way. A reply on a document's
+ * or an image's thread needs only its thread, which its key names; a chat's replies go their own way.
  */
 export function sendable(key: string, draft: KeptCommentDraft | undefined): draft is KeptCommentDraft & Required<Pick<KeptCommentDraft, 'send' | 'clientId'>> {
 	if (!draft?.send || !draft.clientId || !draft.body.trim()) return false;
+	const reply = replyOf(key);
+	if (reply) return (isDocument(reply.scope) || imageIn(reply.scope) !== null) && !draft.place && !draft.region;
 	if (isDocument(key)) return Boolean(draft.place) && !draft.region;
 	const image = imageIn(key);
 	return image !== null && Boolean(draft.region) && (image === '' ? !draft.place : Boolean(draft.place));
@@ -47,6 +60,12 @@ export async function sendUnsent(key: string, draft: KeptCommentDraft): Promise<
 	if (!sendable(key, draft)) throw new Error('Not a draft that sends on its own.');
 	const { send, clientId, place, region } = draft;
 	const version = pressedVersion(draft);
+	const reply = replyOf(key);
+	// A reply goes to its thread as its field's press posts it: the server answers a thread deleted since with a 404.
+	if (reply) {
+		await addReply(send.artifactId, reply.parentId, version.text, 'you', version.taggedAgentIds, send.threadId, version.mentions, clientId, true);
+		return version;
+	}
 	const fields = place
 		? { ...commentFields(place.quote, place.from, place.to, version.text, 'you', false, version.taggedAgentIds, send.threadId, version.mentions), ...keptSides(place) }
 		: { body: version.text, author: 'you' as const, author_kind: 'user' as const, tagged_agent_ids: version.taggedAgentIds, tagged_agent_mentions: version.mentions, thread_id: send.threadId };
