@@ -90,7 +90,8 @@ async def test_forwarder_reads_as_the_agents_account_else_the_host_login(tmp_pat
         yield
 
     @asynccontextmanager
-    async def fake_proxy(path, credential, *, read_budget):
+    async def fake_proxy(path, credential, *, read_budget, hide):
+        seen["hide"] = hide
         seen.update(credential=credential(), budget=read_budget)
         yield
 
@@ -106,6 +107,7 @@ async def test_forwarder_reads_as_the_agents_account_else_the_host_login(tmp_pat
     async with script_clients._authenticated_client("owner", view) as (_, _, config, _, _):
         assert config is not None
         assert "synthetic" not in (config / "hosts.yml").read_text()
+    assert seen.pop("hide") is False  # a run naming no saved items gets GitHub answers streamed, as before
     assert seen == ({"credential": "agents-synthetic", "budget": budget} if state == "ready"
                     else {"credential": "person-synthetic", "budget": person_budget})
 

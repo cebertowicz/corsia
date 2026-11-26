@@ -78,7 +78,8 @@ def test_a_login_goes_only_to_its_own_site(world):
 
 
 @pytest.mark.parametrize("place", ["https://api.example.com", "api.example.com:443", "api.example.com/v1",
-                                   "127.0.0.1", "localhost", "API.example.com", "api.example.com.", "", 7])
+                                   "127.0.0.1", "localhost", "API.example.com", "api.example.com.", "", 7,
+                                   "0x7f.1", "0x7f000001", "10.0x1"])
 def test_a_place_is_a_plain_lowercase_host(world, place):
     with pytest.raises(ValueError, match="place is a host name"):
         _declared([{"name": NAME, "place": place}])

@@ -79,6 +79,7 @@ async def _authenticated_client(thread_id: str, view: AgentAccountView, items: R
             github_socket = socket_dir / "g"
             await stack.enter_async_context(github_proxy(
                 github_socket, credential, read_budget=budget if view.ready else person_budget,
+                hide=items is not None,
             ))
             config_dir = client_dir / "gh"
             config_dir.mkdir(mode=0o700)

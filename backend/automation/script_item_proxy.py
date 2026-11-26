@@ -35,7 +35,7 @@ from automation.script_github_proxy import (
 from automation.script_items import ItemsUnavailable, ItemUse, RunItems, check_use
 from automation.script_schedules import DEFAULT_TIMEOUT_SECONDS
 from automation.script_tool_channel import REQUEST_LIMIT
-from infra import saved_items, saved_logins
+from infra import key_store, saved_items, saved_logins
 from infra.database import write_transaction
 from infra.key_store_values import KeyStoreError
 from infra.saved_login_results import audit
@@ -43,7 +43,9 @@ from infra.saved_login_results import audit
 logger = logging.getLogger(__name__)
 
 SOCKET_ENV = "CORSIA_SCRIPT_SEND_SOCKET"
-_PLACEHOLDER_BYTES = re.compile(rb"\{\{corsia-(item|login):([A-Za-z0-9._-]{1,80})\}\}")
+#: The name is a Keys entry name's own shape (``key_store.NAME_PATTERN``), which a saved login's id (32 hex) fits.
+_PLACEHOLDER_BYTES = re.compile(rb"\{\{corsia-(item|login):(" + key_store.NAME_PATTERN.pattern.strip("^$").encode()
+                                + rb")\}\}")
 _DROPPED = frozenset({b"connection", b"keep-alive", b"transfer-encoding", b"content-length", b"host", b"te",
                       b"upgrade", b"proxy-connection", b"proxy-authorization", b"accept-encoding",
                       b"content-encoding"})
@@ -206,8 +208,10 @@ async def _send(run: RunItems, clients: dict[str, httpx.AsyncClient | None], req
         hidden = await asyncio.to_thread(script_blanking.saved_values)
     except script_blanking.Unchecked:
         return 502, [], UNCHECKED
-    kept = [(name, script_blanking.data(value, hidden)) for name, value in kept]
-    return status, kept, script_blanking.data(content, hidden)
+    # Hiding is CPU work over up to the limit; it runs off the event loop.
+    return await asyncio.to_thread(lambda: (
+        status, [(name, script_blanking.data(value, hidden)) for name, value in kept],
+        script_blanking.data(content, hidden)))
 
 
 async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *, run: RunItems,

@@ -15,18 +15,15 @@ every request. Nothing here reads a value.
 
 from __future__ import annotations
 
-import re
+import ipaddress
+import socket
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
-from infra import saved_fill_identity, saved_item_fills
+from infra import saved_fill_identity, saved_item_fills, saved_logins
 from infra.key_store_values import KeyStoreError
 from infra.saved_fill_identity import FillApprovalError
-
-#: A lowercase DNS host name: labels of letters, digits and hyphens, joined by dots (RFC 1035 section 2.3.1).
-_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
-_HOST_MAX = 253
 
 _SHAPE = ('saved_items is a list of {"name": <Keys item>, "place": <host>}, {"name": <Keys item>, "given": true} '
           'or {"login": <saved login id>} entries.')
@@ -76,13 +73,27 @@ class RunItems:
         return tuple(use for use in self.uses if use.place is None)
 
 
+def _is_address(place: str) -> bool:
+    """Whether a resolver would read the name as an IP address, shorthand forms such as ``0x7f.1`` included."""
+    try:
+        ipaddress.ip_address(place)
+        return True
+    except ValueError:
+        pass
+    try:
+        socket.inet_aton(place)
+        return True
+    except OSError:
+        return False
+
+
 def valid_place(place: object) -> str:
-    """The host, refused unless it is a lowercase DNS name with no scheme, port, path, IP address or trailing dot."""
-    labels = place.split(".") if isinstance(place, str) else []
-    if (not labels or len(place) > _HOST_MAX or place == "localhost"  # type: ignore[arg-type]
-            or not all(_LABEL.fullmatch(label) for label in labels) or all(label.isdigit() for label in labels)):
+    """The host, refused unless it is a lowercase DNS name (the saved-login check) with no scheme, port, path,
+    IP address or trailing dot, and not ``localhost``."""
+    if (not isinstance(place, str) or not saved_logins.dns_name(place) or place == "localhost"
+            or all(label.isdigit() for label in place.split(".")) or _is_address(place)):
         raise ValueError(_PLACE)
-    return place  # type: ignore[return-value]
+    return place
 
 
 def _login_entry(thread_id: str, entry: dict[str, Any]) -> dict[str, Any]:

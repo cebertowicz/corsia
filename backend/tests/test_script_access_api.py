@@ -60,3 +60,17 @@ def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monk
     assert response.status_code == 200 and response.json()["state"] == expected
     assert client.post(url, json=payload, headers=headers).status_code == 409
     delivery.deliver_to_thread.assert_awaited_once()
+
+
+def test_an_approval_on_rules_that_changed_since_the_panel_loaded_is_a_409(isolated_db, tmp_path, monkeypatch):
+    client, _person, schedule, _path = _pending_app(isolated_db, tmp_path, monkeypatch)
+    ui = {"X-CORSIA-Interactive-UI": "1"}
+    request = next(row for row in client.get("/api/host-access/leases?root_thread_id=owner", headers=ui)
+                   .json()["leases"] if row["kind"] == "script")
+    payload = {"application_hash": request["application_hash"], "rules_hash": "0" * 64}
+    response = client.post(f"/api/host-access/leases/scripts/{schedule.id}/approve", json=payload,
+                           headers={"X-CORSIA-User-Decision": request["decision_capability"]})
+    assert response.status_code == 409
+    after = next(row for row in client.get("/api/host-access/leases?root_thread_id=owner", headers=ui)
+                 .json()["leases"] if row["kind"] == "script")
+    assert after["state"] == "awaiting_user"

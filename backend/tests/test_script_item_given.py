@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import sys
@@ -87,6 +88,39 @@ async def test_a_cleared_item_is_no_longer_given(world):
     key_store.clear_value(GIVEN)
     assert await _ask(world, GIVEN) == {"error": "Saved item is no longer available to this script."}
     assert _audit() == []
+
+
+async def _ask_raw(w, request: bytes) -> dict:
+    async with given_items(w.socket, w.run):
+        reader, writer = await asyncio.open_unix_connection(str(w.socket))
+        writer.write(request)
+        await writer.drain()
+        size = int.from_bytes(await reader.readexactly(8), "big")
+        answer = json.loads(await reader.readexactly(size))
+        writer.close()
+    return answer
+
+
+@pytest.mark.asyncio
+async def test_the_value_never_reaches_the_log(world, monkeypatch, caplog):
+    from automation import script_item_given
+
+    caplog.set_level(logging.DEBUG)
+    assert await _ask(world, GIVEN) == {"value": VALUE}
+    # Malformed: the request itself carries the value and isn't JSON.
+    assert await _ask_raw(world, b'{"name": "' + VALUE.encode() + b'"\n') == {"error": "The saved item couldn't be read."}
+
+    def failing_audit(*args, **kwargs):
+        raise RuntimeError(f"history write failed for {VALUE}")
+
+    monkeypatch.setattr(script_item_given, "audit", failing_audit)
+    assert await _ask(world, GIVEN) == {"error": "The saved item couldn't be read."}
+    key_store.clear_value(GIVEN)
+    assert await _ask(world, GIVEN) == {"error": "Saved item is no longer available to this script."}
+    logged = "\n".join(record.getMessage() + str(record.exc_info or "") + str(record.exc_text or "")
+                       for record in caplog.records)
+    assert "RuntimeError" in logged and "JSONDecodeError" in logged
+    assert VALUE not in logged and VALUE not in caplog.text
 
 
 @pytest.mark.asyncio

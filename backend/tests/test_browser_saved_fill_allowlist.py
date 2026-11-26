@@ -38,7 +38,7 @@ def _fresh():
 @pytest.fixture(autouse=True)
 def _no_saved_values(monkeypatch):
     """No saved value by default, so a screenshot's check reads no store; a test that needs one sets it."""
-    monkeypatch.setattr(browser_output_blanking, "_saved_values", frozenset)
+    monkeypatch.setattr(browser_output_blanking, "saved_values", frozenset)
 
 
 def _page(visit: str):
@@ -272,7 +272,7 @@ def _snapshot(text: str, returncode: int = 0) -> browser_cli.CommandResult:
 ])
 async def test_a_screenshot_of_a_later_page_that_shows_a_saved_value_is_refused(monkeypatch, shown):
     """Text, a field's value or an encoded copy: any form blanking hides refuses the screenshot before it is taken."""
-    monkeypatch.setattr(browser_output_blanking, "_saved_values", lambda: frozenset({VALUE}))
+    monkeypatch.setattr(browser_output_blanking, "saved_values", lambda: frozenset({VALUE}))
     browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     ran: list[tuple[str, ...]] = []
     with pytest.raises(BrowserSessionError) as refused:
@@ -283,7 +283,7 @@ async def test_a_screenshot_of_a_later_page_that_shows_a_saved_value_is_refused(
 
 @pytest.mark.asyncio
 async def test_a_screenshot_of_a_later_page_without_a_saved_value_runs(monkeypatch):
-    monkeypatch.setattr(browser_output_blanking, "_saved_values", lambda: frozenset({VALUE}))
+    monkeypatch.setattr(browser_output_blanking, "saved_values", lambda: frozenset({VALUE}))
     browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     ran: list[tuple[str, ...]] = []
     page = _snapshot('- heading "Saved" [level=1]\n- StaticText "Your key was saved."')
@@ -301,7 +301,7 @@ async def test_a_screenshot_whose_page_or_saved_values_cant_be_checked_is_refuse
     browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     page = _snapshot('- StaticText "nothing here"')
     if failure == "values":
-        monkeypatch.setattr(browser_output_blanking, "_saved_values", _unreadable)
+        monkeypatch.setattr(browser_output_blanking, "saved_values", _unreadable)
     elif failure == "snapshot":
         page = _snapshot("", returncode=1)
     ran: list[tuple[str, ...]] = []
@@ -321,7 +321,7 @@ async def test_a_screenshot_whose_page_or_saved_values_cant_be_checked_is_refuse
 
 @pytest.mark.asyncio
 async def test_without_a_saved_fill_a_screenshot_takes_no_snapshot_first(monkeypatch):
-    monkeypatch.setattr(browser_output_blanking, "_saved_values", _unreadable)
+    monkeypatch.setattr(browser_output_blanking, "saved_values", _unreadable)
     ran: list[tuple[str, ...]] = []
     assert await _run(monkeypatch, SHOT, visit=OTHER, ran=ran) == "ok"
     assert ("snapshot",) not in ran
@@ -329,7 +329,7 @@ async def test_without_a_saved_fill_a_screenshot_takes_no_snapshot_first(monkeyp
 
 @pytest.mark.asyncio
 async def test_the_check_runs_only_for_a_screenshot(monkeypatch):
-    monkeypatch.setattr(browser_output_blanking, "_saved_values", _unreadable)
+    monkeypatch.setattr(browser_output_blanking, "saved_values", _unreadable)
     browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     ran: list[tuple[str, ...]] = []
     await _run(monkeypatch, ("get", "title"), visit=OTHER, ran=ran)

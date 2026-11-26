@@ -4,8 +4,6 @@ import { HostAccessApiError, type HostAccessItem, type HostAccessLeaseDecision }
 export const NEW_DETAILS = 'This request has new details. Review them, then approve or reject it.';
 /** The same for a script request, whose refusal is Deny. */
 export const NEW_DETAILS_SCRIPT = 'This request has new details. Review them, then approve or deny it.';
-/** A script approval refused because the rules that start the script changed since it was read (409). */
-export const RULES_CHANGED = 'The rules that start this script changed. Look again.';
 /** A Revoke refused because the approval changed since it was read (409). */
 export const APPROVAL_CHANGED = 'This approval has changed. Check it, then revoke it if you still need to.';
 /** A decision that failed any other way (a refusal, a server error, no connection); its button stays on. */
@@ -55,10 +53,7 @@ export function decisionFailure(
 ): DecisionFailure {
 	const status = caught instanceof HostAccessApiError ? caught.status : null;
 	// The request changed since it was read: say so and read it again.
-	if (status === 409) {
-		const rules = kind === 'script' && caught instanceof HostAccessApiError && caught.message === RULES_CHANGED;
-		return { notice: rules ? RULES_CHANGED : changedLine(decision, kind), refresh: true, gone: false };
-	}
+	if (status === 409) return { notice: changedLine(decision, kind), refresh: true, gone: false };
 	// Gone: one line saying so, then the list without it. On Approve a saved login keeps the server's line for
 	// its closed request and any other kind says Approve failed; Reject, Deny and Revoke never show server text.
 	if (status === 404) {

@@ -22,8 +22,9 @@ from automation.script_items import shown
 from automation.script_rule_binding import bindings_for, rules_hash
 from infra.database import get_db, write_transaction
 
-#: The person's decision named a rule set that changed after the panel loaded.
-RULES_CHANGED = "The rules that start this script changed. Look again."
+#: The request, or the rules that start the script, changed after the panel loaded (409; the drawer says the
+#: request has new details).
+NOT_CURRENT = "Script request is no longer current"
 
 
 def _public(row, bindings: list[tuple[str, str]]) -> dict:
@@ -82,11 +83,11 @@ def decide(
         payload = json.loads(row["payload_json"] or "{}")
         auth = payload.get("authentication") or {}
         if row["state"] != "paused" or auth.get("state") != "pending" or auth.get("application_hash") != application_hash:
-            raise ValueError("Script request is no longer current")
+            raise ValueError(NOT_CURRENT)
         if approve:
             bindings = bindings_for([schedule_id], db)[schedule_id]
             if loaded_rules_hash != rules_hash(bindings):
-                raise ValueError(RULES_CHANGED)
+                raise ValueError(NOT_CURRENT)
             auth["rules"] = [{"id": rule_id, "fingerprint": fingerprint} for rule_id, fingerprint in bindings]
         auth["state"] = "approved" if approve else "denied"
         now = datetime.now(timezone.utc).isoformat()

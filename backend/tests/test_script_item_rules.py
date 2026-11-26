@@ -80,7 +80,7 @@ def test_approval_binds_the_rules_it_was_shown(pending):
     loaded = _loaded(pending)
     assert loaded["saved_items"] == [{"label": "Billing key", "place": "api.example.com"}]
     added = _rule(pending["id"], event_type="two")  # a rule added after the panel loaded
-    with pytest.raises(ValueError, match="The rules that start this script changed. Look again."):
+    with pytest.raises(ValueError, match=script_decisions.NOT_CURRENT):
         script_decisions.decide(pending["id"], pending["user"], "a" * 64, True, loaded["rules_hash"])
     loaded = _loaded(pending)
     script_decisions.decide(pending["id"], pending["user"], "a" * 64, True, loaded["rules_hash"])

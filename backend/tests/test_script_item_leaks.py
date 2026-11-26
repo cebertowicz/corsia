@@ -17,7 +17,7 @@ import infra.saved_logins as saved_logins
 from auth_fixtures import OWNER_USER as PERSON
 from automation import script_blanking, script_runner, script_tree
 from automation import script_schedules as store
-from automation.script_sandbox import STDOUT_CAP_BYTES, ScriptRun, ScriptSandboxError
+from automation.script_sandbox import STDERR_CAP_BYTES, STDOUT_CAP_BYTES, ScriptRun, ScriptSandboxError
 from automation.script_tool_channel import UNCHECKED, _serve
 from infra import key_store
 from infra.database import get_db
@@ -121,6 +121,37 @@ async def test_a_start_failure_that_cannot_be_checked_says_so_without_the_text(w
     monkeypatch.setattr(script_runner, "_drive_owner", lambda _thread: asyncio.sleep(0))
     await script_runner.run_claimed(world["schedule"], "2026-01-01T00:10:00+00:00")
     _nowhere(world)
+
+
+@pytest.mark.asyncio
+async def test_a_value_the_stderr_cap_cut_in_two_shows_no_part(world, monkeypatch):
+    stderr = b"e" * (STDERR_CAP_BYTES - 10) + VALUE[:10].encode()  # head -c stopped inside the value
+    _process(monkeypatch, ScriptRun(1, b"", stderr, False))
+    report = await script_runner._execute(world["schedule"])
+    assert report.status == "error" and VALUE[:4] not in repr(report)
+
+
+def test_a_value_the_stdout_cap_cut_in_two_shows_no_part():
+    stdout = b"o" * (STDOUT_CAP_BYTES - 4) + VALUE[:5].encode()  # the cap's one extra byte, inside the value
+    run = script_runner._hidden(ScriptRun(0, stdout, b"", False), frozenset({VALUE}))
+    assert run.over_cap and run.stdout.endswith(b"o") and VALUE[:2].encode() not in run.stdout
+
+
+@pytest.mark.asyncio
+async def test_a_value_across_the_start_of_the_error_tail_shows_no_part(world, monkeypatch):
+    # The report keeps the last 300 characters of stderr; hiding runs first, so no half of a value is left.
+    stderr = b"x" * 1000 + VALUE.encode() + b"y" * (300 - len(VALUE) // 2)
+    _process(monkeypatch, ScriptRun(1, b"", stderr, False))
+    report = await script_runner._execute(world["schedule"])
+    assert report.status == "error" and VALUE[len(VALUE) // 2:] not in repr(report)
+
+
+def test_cut_drops_only_a_value_begun_at_the_end():
+    values = frozenset({VALUE})
+    assert script_blanking.cut(b"kept " + VALUE[:6].encode(), values) == b"kept "
+    assert script_blanking.cut(b"kept " + VALUE.encode(), values) == b"kept " + VALUE.encode()  # data() hides it
+    assert script_blanking.cut(b"kept plain", values) == b"kept plain"
+    assert script_blanking.cut(b"kept " + VALUE[:6].encode(), frozenset()) == b"kept " + VALUE[:6].encode()
 
 
 def test_over_cap_is_read_before_hiding_shrinks_the_output():

@@ -35,7 +35,9 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
         request: Any = json.loads(await reader.readuntil(b"\n"))
         if not isinstance(request, dict) or not isinstance(request.get("name"), str) or not isinstance(request.get("arguments"), dict):
             raise ValueError("expected a tool name and JSON object")
-        arguments = script_blanking.structure(request["arguments"], await run_off_db(script_blanking.saved_values))
+        hidden = await run_off_db(script_blanking.saved_values)
+        # Hiding is CPU work over up to the limit; it runs off the event loop.
+        arguments = await asyncio.to_thread(script_blanking.structure, request["arguments"], hidden)
         context = state._current_thread_id.set(thread_id)
         turn = state._current_turn_identity.set(None)
         try:

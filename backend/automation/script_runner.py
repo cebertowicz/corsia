@@ -38,7 +38,9 @@ from automation.script_readings import (
     hash_mismatch_report,
     items_unavailable_report,
 )
-from automation.script_sandbox import STDOUT_CAP_BYTES, ScriptSandboxError, run_script
+from automation.script_sandbox import (
+    STDERR_CAP_BYTES, STDOUT_CAP_BYTES, ScriptRun, ScriptSandboxError, run_script,
+)
 from host_access.processes import ProcessOwnerError
 from infra import sweep_wake
 from infra.database import get_db, write_transaction
@@ -324,11 +326,19 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
             values = await run_off_db(script_blanking.saved_values)
         except script_blanking.Unchecked:
             return _error_report(schedule, "its output was withheld: CORSIA couldn't check it for saved values")
-        run = dataclasses.replace(
-            run, over_cap_raw=len(run.stdout) > STDOUT_CAP_BYTES,
-            stdout=script_blanking.data(run.stdout, values), stderr=script_blanking.data(run.stderr, values))
+        run = await asyncio.to_thread(_hidden, run, values)
     return dataclasses.replace(build_report(schedule, run, run_id=run_id), github_locked=run.github_locked,
                                withheld=ITEMS_WITHHELD if items is not None and items.withheld else None)
+
+
+def _hidden(run: ScriptRun, values: frozenset[str]) -> ScriptRun:
+    """An approved run's output with every saved value hidden; a stream its cap cut short first loses any
+    part of a value at its end. Whether stdout ran past its cap is read before hiding shrinks it."""
+    over = len(run.stdout) > STDOUT_CAP_BYTES
+    stdout = script_blanking.cut(run.stdout, values) if over else run.stdout
+    stderr = script_blanking.cut(run.stderr, values) if len(run.stderr) >= STDERR_CAP_BYTES else run.stderr
+    return dataclasses.replace(run, over_cap_raw=over, stdout=script_blanking.data(stdout, values),
+                               stderr=script_blanking.data(stderr, values))
 
 
 async def _blanked_error(schedule: Schedule, message: str, approved: bool) -> RunReport:

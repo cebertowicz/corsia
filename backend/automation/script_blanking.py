@@ -20,7 +20,7 @@ class Unchecked(Exception):
 def saved_values() -> frozenset[str]:
     """Every saved value to hide, read once for one run, request or call; :class:`Unchecked` when unreadable."""
     try:
-        return browser_output_blanking._saved_values()
+        return browser_output_blanking.saved_values()
     except Exception:  # noqa: BLE001 - any failure withholds the text; the caller's text is fixed
         raise Unchecked from None
 
@@ -34,6 +34,23 @@ def data(value: bytes, values: frozenset[str]) -> bytes:
     if not values or not value:
         return value
     return text(value.decode("utf-8", errors="surrogateescape"), values).encode("utf-8", errors="surrogateescape")
+
+
+def cut(value: bytes, values: frozenset[str]) -> bytes:
+    """A stream cut short at its cap, less any bytes at its end that begin a saved value: the cut may have
+    split one, and a part of a value is not hidden. Run it before :func:`data`."""
+    if not values or not value:
+        return value
+    drop = 0
+    for form in {form.encode("utf-8", errors="surrogateescape") for saved in values
+                 for form in browser_output_blanking.encodings(saved)}:
+        # Each place the stream's last byte occurs in the form ends a candidate start of that form.
+        end = form.find(value[-1:])
+        while 0 <= end < len(form) - 1:
+            if end + 1 > drop and value.endswith(form[:end + 1]):
+                drop = end + 1
+            end = form.find(value[-1:], end + 1)
+    return value[:len(value) - drop]
 
 
 def structure(value: Any, values: frozenset[str]) -> Any:
