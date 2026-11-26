@@ -2,7 +2,7 @@
 
 from plans import activity_projection, admission, decisions, holds, mutations, service, status, watch_operations
 from plans.boundary import PlanActor
-from tests.child_parent_notice_helpers import begin_worker_turn, db, delegated
+from tests.child_parent_notice_helpers import begin_worker_turn, db, delegated, other_open_step
 
 __all__ = ["db"]
 
@@ -189,3 +189,54 @@ def test_compact_read_parks_a_row_behind_a_running_row_and_an_idle_helper(db):
     activity = activity_projection.read_project("project-1", actor=PlanActor(None, "user-1", None, kind="user"), db=db)
     parent_activity = next(item for item in activity["plans"] if item["plan"]["id"] == parent.id)
     assert parent_activity["display"]["label_key"] != "working"
+
+
+def _set_aside(db, plan, node, *, hours, why):
+    """The worker sets its own step aside through the real boundary (arm_watch with a reason)."""
+    from datetime import datetime, timedelta, timezone
+
+    from tests.plan_close_next_helpers import plan_update
+
+    until = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(hours=hours)
+    plan_update(db, plan.id, "arm_watch", {
+        "node_id": node.id, "expected_revision": service.get_node(node.id, db=db).revision,
+        "condition": {"type": "deadline", "value": until.isoformat()}, "reason": why,
+    }, actor=PlanActor("worker", "user-1", "project-1"))
+    return f"Until {until:%Y-%m-%dT%H:%MZ} · {why}"
+
+
+def _person_row(db, step):
+    from plans import operator_projection
+
+    read = operator_projection.read_thread("parent", actor=PlanActor(None, "user-1", None, kind="user"), db=db)
+    return next(node for plan in read["plans"] for node in plan["nodes"] if node["id"] == step.id)
+
+
+def test_parked_worker_row_says_until_when_and_why(db):
+    """A worker that set its step aside reads as set aside, with its time and reason, on the step it holds."""
+    step, child_plan, child = delegated(db)
+    service.transition_node(child.id, "active", actor_id="worker", db=db)
+    shown = _set_aside(db, child_plan, child, hours=8, why="Parked for the thumbs map")
+    row = _step_row(db, step)
+    assert (row["label"], row["condition"]) == ("waiting", "waiting")
+    # The agent's row is cut to a few dozen characters; the person's row carries it whole.
+    assert f"Worker set aside · {shown}".startswith(row["reason"].removesuffix("…"))
+    assert _person_row(db, step)["status_reason"] == f"Worker set aside · {shown}"
+
+
+def test_parked_worker_row_names_the_step_that_comes_back_first(db):
+    step, child_plan, child = delegated(db)
+    later = other_open_step(db, child_plan, title="Second")
+    service.transition_node(child.id, "active", actor_id="worker", db=db)
+    _set_aside(db, child_plan, later, hours=30, why="After the review")
+    first = _set_aside(db, child_plan, child, hours=4, why="After the map")
+    assert _person_row(db, step)["status_reason"] == f"Worker set aside · {first}"
+
+
+def test_worker_with_a_step_not_set_aside_keeps_the_open_steps_wait(db):
+    """Set-aside names the wait only when every open step of the worker is set aside."""
+    step, child_plan, child = delegated(db)
+    other_open_step(db, child_plan, title="Second")
+    service.transition_node(child.id, "active", actor_id="worker", db=db)
+    _set_aside(db, child_plan, child, hours=4, why="After the map")
+    assert _person_row(db, step)["status_reason"] == "Waiting for the delegated child to take up its open steps"

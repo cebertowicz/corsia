@@ -289,9 +289,10 @@ def delegation_cause(row, *, plan, child) -> dict | None:
         reason_key = DELEGATED_CHILD
         from prompts.plan_wakes import account_readiness_detail
         reason = _STALLED[stalled] + (' ' + account_readiness_detail(row.get('account_readiness')) if stalled == 'account' else '')
-    else:
+    else:  # A worker that set every open step aside says until when and why, as its own row does.
         reason_key = DELEGATED_CHILD
-        reason = "Waiting for the delegated child to take up its open steps"
+        reason = (f"Worker set aside · {child.set_aside_reason}" if child.set_aside_reason
+                  else "Waiting for the delegated child to take up its open steps")
     return {
         "kind": "waiting",
         "reason_key": reason_key,

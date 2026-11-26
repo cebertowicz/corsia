@@ -99,6 +99,7 @@ class PlanState:
     open_above: int = 0
     # In-memory facts used only by wait_causes.delegation_cause.
     parked_commitments: frozenset[str] = frozenset()
+    set_aside_reason: str | None = None
 
 
 @dataclass(frozen=True)

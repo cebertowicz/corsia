@@ -13,6 +13,8 @@ its reduced nodes.
 
 from __future__ import annotations
 
+from plans import operator_scheduled
+
 
 def parked_commitments(rows, conditions: dict, causes: dict) -> frozenset[str]:
     """Commitments a helper holds open rows for, none of which its work can reach now.
@@ -42,3 +44,23 @@ def parked_commitments(rows, conditions: dict, causes: dict) -> frozenset[str]:
         key = str(row["id"])
         (moving if reachable(key, set()) else parked).add(str(row["commitment_id"]))
     return frozenset(parked - moving)
+
+
+def set_aside_reason(causes_by_leaf) -> str | None:
+    """The shown reason of a helper that set every open step aside, else None.
+
+    Only the full read names a set-aside (``scheduled_reason``); the compact
+    read's causes never do, so it answers None and keeps the generic wait.
+    When several steps are set aside, the one ending first is when the helper
+    comes back.
+    """
+    leaves = [list(causes) for causes in causes_by_leaf]
+    if not leaves or not all(operator_scheduled.only_set_aside(causes) for causes in leaves):
+        return None
+    dated = [
+        (moment, cause) for causes in leaves for cause in causes
+        if (moment := operator_scheduled.instant(cause.get("ends_at"))) is not None
+    ]
+    if not dated:
+        return None
+    return min(dated, key=lambda item: item[0])[1].get("reason") or None

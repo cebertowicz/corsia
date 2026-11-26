@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 
 
-def _instant(value: str | None) -> datetime | None:
+def instant(value: str | None) -> datetime | None:
     """A stored deadline as an aware instant; one without a zone has no knowable end."""
     try:
         moment = datetime.fromisoformat(value) if value else None
@@ -58,7 +58,7 @@ def own_wait(node: dict) -> tuple[bool, datetime | None]:
     )
     if cause is None:
         return False, None
-    return True, _instant(cause["ends_at"]) if is_set_aside(cause) else None
+    return True, instant(cause["ends_at"]) if is_set_aside(cause) else None
 
 
 def scheduled_leaf_end(node: dict) -> datetime | None:
