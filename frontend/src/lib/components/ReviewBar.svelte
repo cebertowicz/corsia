@@ -8,6 +8,7 @@
 	import ReviewBarShell from './ReviewBarShell.svelte';
 	import { createReviewBarState, DRAFT_OPEN, REVIEW_ANSWERED, REVIEW_REPLIES, type ReviewBarState } from '$lib/reviewBarState.svelte';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
+	import { textSha256 } from '$lib/stores/documentWire';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
@@ -126,8 +127,7 @@
 		const targetHoldIds = [...holdIds];
 		let docSha256: string | undefined;
 		if (verdict === 'approved' && documentText) {
-			const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(documentText()));
-			docSha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+			docSha256 = await textSha256(documentText());
 		}
 		const outcome = await bar.answer(
 			verdict,

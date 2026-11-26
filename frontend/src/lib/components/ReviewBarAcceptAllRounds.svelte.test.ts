@@ -43,6 +43,16 @@ afterEach(() => {
 });
 
 describe('ReviewBar approval hash', () => {
+	it('approves with the correct hash when WebCrypto is unavailable', async () => {
+		vi.stubGlobal('crypto', {});
+		const text = 'A document over plain HTTP\n';
+		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', documentText: () => text } });
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
+		button('Approve')!.click();
+		const expected = createHash('sha256').update(text).digest('hex');
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1'], expected));
+	});
+
 	it('hashes the document after accepting the pending suggestion', async () => {
 		vi.stubGlobal('crypto', webcrypto);
 		let text = 'Before suggestion\n';
