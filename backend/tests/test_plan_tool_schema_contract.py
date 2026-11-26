@@ -181,6 +181,13 @@ def test_plan_decision_rationale_publishes_its_purpose_and_limit():
     assert rationale["description"].startswith("Why you recommend it")
 
 
+def test_plan_decision_options_publish_name_by_label():
+    from tools.plans import PlanDecisionTool
+
+    options = PlanDecisionTool().parameters["properties"]["params"]["properties"]["options"]
+    assert "name an option by its label" in options["description"]
+
+
 @pytest.mark.parametrize("operation", sorted(_MUTATION_REQUIRED))
 def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(operation):
     from tools.plans import PlanUpdateTool
