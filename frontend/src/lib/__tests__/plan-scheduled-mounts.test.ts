@@ -73,7 +73,7 @@ function threadEnvelope(nodes: OperatorNode[], open: number, state = 'active'): 
 		plans: [{
 			plan: { id: 'plan-t1', owner_kind: 'thread', owner_id: 't1', state, revision: 1, updated_at: 'now' },
 			owner: { label: 'Thread', project_id: null, thread_id: 't1' },
-			progress: { done: 0, total: open, open, liveness: 'waiting', distribution: { ...EMPTY_DISTRIBUTION } },
+			progress: { done: 0, total: open, open, open_above: open, liveness: 'waiting', distribution: { ...EMPTY_DISTRIBUTION } },
 			display: planDisplay('waiting', 'waiting'), oversize: null, current_node_ids: [], next_node_ids: [], nodes, ...planFoldFields(nodes),
 		}],
 	} as OperatorEnvelope;

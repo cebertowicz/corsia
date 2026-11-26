@@ -46,6 +46,41 @@ def _add(db, plan_id: str, title: str, **params) -> dict:
     )["node"]
 
 
+def test_header_progress_counts_only_open_work_above_the_cut(db):
+    plan = owner_plan(db)
+    above = [task(db, plan.id, f"Now {i}") for i in range(5)]
+    for i in range(3):
+        _add(db, plan.id, f"Later {i}", later=True)
+    select(db, plan.id, above[0].id)
+
+    state = projections.plan_state(plan.id, db=db)
+    assert state.progress.open == 8
+    assert state.open_above == 5
+    from plans import operator_projection
+    from plans.boundary import PlanActor
+
+    payload = operator_projection.read_thread("owner", actor=PlanActor(None, "user", None, kind="user"), db=db)
+    assert payload["plans"][0]["progress"]["open"] == 8
+    assert payload["plans"][0]["progress"]["open_above"] == 5
+
+
+def test_header_progress_excludes_every_step_of_a_later_phase(db):
+    plan = owner_plan(db)
+    phase = plan_update(db, plan.id, "add", {
+        "kind": "phase", "title": "Later phase", "acceptance_criteria": "Verified",
+    })["node"]
+    for i in range(2):
+        _add(db, plan.id, f"Step {i}", parent_id=phase["id"])
+    plan_update(db, plan.id, "edit", {
+        "node_id": phase["id"], "later": True, "expected_revision": revision(db, phase["id"]),
+    })
+    task(db, plan.id, "Now")
+
+    state = projections.plan_state(plan.id, db=db)
+    assert state.progress.open == 3
+    assert state.open_above == 1
+
+
 # --- the flag and its refusals ---------------------------------------------
 
 

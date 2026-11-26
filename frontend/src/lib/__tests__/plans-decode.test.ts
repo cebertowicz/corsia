@@ -29,7 +29,7 @@ function envelope(nodes: unknown[] = [operatorNode({ id: 'a', title: 'Step' })])
 		plans: [{
 			plan: { id: 'plan-t1', owner_kind: 'thread', owner_id: 't1', state: 'active', revision: 1, updated_at: '2026-08-13T00:00:00Z' },
 			owner: { label: 'Conversation', project_id: null, thread_id: 't1' },
-			progress: { done: 0, total: 1, open: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION } },
+			progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION } },
 			display: planDisplay('working', 'active'),
 			current_node_ids: ['a'],
 			next_node_ids: [],
@@ -42,6 +42,12 @@ describe('decodeOperatorEnvelope', () => {
 	it('admits the envelope the pane renders, with and without plans', () => {
 		expect(decodeOperatorEnvelope(envelope())).not.toBeNull();
 		expect(decodeOperatorEnvelope({ ...envelope(), plans: [] })).not.toBeNull();
+	});
+
+	it('requires a numeric above-line count in plan progress', () => {
+		const body = envelope();
+		delete (body.plans[0].progress as Partial<typeof body.plans[0]['progress']>).open_above;
+		expect(decodeOperatorEnvelope(body)).toBeNull();
 	});
 
 	it('admits the envelope the backend projection actually builds', () => {
@@ -135,10 +141,13 @@ describe('decodeOperatorEnvelope', () => {
 	it('refuses a nested fact that is an object but not the fact a row reads', () => {
 		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', branch_progress: {} as never })]))).toBeNull();
 		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', child: {} as never })]))).toBeNull();
+		const child = { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, liveness: 'advancing' } };
+		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', child: child as never })]))).toBeNull();
+		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', child: { ...child, progress: { ...child.progress, open_above: '1' } } as never })]))).toBeNull();
 		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', review: { kind: 'external' } as never })]))).toBeNull();
 		expect(decodeOperatorEnvelope(envelope([operatorNode({
 			id: 'a', branch_progress: { done: 1, total: 2 }, review: { kind: 'external', label: 'Awaiting', actor: { kind: 'external', id: 'x', label: 'X' } },
-			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, liveness: 'advancing' } },
+			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing' } },
 		})]))).not.toBeNull();
 	});
 });

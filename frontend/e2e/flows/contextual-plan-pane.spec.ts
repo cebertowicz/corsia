@@ -199,7 +199,7 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
           available: true,
           plan_id: `plan-${childId}`,
           thread_id: childId,
-          progress: { done: 0, total: 1, open: 1, liveness: "advancing" },
+          progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: "advancing" },
         },
         discussion_artifact_id: "legacy-discussion-1",
       }),

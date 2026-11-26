@@ -6,7 +6,8 @@
 	import { mutatePlanLifecycle } from '$lib/api/plans';
 
 	/**
-	 * The plan's count of unfinished work and its Pause/Resume, for whatever
+	 * The plan's count of unfinished work above the line (Later counts its own
+	 * on its row) and its Pause/Resume, for whatever
 	 * header the host owns: the desktop section cap shows both, the phone
 	 * drawer puts Pause alone at its leading edge and the count by its title.
 	 */
@@ -48,12 +49,12 @@
 {#if plan}
 	<span class="plan-head-controls">
 		{#if show === 'both' && open > 0}
-			<!-- One count of unfinished work; the agent-read budget is a hint on it, never a second number. -->
+			<!-- One count of unfinished work above the line; the agent-read budget is a hint on it, never a second number. -->
 			<span
 				class="progress"
 				class:oversize={!!plan.oversize}
 				title={plan.oversize ? `This plan has more than ${plan.oversize.budget} open tasks. Use Mark done or Won’t do on any that don’t need doing.` : undefined}
-			>{open} left</span>
+			>{plan.progress.open_above} left</span>
 		{/if}
 		{#if error}<span class="lifecycle-error" role="alert" title={error}>{error}</span>{/if}
 		<Button

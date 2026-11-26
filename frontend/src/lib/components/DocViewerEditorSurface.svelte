@@ -62,6 +62,7 @@
 		saveError,
 		pendingSel,
 		listOverText = false,
+		bottomClear = 0,
 		cardMode,
 		onTyping,
 		onStartComment,
@@ -101,6 +102,8 @@
 		pendingSel: PendingSelection | null;
 		/** The comment list is over the text (the sheet, whose closing scrim stays modal until its outro ends, or the list popover). */
 		listOverText?: boolean;
+		/** What stands at the canvas's foot over the text (the docked ask card): the touch Comment button is held above it. */
+		bottomClear?: number;
 		/** How a card opened from the text shows now (DocCommentSurface): over the text, as a popover or the sheet, only a click opens one. */
 		cardMode?: CardMode;
 		onTyping?: () => void;
@@ -225,7 +228,7 @@
 {/snippet}
 
 {#if touchReading}
-	<DocTouchCommentBar {column} offered={!!pendingSel && !listOverText}>
+	<DocTouchCommentBar {column} above={bottomClear} offered={!!pendingSel && !listOverText}>
 		<button class="sel-comment" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>{@render commentFace()}</button>
 	</DocTouchCommentBar>
 {:else if pendingSel && !listOverText}

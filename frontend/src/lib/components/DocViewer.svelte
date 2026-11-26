@@ -137,6 +137,7 @@
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), columnFits);
 	const reviewBarState = createReviewBarState();
+	let askReach = $state(0); // How far the docked ask card reaches up from the canvas's foot: the touch Comment button is held above it.
 	/** The ask waiting on this document, for Details while its card is hidden (under a comment sheet, or stepped aside for Details). */
 	const askSheetHidden = $derived(commentUI.state != null && commentUI.sheetUp);
 	const documentAsk = $derived(documentAskOf(reviewBarState, askSheetHidden));
@@ -341,7 +342,7 @@
 		saveError={save.error}
 		onUseFile={applyLoaded}
 		pendingSel={draftController.pending}
-		{listOverText}
+		{listOverText} bottomClear={askReach}
 		onStartComment={draftController.start}
 	/>
 	{#if history.open && history.available && target}<DocHistorySurface {target} readOnly={serverReadOnly} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
@@ -395,6 +396,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar bind:capsuleClearance={askReach} docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

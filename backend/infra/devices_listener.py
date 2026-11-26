@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from urllib.parse import parse_qs
 
 import psutil
-import uvicorn
 from starlette.responses import JSONResponse
 
 from infra.auth import authenticate, is_person_session, token_from_request
@@ -220,20 +219,14 @@ class DevicesListener:
             self.reason = "ports_taken" if error == _NO_PORT_ERROR else "bind"
             return False
         assert port is not None
-        config = uvicorn.Config(
+        self.server = DevicesServer(
             DevicesApp(self.app, outside_enabled=self.outside_enabled),
-            host="::",
-            port=port,
-            log_config=None,
-            proxy_headers=False,
-            lifespan="off",
-            timeout_graceful_shutdown=2,
-            ssl_keyfile=str(key_path),
-            ssl_certfile=str(cert_path),
+            sock=sock,
+            keyfile=key_path,
+            certfile=cert_path,
         )
-        self.server = DevicesServer(config)
         self.sock = sock
-        self.task = asyncio.create_task(self.server.serve(sockets=[sock]))
+        self.task = asyncio.create_task(self.server.serve())
         self.task.add_done_callback(self._serve_ended)
         self.port = port
         self.error = None
@@ -264,7 +257,7 @@ class DevicesListener:
         if self.announcement is not None:
             self.announcement.stop()
             self.announcement = None
-        self.server.should_exit = True
+        self.server.request_exit()
         try:
             await self.task
         finally:
@@ -278,7 +271,7 @@ _NO_PORT_ERROR = "No approved Devices port is available"
 
 
 def _prebind() -> tuple[socket.socket | None, int | None, str | None]:
-    """Bind the approved port range without letting Uvicorn exit the backend."""
+    """Bind the approved port range here, so a port in use is a reported reason, never a server exit."""
     for port in (DEFAULT_PORT, *FALLBACK_PORTS):
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         try:

@@ -1,14 +1,18 @@
-"""The weekly review of one plan's Later pile: its arm, its due read, its settle.
+"""The review of one plan's Later pile, weekly and when the work above it is done.
 
-``plans.later_review_at`` is the one home of the review time, and only two
-writes touch it: ``arm``, made inside the transaction of the first write that
-puts a task below the cut, and ``settle``, which answers a review whose time
-has come. Nothing else moves it at run time -- a second, tenth or hundredth task
-crossing the cut leaves it where the first put it -- so a plan keeps one review
-weekday however big its pile grows, and a late sweep cannot start a second
-review. The one other writer is the one-time upgrade
-``infra.migration_195_to_196_later_review_arm``, which arms plans whose pile
-predates the review the way ``arm`` would.
+``plans.later_review_at`` is the one home of the review time. ``arm`` sets
+it when the first task goes below the cut, a post-commit effect brings it
+forward when the last above-cut task settles, and ``settle`` answers a review.
+Adding more tasks below the cut does not move the time. Its other writer is the
+one-time upgrade ``infra.migration_195_to_196_later_review_arm``, which armed
+plans whose pile predates the review the way ``arm`` would.
+
+``plans.later_reviewed_at`` is when ``settle`` last sent a review; null means
+never. The early review on an empty top is brought forward only when the pile
+was never reviewed, a task went below the cut since, or a priorities file that
+ranks the owner's work (``registry.priorities_ownership``) changed since: an
+owner who looked at the pile and left it is not asked again about the same pile
+under the same priorities. The weekly review is sent regardless.
 
 Nothing is scheduled for the review and nothing is derived from a timestamp:
 the continuation runner asks ``due`` on its own cadence, and ``settle`` answers
@@ -26,11 +30,16 @@ surfaces.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
+from pathlib import Path
 
+from core.workspace_layout import ABSENT_ERRNOS
+from infra import config, write_effects
+from infra.database import TransactionOwnershipError, write_transaction
 from infra.packed_rows import fetch_all
 from plans import (
-    later_fields, node_order, node_waits, plan_wake, service, status_time,
+    later_fields, node_order, node_states, node_waits, plan_wake, service, status_time,
 )
 from plans.close_next_bounds import CRITERIA_MIN_BYTES, bounded, json_bytes, title as _title
 from plans.errors import PlanError
@@ -39,8 +48,11 @@ from prompts import later_pull
 from prompts import later_review as text
 from prompts.plan_tools import bounded_text
 
-#: One week between reviews of the same pile. A plan's review weekday is set by
-#: its first task below the cut, so plans spread across the week on their own.
+logger = logging.getLogger(__name__)
+
+#: One week between reviews of the same pile. A plan's review weekday follows its
+#: last sent review, which is a week after its first task below the cut unless
+#: an empty top brought one forward, so plans spread across the week on their own.
 REVIEW_DAYS = 7
 #: A row inside the wake identifies the task; reading it is the section read's
 #: job, so its reason is shorter than its status counterpart. A title is cut
@@ -85,6 +97,106 @@ def arm_node(connection, node_id: str) -> None:
              AND id=(SELECT plan_id FROM plan_nodes WHERE id=?)""",
         (_week_out(service._now()), str(node_id)),
     )
+
+
+def schedule_if_top_empties(connection, node) -> None:
+    """Recheck the committed plan once per transaction after above-cut work settles."""
+    if not node_states.later_ready(connection) or node["kind"] != "task" or node["later"]:
+        return
+    plan_id = str(node["plan_id"])
+    plan = connection.execute("SELECT owner_kind FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if plan is None or plan["owner_kind"] != "thread":
+        return
+    try:
+        write_effects.after_commit_merged(
+            connection, ("later_review_top_empty", plan_id), [plan_id],
+            lambda ids: _arm_empty_tops(connection, ids),
+        )
+    except TransactionOwnershipError:
+        logger.warning(
+            "early Later review not scheduled for plan %s: the settlement's transaction "
+            "is not owned here; the weekly review stays armed", plan_id,
+        )
+
+
+def _arm_empty_tops(connection, plan_ids: list[str]) -> None:
+    """Bring the review forward only if committed work still leaves the top empty."""
+    for plan_id in plan_ids:
+        later_exists = connection.execute(
+            "SELECT 1 FROM plan_nodes WHERE plan_id=? AND kind='task' AND later=1 AND "
+            f"{node_states.open_sql('plan_nodes')} LIMIT 1", (plan_id,),
+        ).fetchone()
+        if not later_exists:
+            continue
+        tasks = [row for row, _ in node_order.open_nodes_with_paths(connection, plan_id)
+                 if row["kind"] == "task"]
+        if not any(row["later"] for row in tasks) or any(not row["later"] for row in tasks):
+            continue
+        with write_transaction(connection, scope="later_review_empty") as db:
+            tasks = [row for row, _ in node_order.open_nodes_with_paths(db, plan_id)
+                     if row["kind"] == "task"]
+            if not any(row["later"] for row in tasks) or any(not row["later"] for row in tasks):
+                continue
+            if not _changed_since_review(db, plan_id):
+                continue
+            now = service._now()
+            db.execute(
+                "UPDATE plans SET later_review_at=? WHERE id=? AND owner_kind='thread' "
+                "AND (later_review_at IS NULL OR later_review_at>?)",
+                (now, plan_id, now),
+            )
+
+
+#: An open task of the plan that went below the cut after ``?``: born there
+#: (no crossing event) or moved there by its latest crossing. An open task is never
+#: folded, so the listed-open filter drops none and reads only the plan's open rows
+#: (``idx_plan_nodes_open``), whatever its settled history.
+_NEW_BELOW_CUT_SQL = f"""SELECT 1 FROM plan_nodes AS n
+    WHERE n.plan_id=? AND {node_states.listed_open_sql('n')}
+      AND n.kind='task' AND n.later=1 AND {node_states.open_sql('n')}
+      AND (n.created_at>? OR EXISTS (
+          SELECT 1 FROM plan_node_events AS e
+          WHERE e.node_id=n.id AND e.event=? AND e.created_at>?
+            AND json_extract(e.payload_json,'$.later')=1))
+    LIMIT 1"""
+
+
+def _changed_since_review(db, plan_id: str) -> bool:
+    """Whether the pile or its owner's priorities changed since the last sent review.
+
+    True when the pile was never reviewed. A priorities file counts as changed
+    when it was written after the review; a missing file has not changed.
+    """
+    plan = db.execute(
+        "SELECT owner_id, later_reviewed_at FROM plans WHERE id=?", (plan_id,),
+    ).fetchone()
+    reviewed = plan["later_reviewed_at"] if plan is not None else None
+    if reviewed is None:
+        return True
+    if db.execute(_NEW_BELOW_CUT_SQL, (plan_id, reviewed, later_fields.EVENT, reviewed)).fetchone():
+        return True
+    return _priorities_written_after(db, str(plan["owner_id"]), str(reviewed))
+
+
+def _priorities_written_after(db, thread_id: str, instant: str) -> bool:
+    """Whether a priorities file ranking this thread's work was written after ``instant``."""
+    from registry.priorities_ownership import agent_priorities_files
+
+    parsed = status_time.parse(instant)
+    if parsed is None:
+        raise PlanError(f"not a timestamp: {instant!r}")
+    for path in agent_priorities_files(thread_id, workspace=Path(config.WORKSPACE), db=db):
+        try:
+            if path.stat().st_mtime > parsed.timestamp():
+                return True
+        except OSError as error:
+            if error.errno not in ABSENT_ERRNOS:
+                logger.warning(
+                    "priorities file %s could not be read (%s); counted as unchanged, "
+                    "the weekly Later review stays armed", path, type(error).__name__,
+                )
+            continue
+    return False
 
 
 def due(db, now: str) -> list:
@@ -235,6 +347,10 @@ def settle(connection, plan_id: str, *, now: str) -> str | None:
         plan_id=str(plan_id), content=wake_text(connection, rows),
     )
     _arm_again(connection, plan_id, _week_out(now))
+    if wake is not None:
+        connection.execute(
+            "UPDATE plans SET later_reviewed_at=? WHERE id=?", (now, str(plan_id)),
+        )
     return wake
 
 

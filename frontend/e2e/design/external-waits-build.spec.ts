@@ -143,7 +143,7 @@ function planNodesFor(tpl: any, m: Made, childWaitAt: number): any[] | null {
 			execution: timed('Waiting for the delegated child to return', 'thread', childWaitAt),
 			child: {
 				available: true, plan_id: 'plan-child-release-notes', thread_id: 'child-release-notes',
-				progress: { done: 1, total: 3, open: 2, liveness: 'waiting' }, wait: wait('CI on PR #1193', childWaitAt),
+				progress: { done: 1, total: 3, open: 2, open_above: 2, liveness: 'waiting' }, wait: wait('CI on PR #1193', childWaitAt),
 			},
 		})];
 	}
@@ -499,7 +499,7 @@ test('plan copy: task details, read-only discussion, task menu, empty pane', asy
 					mount(Component, { target: host, props: { artifactId: 'example', title: 'Discussion' } });
 				} else if (selected === 8) {
 					const { default: Component } = await load('/src/lib/components/plans/PlanTaskMenu.svelte');
-					const item = node({ user_actions: ['mark_done', 'close_node'], child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1 } } });
+					const item = node({ user_actions: ['mark_done', 'close_node'], child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'idle' } } });
 					mount(Component, { target: host, props: { node: item, x: 24, y: 24, onAction: () => {}, onClose: () => {} } });
 				} else if (selected === 15) {
 					const { default: Component } = await load('/src/lib/components/Pane.svelte');
