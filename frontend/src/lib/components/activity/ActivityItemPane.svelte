@@ -8,7 +8,8 @@
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
 	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
-	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
+	import ActivityChatPane from './ActivityChatPane.svelte';
+	import { isPickAny, OTHER_OPTION_ID, type AttentionDestination, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
 	import { connectionState } from '$lib/stores/connection';
@@ -16,13 +17,9 @@
 	import type { HeldVerb } from '$lib/api/heldReplies';
 	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
 	import { emitProductEvent } from '$lib/product_events';
-	import {
-		agentsLabel, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps,
-		type DecisionDraft, type DocumentLookup,
-	} from './activityItems';
-	import {
-		answerPressed, decideHeldPress, markTaskDonePress, SUCCEEDED, type PressAction, type Pressed,
-	} from './activityPress';
+	import { agentsLabel, chatDetailOf, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf,
+		taskOf, taskSteps, type DecisionDraft, type DocumentLookup } from './activityItems';
+	import { answerPressed, decideHeldPress, markTaskDonePress, SUCCEEDED, type PressAction, type Pressed } from './activityPress';
 
 	/**
 	 * The open item, in the pane the chat uses for documents. A document opens in Activity's own workspace (never a
@@ -30,7 +27,7 @@
 	 * through the call its own surface already uses; the list then re-reads, and the item leaves only when the server
 	 * stops returning it. Every outcome of a press is reported here; nothing here writes the attention queue's state.
 	 */
-	let { item, workspaceKey, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat }: {
+	let { item, workspaceKey, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat, onCloseChat }: {
 		item: ActivityQueueItem;
 		workspaceKey: string;
 		draft?: DecisionDraft;
@@ -44,13 +41,14 @@
 		onActed: () => Promise<void> | void;
 		/** The server let the item go without doing what was pressed: keep it open, with the reason, until the person moves on. */
 		onKeep: () => void;
-		onOpenChat: (threadId: string) => void;
+		onOpenChat: (threadId: string, destination?: AttentionDestination) => void | Promise<void>; onCloseChat: () => void;
 	} = $props();
 
 	// Every band here, the document's own review band included, names the agent asking at rest.
 	setContext(ASKER_AT_REST, true);
 	setContext(REVIEW_ANSWERED, () => void onActed());
 
+	const chat = $derived(chatDetailOf(item));
 	const decision = $derived(decisionOf(item));
 	const held = $derived(heldOf(item));
 	const task = $derived(taskOf(item));
@@ -221,7 +219,9 @@
 	{:else if held?.error}<!-- Why the last Send didn't go, shown here until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
 {/snippet}
 
-{#if doc}
+{#if chat}
+	<ActivityChatPane {item} detail={chat} {allRead} {onActed} {onOpenChat} onClose={onCloseChat} />
+{:else if doc}
 	{#if lookupFailed}
 		<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
 			{#snippet body()}

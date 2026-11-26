@@ -1,0 +1,134 @@
+<script lang="ts">
+	import { tick, untrack } from 'svelte';
+	import ArtifactTabStrip from '$lib/components/ArtifactTabStrip.svelte';
+	import DocJumpControl from '$lib/components/DocJumpControl.svelte';
+	import type { ArtifactTab } from '$lib/artifactTabTypes';
+	import { apiFetch } from '$lib/api/request';
+	import { threads, isNavAgent } from '$lib/stores/threads';
+	import { markDocumentsRead, type ActivityChatDetail, type ActivityQueueItem } from '$lib/api/activityQueue';
+	import type { AttentionDestination } from '$lib/api/attentionQueue';
+	import type { ChatComment } from '$lib/chatCommentTypes';
+	import { formatMoment, parseUTC } from '$lib/time';
+	import { renderMarkdown } from '$lib/markdown';
+	import { chatTextPoint } from '$lib/chatCommentAnchors';
+	import { wrapRange } from '$lib/cm/widget-paint';
+	import { Avatar, Button } from '$lib/components/ui';
+	import { agentColor } from '$lib/docPresence';
+
+	let { item, detail, allRead = false, onActed, onOpenChat, onClose }: {
+		item: ActivityQueueItem; detail: ActivityChatDetail; allRead?: boolean; onActed: () => void | Promise<void>;
+		onOpenChat: (threadId: string, destination?: AttentionDestination) => void | Promise<void>;
+		onClose: () => void;
+	} = $props();
+	type ChatMessage = { id: string; seq: number; content: string; chat_visible_content?: string; created_at: string; chat_comments: ChatComment[] };
+	const { through, thread_id: threadId } = untrack(() => detail);
+	const latestThrough = $derived(detail.through);
+	const agentName = $derived.by(() => {
+		const current = $threads.find(thread => thread.id === detail.thread_id);
+		return current && isNavAgent(current) ? current.title : 'CORSIA';
+	});
+	const tab = $derived<ArtifactTab>({ kind: 'subagent', instanceId: item.key, artifactId: null, path: '', title: item.title, threadId, loadedRevision: null, latestRevision: null, status: 'ready' });
+	let scroll = $state<HTMLElement>();
+	let jumpTarget = $state<{ count: number; direction: 'above' | 'below'; element: HTMLElement } | null>(null);
+	function updateJump() {
+		if (!scroll || allRead) { jumpTarget = null; return; }
+		const box = scroll.getBoundingClientRect();
+		const answers = [...scroll.querySelectorAll<HTMLElement>('[data-unread-answer]')];
+		const above = answers.filter(el => el.getBoundingClientRect().bottom <= box.top);
+		const below = answers.filter(el => el.getBoundingClientRect().top >= box.bottom);
+		jumpTarget = above.length ? { count: above.length, direction: 'above', element: above[above.length - 1] }
+			: below.length ? { count: below.length, direction: 'below', element: below[0] } : null;
+	}
+	let messages = $state<ChatMessage[]>([]);
+	$effect(() => {
+		void messages; void allRead;
+		const el = scroll;
+		void tick().then(updateJump);
+		if (!el || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(updateJump);
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
+	let loading = $state(true), failed = $state(false), sending = $state(false), readFailed = $state(false);
+	async function load() {
+		loading = true; failed = false;
+		try {
+			const response = await apiFetch(`/api/attention/notifications/chats/${encodeURIComponent(threadId)}`);
+			if (!response.ok) throw new Error('read failed');
+			messages = (await response.json()).messages;
+		} catch { failed = true; } finally { loading = false; }
+	}
+	$effect(() => { void latestThrough; void load(); });
+	async function done() {
+		if (sending) return;
+		sending = true; readFailed = false;
+		try {
+			await markDocumentsRead([], [{ thread_id: detail.thread_id, through }]);
+			await onActed();
+		} catch { readFailed = true; } finally { sending = false; }
+	}
+	function jump(message: ChatMessage, comment: ChatComment) {
+		void onOpenChat(detail.thread_id, { pane: 'chat-replies', id: message.id, seq: message.seq,
+			cid: comment.cid, user_message_id: comment.user_message_id });
+	}
+	const when = (value: string) => formatMoment(parseUTC(value), new Date(), { clock: true, plain: true });
+	function highlight(node: HTMLElement, comment: ChatComment) {
+		if ((node.textContent ?? '').slice(comment.from_off, comment.to_off) !== comment.quote) return;
+		const range = document.createRange();
+		range.setStart(...chatTextPoint(node, comment.from_off));
+		range.setEnd(...chatTextPoint(node, comment.to_off));
+		wrapRange(range, { from: comment.from_off, to: comment.to_off, id: comment.id, kind: 'placed' }, false);
+	}
+</script>
+
+<div class="chat-pane">
+	<div class="strip"><ArtifactTabStrip tabs={[tab]} activeKey={tab.instanceId} onSelect={() => {}} onClose={onClose} /></div>
+	<section class="bar" aria-label="Replies to your comments">
+		<div class="who"><Avatar name={agentName} color={agentColor(threadId)} hidden /><div><strong>{agentName}</strong><div>{allRead ? 'All replies read.' : detail.unread === 1 ? '1 reply to your comment' : `1 of ${detail.unread} replies to your comments`}</div></div></div>
+		{#if !allRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void done()}>Done</Button>{/if}
+	</section>
+	{#if readFailed}<p role="alert">Couldn’t mark these replies read. Try again.</p>{/if}
+	<div class="scroll" bind:this={scroll} onscroll={updateJump}>
+		{#if loading}<p>Loading…</p>
+		{:else if failed}<p role="alert">Couldn’t load these replies. <button type="button" onclick={() => void load()}>Try again</button></p>
+		{:else}
+			{#each messages as message (message.id)}
+				{#each message.chat_comments as comment (comment.cid)}
+					<section class="conversation">
+						<div class="meta"><span>{agentName} · {when(message.created_at)}</span><button type="button" onclick={() => jump(message, comment)}>Go to message ›</button></div>
+						<!-- AssistantMessage includes a leading space in the rendered text that comment offsets count. -->
+						<div class="message" use:highlight={comment}>{' '}{@html renderMarkdown(message.chat_visible_content ?? message.content)}</div>
+						<div class="thread"><div><strong>You</strong> · {when(comment.created_at)}</div><div class="text">{@html renderMarkdown(comment.note)}</div>
+							{#each comment.answers as answer}
+								<div data-unread-answer={answer.unread ? '' : undefined}><span class:agent={answer.author_kind === 'agent'}>{answer.author_kind === 'agent' ? agentName : 'You'}</span> · {when(answer.created_at)}</div>
+								<div class="text">{@html renderMarkdown(answer.text)}</div>
+							{/each}
+						</div>
+					</section>
+				{/each}
+			{/each}
+		{/if}
+	</div>
+	{#if jumpTarget}<div class="jump"><DocJumpControl count={jumpTarget.count} direction={jumpTarget.direction} label={`Go to ${jumpTarget.count} new replies ${jumpTarget.direction}`} onJump={() => jumpTarget?.element.scrollIntoView({ block: 'center', behavior: 'smooth' })} /></div>{/if}
+</div>
+
+<style>
+	.chat-pane { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; padding-top: var(--header-bottom); background: var(--bg-primary); }
+	.strip { position: absolute; inset: 0 var(--header-right-controls-inset, 0px) auto 0; height: var(--header-height); z-index: 11; overflow: hidden; }
+	.jump { position: absolute; bottom: var(--space-4); left: 50%; transform: translateX(-50%); z-index: 2; }
+	.bar { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: var(--text-subhead); }
+	.bar strong { color: var(--text-primary); } .who { display: flex; align-items: flex-start; gap: var(--space-2); } .who > div > div { margin-top: var(--space-1); }
+	.scroll { overflow-y: auto; padding: var(--space-5); font-size: var(--text-body); line-height: var(--lh-relaxed); }
+	.conversation + .conversation { margin-top: var(--space-6); }
+	.meta { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-tertiary); }
+	.meta button { border: 0; padding: 0; background: none; color: var(--accent-text); font: inherit; cursor: pointer; white-space: nowrap; }
+	.message { margin-top: var(--space-2); padding: var(--space-4); background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+	.message :global(> :first-child) { margin-top: 0; }
+	.message :global(> :last-child) { margin-bottom: 0; }
+	.message :global(.cm-comment-wrap) { background: var(--accent-subtle); color: inherit; border-bottom: var(--comment-rail-default) solid var(--accent); }
+	.thread { margin-top: var(--space-3); padding-left: var(--space-3); border-left: var(--comment-rail-default) solid var(--accent); }
+	.text { margin: var(--space-2) 0 var(--space-4); } .text:last-child { margin-bottom: 0; }
+	.agent { color: var(--accent-text); }
+	:global(.activity.phone) .bar { padding-inline: var(--space-3); }
+	:global(.activity.phone) .scroll { padding: var(--space-4) var(--space-3); font-size: var(--text-input); }
+</style>

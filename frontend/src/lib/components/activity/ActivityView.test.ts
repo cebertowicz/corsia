@@ -1404,6 +1404,23 @@ describe('Activity on a phone', () => {
 		expect(listSource).toMatch(/\.link::after \{\n[^}]*height: var\(--touch-target\)/);
 	});
 
+	it('counts a chat once and advances after Done', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 4, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat, activityDocument('next')];
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [] }));
+		alsoServe('/notifications/read', () => { notes = notes.filter(item => item.key !== chat.key); return respond(200, {}); });
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications, 2');
+		expect(rows()[0].textContent).toContain('Chat · 4 unread replies');
+		rows()[0].click(); await settle();
+		buttonNamed('Done')!.click(); await settle();
+		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications, 1');
+		expect(openRow()?.textContent).toContain('next');
+	});
+
 	it('keeps an opened document’s Done at least 44 px high on a phone, on the bar’s own line', () => {
 		expect(paneSource).toContain(':global(.activity.phone) .doc-done :global(.btn) { min-height: var(--touch-target); }');
 		expect(paneSource).toMatch(/<div class="doc-line">\s*<span class="doc-at"[^>]*>\{barLabel\}<\/span>\s*<span class="doc-done">/);

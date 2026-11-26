@@ -3,7 +3,7 @@
 	import type { ActivityQueueItem, ActivityRanker } from '$lib/api/activityQueue';
 	import { formatTime } from '$lib/time';
 	import {
-		EMPTY_LINE, KIND_LABEL, ageLabel, documentDetailOf, latestLabel, rankedAt, reviewOf, unreadRepliesLabel, type ActivityTab,
+		EMPTY_LINE, KIND_LABEL, ageLabel, chatDetailOf, documentDetailOf, latestLabel, rankedAt, reviewOf, unreadRepliesLabel, type ActivityTab,
 	} from './activityItems';
 
 	/**
@@ -181,12 +181,13 @@
 					{#each items as item, index (item.key)}
 						{@const open = item.key === openKey}
 						{@const doc = documentDetailOf(item)}
+						{@const chat = chatDetailOf(item)}
 						{@const replies = reviewOf(item)?.unread_replies ?? 0}
 						<li
 							class="row"
-							onpointerdown={doc ? (event) => swipeStart(event, item.key) : undefined}
-							onpointermove={doc ? swipeMove : undefined}
-							onpointerup={doc ? swipeEnd : undefined}
+							onpointerdown={doc || chat ? (event) => swipeStart(event, item.key) : undefined}
+							onpointermove={doc || chat ? swipeMove : undefined}
+							onpointerup={doc || chat ? swipeEnd : undefined}
 							onpointercancel={() => { swipe = null; }}
 						>
 							<button
@@ -202,6 +203,9 @@
 								{#if doc}
 									<strong class="one">{item.title}</strong>
 									<span class="sub">{item.key === allReadKey ? 'All replies read' : [unreadRepliesLabel(doc.unread), latestLabel(item.raised_at)].filter(Boolean).join(' · ')}</span>
+								{:else if chat}
+									<strong class="one">{item.title}</strong>
+									<span class="sub"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z" /></svg> Chat · {item.key === allReadKey ? 'All replies read' : `${unreadRepliesLabel(chat.unread)} · ${latestLabel(item.raised_at)}`}</span>
 								{:else}
 									<span class="itemtop">
 										<span class="rank">{index + 1}</span>
@@ -213,7 +217,7 @@
 									{/if}
 								{/if}
 							</button>
-							{#if doc && item.key !== allReadKey}
+							{#if (doc || chat) && item.key !== allReadKey}
 								<button type="button" class="dismiss" aria-label="Mark {item.title} read" title="Mark read" onclick={() => onDismiss(item.key)}>
 									<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
 								</button>

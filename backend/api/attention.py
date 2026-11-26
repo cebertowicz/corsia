@@ -224,9 +224,9 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     rows = [shape(row) for row in _queue_for(user_id, db=db, raw=True, annotated=annotated)]
     notifications: list[dict] = []
     if view == 'activity':
-        from doceditor.activity_reply_rows import document_rows
+        from doceditor import activity_chat_reply_rows, activity_reply_rows
         projected = public.activity_plan_rows(db, user_id, annotated)
-        documents = document_rows(db, user_id)
+        documents = activity_reply_rows.document_rows(db, user_id)
         rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
         # A reviewed document's replies ride on its review row; Approve ends the review and
         # the next read lists the document in Notifications.
@@ -236,7 +236,7 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
             if row['kind'] == 'review' and row['detail']['artifact_id'] in unread:
                 row['detail']['unread_replies'] = unread[row['detail']['artifact_id']]
                 reviewed.add(row['detail']['artifact_id'])
-        notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed]
+        notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed] + activity_chat_reply_rows.chat_rows(db, user_id)
     if project_id:
         rows = [r for r in rows if r['source'].get('project_id') == project_id]
         notifications = [r for r in notifications if r['source'].get('project_id') == project_id]

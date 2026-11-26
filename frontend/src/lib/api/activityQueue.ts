@@ -7,7 +7,7 @@ import type { AttentionRenderer, AttentionSource, DecisionDetail, HeldReplyDetai
  * comments, newest reply first, never ranked. Only Activity reads this view; the plan pane reads the default view,
  * whose rows and renderers are unchanged.
  */
-export type ActivityKind = 'review' | 'decision' | 'task' | 'document' | 'message';
+export type ActivityKind = 'review' | 'decision' | 'task' | 'document' | 'message' | 'chat';
 
 /** What the pane opens: a document (at a comment), or nothing (the kind's own panel). */
 export type ActivityOpen = { artifact_id: string; comment_id?: string } | null;
@@ -55,11 +55,17 @@ export interface ActivityDocumentDetail {
 	threads: { root_id: string; reply_id: string }[];
 }
 
+export interface ActivityChatDetail {
+	thread_id: string;
+	unread: number;
+	through: string;
+}
+
 export interface ActivityQueueItem {
 	/** Stable across reads; what the ranker writes. */
 	key: string;
 	external_id: string;
-	renderer: AttentionRenderer | 'review' | 'task' | 'document';
+	renderer: AttentionRenderer | 'review' | 'task' | 'document' | 'chat';
 	kind: ActivityKind;
 	title: string;
 	raised_at: string | null;
@@ -71,7 +77,8 @@ export interface ActivityQueueItem {
 		| HeldReplyDetail
 		| ActivityReviewDetail
 		| ActivityTaskDetail
-		| ActivityDocumentDetail;
+		| ActivityDocumentDetail
+		| ActivityChatDetail;
 }
 
 export interface ActivityQueue {
@@ -143,11 +150,11 @@ export async function fetchActivityQueue(projectId: string | null): Promise<Acti
  * Marks documents read up to the reply the person was shown: Done, a dismissed row, and Mark all read all use this one
  * call. It throws on any failure, and the caller shows its own line.
  */
-export async function markDocumentsRead(documents: { artifact_id: string; through_reply_id: string }[]): Promise<void> {
+export async function markDocumentsRead(documents: { artifact_id: string; through_reply_id: string }[], chats: { thread_id: string; through: string }[] = []): Promise<void> {
 	const res = await apiFetch('/api/attention/notifications/read', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ documents }),
+		body: JSON.stringify(chats.length ? { documents, chats } : { documents }),
 	});
 	if (!res.ok) throw new ActivityQueueError(res.status);
 }

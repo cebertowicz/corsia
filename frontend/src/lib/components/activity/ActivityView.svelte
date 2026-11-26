@@ -9,10 +9,12 @@
 	import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import { emitProductEvent } from '$lib/product_events';
+	import { activityChatJump } from '$lib/stores/activityChatJump';
+	import type { AttentionDestination } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
-	import { EMPTY_LINE, documentDetailOf, documentOf, followerOf, keepInPlace, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
+	import { EMPTY_LINE, chatDetailOf, documentDetailOf, documentOf, followerOf, keepInPlace, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
 
 	/**
 	 * Activity: two lists beside the pane the chat uses. Your tasks holds everything waiting on the person, ranked by
@@ -43,6 +45,7 @@
 
 	/** The item open in the pane; on a phone, the item marked in the list until it is tapped open. */
 	let openKey = $state<string | null>(null);
+	let paneClosed = false;
 	/** Phone only: the item is on screen instead of the list. */
 	let phoneOpen = $state(false);
 	/** The tab showing; the open item may belong to the other one. */
@@ -70,6 +73,7 @@
 		void projectId;
 		return untrack(() => {
 			openKey = null;
+			paneClosed = false;
 			phoneOpen = false;
 			tab = 'tasks';
 			seen = { tasks: [], notifications: [] };
@@ -95,8 +99,8 @@
 	/** The open item has left the server's lists and is kept where it was while the person stays on it. */
 	const openGone = $derived(!!kept && kept.key === openKey
 		&& ![...(store.queue?.items ?? []), ...(store.queue?.notifications.items ?? [])].some((item) => item.key === openKey));
-	/** A document the person still has open after its replies were read: its row reads "All replies read". */
-	const allReadKey = $derived(openGone && kept?.kind === 'document' ? kept.key : null);
+	/** A reply item still open after being read keeps its place and says all replies were read. */
+	const allReadKey = $derived(openGone && (kept?.kind === 'document' || kept?.kind === 'chat') ? kept.key : null);
 
 	$effect(() => { if (openItem) lastOpen = openItem; });
 
@@ -147,7 +151,7 @@
 					openKey = matches[0].key;
 					kept = null;
 				} else kept = lastOpen;
-			} else if (!openKey && lists[tab].length) openKey = lists[tab][0].key;
+			} else if (!openKey && !paneClosed && lists[tab].length) openKey = lists[tab][0].key;
 			else if (openKey && keys.includes(openKey)) kept = null;
 			const keptFor = (list: ActivityTab) => (kept && tabOf(kept) === list ? kept : null);
 			seen = {
@@ -175,6 +179,7 @@
 
 	/** Opening another row is moving on: a kept item is let go. */
 	function moveTo(key: string) {
+		paneClosed = false;
 		if (key !== openKey) {
 			advancing = null;
 			refusedKeep = false;
@@ -226,6 +231,7 @@
 	/** Keep an open item; otherwise select the destination's first row without leaving the phone list. */
 	async function switchTab(to: ActivityTab) {
 		if (to === tab) return;
+		paneClosed = false;
 		scrolls[tab] = listScroll?.scrollTop ?? 0;
 		tab = to;
 		const first = (to === 'tasks' ? tasks : notifications)[0];
@@ -245,11 +251,12 @@
 		markAllFailed = false;
 		const item = notifications.find((row) => row.key === key);
 		const read = item && through(item);
-		if (!read) return;
+		const chat = item && chatDetailOf(item);
+		if (!read && !chat) return;
 		const { [key]: _, ...rest } = dismissFailed;
 		dismissFailed = rest;
 		try {
-			await markDocumentsRead([read]);
+			await markDocumentsRead(read ? [read] : [], chat ? [{ thread_id: chat.thread_id, through: chat.through }] : []);
 		} catch {
 			dismissFailed = { ...dismissFailed, [key]: 'Couldn’t mark these replies read. Try again.' };
 			return;
@@ -263,12 +270,13 @@
 	async function markAllRead() {
 		if (markingAll) return;
 		const documents = notifications.map(through).filter((read) => read !== null);
-		if (!documents.length) return;
+		const chats = notifications.map(chatDetailOf).filter((chat) => chat !== null).map(({ thread_id, through }) => ({ thread_id, through }));
+		if (!documents.length && !chats.length) return;
 		markingAll = true;
 		markAllFailed = false;
 		try {
-			await markDocumentsRead(documents);
-			emitProductEvent('activity', 'marked_all_read', { count: documents.length });
+			await markDocumentsRead(documents, chats);
+			emitProductEvent('activity', 'marked_all_read', { count: documents.length + chats.length });
 			await store.reload();
 		} catch {
 			markAllFailed = true;
@@ -277,8 +285,9 @@
 		}
 	}
 
-	function openChat(threadId: string) {
-		void onSelectThread(threadId);
+	async function openChat(threadId: string, destination?: AttentionDestination) {
+		await onSelectThread(threadId);
+		if (destination) activityChatJump.set({ threadId, destination });
 	}
 
 	// A phone shows one screen at a time; the header gives the open item its way back to the list it came from.
@@ -329,14 +338,14 @@
 				onRetry={() => void store.reload()}
 			/>
 		</div>
-		<p class="nothere">Not gathered here: email you receive, and questions and replies inside chats. Open the chat to see them.</p>
+		<p class="nothere">Not gathered here: email you receive, and other messages and questions inside chats. Open the chat to see them.</p>
 	</section>
 	<section class="pane-col" bind:offsetWidth={paneWidth} aria-label={openItem ? openItem.title : 'Nothing open'}>
 		{#if openItem}
 			{#key paneInstance}
 				{@const mountedInstance = paneInstance}
 				{@const mountedKey = openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
+				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && allReadKey === null} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} onCloseChat={() => { paneClosed = true; openKey = null; kept = null; phoneOpen = false; paneInstance += 1; }} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
 			<div class="nothing">{EMPTY_LINE[tab]}</div>
