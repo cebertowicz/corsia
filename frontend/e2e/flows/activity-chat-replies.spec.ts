@@ -119,7 +119,17 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
     await expect(page.getByText('Chat answer', { exact: false })).toBeVisible();
     await expect(page.locator('.message .cm-comment-wrap').first()).toHaveText('Message');
     if (action === 'overflow') await expect(page.locator('.message .cm-comment-wrap').nth(1)).toHaveText('Second');
-    if (action === 'jump') await expect(page.getByText('Another answer.', { exact: false })).toBeVisible();
+    if (action === 'jump') {
+      await expect(page.getByText('Another answer.', { exact: false })).toBeVisible();
+      const answers = page.locator('.chat-pane .thread [data-unread-answer]');
+      await expect(answers).toHaveCount(2);
+      const gap = await answers.first().evaluate(header => {
+        const text = header.nextElementSibling!;
+        const nextHeader = text.nextElementSibling!;
+        return nextHeader.getBoundingClientRect().top - text.getBoundingClientRect().bottom;
+      });
+      expect(gap).toBe(14);
+    }
     await expect(page.getByRole('button', { name: `Close Reply agent ${width}` })).toBeVisible();
     if (action === 'overflow') await expect(page.locator('[data-doc-jump]')).toContainText('3 new');
     await capture(page, info.outputPath('chat-open.png'));
