@@ -292,6 +292,32 @@ describe('CommentThread', () => {
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r6'), { timeout: 3000 });
 	});
 
+	it('pressing Show earlier replies in a capped sheet holds the sheet at the height it has', () => {
+		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
+		render(thread({ replies }));
+		const panel = document.createElement('div');
+		panel.className = 'drawer-panel';
+		panel.style.setProperty('--drawer-text-cap', '700px');
+		panel.getBoundingClientRect = () => ({ height: 443, width: 393, top: 409, bottom: 852, left: 0, right: 393, x: 0, y: 409, toJSON: () => ({}) });
+		host.before(panel); panel.append(host);
+		button('.ct-earlier').click(); flushSync();
+		expect(host.textContent).toContain('reply 0');
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('443px');
+	});
+
+	it('the chat sheet does not hold its height when Show earlier replies is pressed', () => {
+		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
+		render(thread({ replies }), false, { chatSurface: true, opened: true });
+		const panel = document.createElement('div');
+		panel.className = 'drawer-panel';
+		panel.style.setProperty('--drawer-text-cap', '700px');
+		panel.getBoundingClientRect = () => ({ height: 443, width: 393, top: 409, bottom: 852, left: 0, right: 393, x: 0, y: 409, toJSON: () => ({}) });
+		host.before(panel); panel.append(host);
+		button('.ct-earlier').click(); flushSync();
+		expect(host.textContent).toContain('reply 0');
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('700px');
+	});
+
 	it('expanding earlier replies does not focus the thread', () => {
 		const onFocus = vi.fn();
 		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
