@@ -161,6 +161,8 @@
 	}
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
+		/* The 600px block gives the tools 12px side padding; from 37.5rem down they go back to 8px, so the row holds the same controls in the room a narrow canvas leaves. */
+		.document-status-row :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
 		/* The count and Resolved sit closer, so "N comments · N unread" and "Resolved · N" keep one row in a narrow header. */
 		.tool-send :global(.comment-status:has(+ .resolved-tool)) { padding-inline-end: var(--space-1); }
 		.tool-send .resolved-tool { padding-inline-start: var(--space-1); }
