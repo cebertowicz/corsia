@@ -30,6 +30,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On a touch screen, Comment is again the round accent button, centred at the bottom of the screen above the keyboard, with no bar behind it; a selected last line still never sits under it.
 - On a phone, the bar at the top of the screen is now evenly frosted over the chat as it scrolls beneath it; before, its lower part let the chat show through unblurred and ended in a hard line.
+- On a phone, the New chat button in the menu no longer carries an orange dot that could read as unread; the menu's rows and the button that opens the menu still mark what needs you.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
 - Phone header sits closer to the top of the screen when CORSIA is added to the Home Screen.
