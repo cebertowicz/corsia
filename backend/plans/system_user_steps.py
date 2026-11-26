@@ -151,6 +151,7 @@ def _drive_after_commit(connection, woken: list[str]) -> None:
     if not woken:
         return
     import infra.app_loop as app_loop
+    from infra.database import TransactionOwnershipError
     from infra.write_effects import after_commit
     from plans.notifications import drive_threads
 
@@ -160,7 +161,12 @@ def _drive_after_commit(connection, woken: list[str]) -> None:
         except app_loop.AppLoopUnavailable:
             log.debug("no application loop to drive %s; their wakes stay queued", woken)
 
-    after_commit(connection, submit)
+    try:
+        after_commit(connection, submit)
+    except TransactionOwnershipError:
+        # As plans_changed and the status drain do: the step's write stands and the wakes stay queued.
+        log.warning("woken agents %s not driven: the write's transaction is not owned here; "
+                    "their wakes stay queued", woken)
 
 
 def opened(db, plan_id: str, node_id: str) -> bool:

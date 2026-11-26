@@ -105,6 +105,30 @@ async def test_a_system_ended_step_starts_the_agents_turn(started, submitted, en
     assert queued <= _wake_ids(started[0])
 
 
+def test_a_step_ends_even_when_its_drive_cannot_be_scheduled(started, submitted, monkeypatch):
+    """A transaction this write doesn't own can't take the drive: the step still ends, its wake stays queued."""
+    import infra.write_effects as write_effects
+    from infra.database import TransactionOwnershipError
+
+    def not_owned(_connection, _effect):
+        raise TransactionOwnershipError("not owned here")
+
+    db = get_db()
+    try:
+        _plan_id, _mine, step = _waiting_step(db)
+        monkeypatch.setattr(write_effects, "after_commit", not_owned)
+        assert _off_loop(public.settle_user_step, step, evidence="The shared browser moved on to a new page.") is True
+        state = db.execute("SELECT state FROM plan_nodes WHERE id=?", (step,)).fetchone()[0]
+        queued = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:%' "
+            "AND delivery_state='queued'",
+        ).fetchone()[0]
+    finally:
+        db.close()
+    assert state == "accepted" and queued > 0
+    assert started == []
+
+
 def _off_loop(write, step: str, **word) -> bool:
     """The browser's own call shape: a dedicated connection on a worker thread."""
     db = get_db()
