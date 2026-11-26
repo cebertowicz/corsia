@@ -11,6 +11,8 @@ it('keeps the lifted row under the pointer when its container scrolls', () => {
 	const nodes = Array.from({ length: 5 }, (_, i) => node({ id: `n${i}`, user_actions: ['reorder'] }));
 	const component = mount(PlanTree, { target: host, props: withFolds({ nodes, onUserAction: vi.fn() }) }); flushSync();
 	const rows = [...host.querySelectorAll<HTMLElement>('.tree-row')];
+	// The tree's content scrolls with its rows.
+	host.querySelector<HTMLElement>('.plan-tree')!.getBoundingClientRect = () => new DOMRect(0, -host.scrollTop, 300, 200);
 	rows.forEach((row, i) => { row.getBoundingClientRect = vi.fn(() => new DOMRect(0, i * 40 - host.scrollTop, 300, 40)); });
 	vi.stubGlobal('DOMMatrixReadOnly', class { m42 = 0; });
 	const frames = new Map<number, FrameRequestCallback>(); let id = 0;
