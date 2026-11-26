@@ -40,7 +40,7 @@ export interface ReviewAnswer { verdict: ReviewVerdict; note: string | null; fee
 
 /** The server's typed refusal of an answer; `code` is what the bar branches on. */
 export class ReviewRefusal extends Error {
-	constructor(readonly code: string, message: string) { super(message); }
+	constructor(readonly code: string, message: string, readonly cause?: string) { super(message); }
 }
 
 // The review read has the review requests' own limit (REVIEW_REQUEST_TIMEOUT_MS), not the comment post's, which
@@ -69,7 +69,7 @@ export async function answerReview(artifactId: string, verdict: ReviewVerdict, n
 	}
 	const detail = await response.json().then((body) => body?.detail, () => undefined);
 	if (detail && typeof detail === 'object' && typeof detail.code === 'string') {
-		throw new ReviewRefusal(detail.code, String(detail.message ?? ''));
+		throw new ReviewRefusal(detail.code, String(detail.message ?? ''), typeof detail.cause === 'string' ? detail.cause : undefined);
 	}
 	throw new Error(`${response.status}`);
 }

@@ -154,12 +154,23 @@ def test_an_approval_of_text_the_server_no_longer_holds_is_stale_and_records_not
 
     assert refused.status_code == 409
     assert refused.json()["detail"]["code"] == "ask_stale"
+    assert refused.json()["detail"]["cause"] == "document_changed"
     assert _review(integration_client, artifact)["hold_ids"] == hold_ids
     db = get_db()
     try:
         assert db.execute("SELECT COUNT(*) FROM artifact_approvals WHERE artifact_id=?", (artifact,)).fetchone()[0] == 0
     finally:
         db.close()
+
+
+def test_document_approval_requires_hash(integration_client):
+    artifact = _asked_document(f"rb-no-hash-{uuid.uuid4().hex[:6]}")
+    hold_ids = _review(integration_client, artifact)["hold_ids"]
+    response = _clear(integration_client, artifact, verdict="approved", doc_sha256=None)
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "doc_hash_required"
+    assert "doc_sha256" in response.json()["detail"]["message"]
+    assert _review(integration_client, artifact)["hold_ids"] == hold_ids
 
 
 def test_a_second_answer_is_stale_and_clears_nothing(integration_client):

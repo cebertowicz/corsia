@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -237,7 +238,7 @@ for (const width of [1440, 393]) {
 		expect(read.ok()).toBeTruthy();
 		const holdIds = (await read.json()).hold_ids;
 		const queueRead = page.waitForResponse((r) => r.url().includes('/api/attention/queue') && r.url().includes('view=activity'));
-		const settled = await request.post(`/api/attention/${doc.artifactId}/clear`, { params: { token: TEST_TOKEN }, data: { token: TEST_TOKEN, outcome: 'answer', verdict: 'approved', hold_ids: holdIds } });
+		const settled = await request.post(`/api/attention/${doc.artifactId}/clear`, { params: { token: TEST_TOKEN }, data: { token: TEST_TOKEN, outcome: 'answer', verdict: 'approved', hold_ids: holdIds, doc_sha256: createHash('sha256').update(fs.readFileSync(doc.docPath)).digest('hex') } });
 		expect(settled.ok(), await settled.text()).toBeTruthy();
 		await queueRead;
 		await page.waitForTimeout(300);

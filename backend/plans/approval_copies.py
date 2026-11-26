@@ -88,25 +88,30 @@ def prepare_bar(artifact_id: str, expected_sha256: str | None, *, db) -> Prepare
     row = db.execute("SELECT type,path,external_id FROM artifact_identities WHERE id=?", (artifact_id,)).fetchone()
     if row is None or row["type"] != "document":
         return None
+    from doceditor.review_bar import AnswerRefused
+
+    if expected_sha256 is None:
+        raise AnswerRefused("doc_hash_required", "doc_sha256 is required to approve a document.")
     path = Path(row["path"] or row["external_id"])
     entry = find_live(path)
     raw = entry.live.snapshot[0].encode("utf-8") if entry is not None else path.read_bytes()
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
-        from doceditor.review_bar import AnswerRefused
-        raise AnswerRefused("ask_stale", "The document is still changing. Reload and try again.")
+        raise AnswerRefused("ask_stale", "The document is still changing. Try again in a moment.",
+                            cause="document_changed")
     return prepare(path, raw, _project_id(artifact_id, db), db=db)
 
 
-def prepare_save(path: Path, raw: bytes, project_id: str | None, *, db) -> PreparedCopies | None:
+def prepare_save(path: Path, raw: bytes, *, db) -> PreparedCopies | None:
     """Prepare a new version only when this document already has an approval."""
     from registry import service
+    from plans.approved_versions import _project_id
 
     artifact = service.resolve_file_identity(str(path), db=db)
     if artifact is None or db.execute(
         "SELECT 1 FROM artifact_approvals WHERE artifact_id=? LIMIT 1", (artifact["id"],)
     ).fetchone() is None:
         return None
-    return prepare(path, raw, project_id, db=db)
+    return prepare(path, raw, _project_id(artifact["id"], db), db=db)
 
 
 def prepare(path: Path, raw: bytes, project_id: str | None, *, db) -> PreparedCopies:

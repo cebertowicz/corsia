@@ -13,7 +13,7 @@ def write_with_approval(body, resolved, direct_user, expected_sha256, reports, s
     for attempt in range(2):
         db = get_db()
         try:
-            prepared = plans_public.prepare_save_approval(resolved, body.text.encode(), body.project_id, db=db) if direct_user else None
+            prepared = plans_public.prepare_save_approval(resolved, body.text.encode(), db=db) if direct_user else None
         finally:
             db.close()
         wrote = False

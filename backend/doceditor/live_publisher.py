@@ -75,7 +75,7 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
 
     for attempt in range(2):
         prepared = plans_public.prepare_save_approval(
-            publication.target_path(), text.encode("utf-8"), publication.project_id, db=db,
+            publication.target_path(), text.encode("utf-8"), db=db,
         ) if publication.direct_user else None
         recorded = [False]
         try:

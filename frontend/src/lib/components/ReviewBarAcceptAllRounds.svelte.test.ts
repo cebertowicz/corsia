@@ -74,11 +74,11 @@ describe('ReviewBar approval hash', () => {
 
 	it('returns to the ask and shows the server message when the document is still changing', async () => {
 		vi.stubGlobal('crypto', webcrypto);
-		api.answerReview.mockRejectedValue(new ReviewRefusal('ask_stale', 'The document is still changing. Reload and try again.'));
+		api.answerReview.mockRejectedValue(new ReviewRefusal('ask_stale', 'A changed document message', 'document_changed'));
 		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', documentText: () => 'Text\n' } });
 		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
 		button('Approve')!.click();
-		await vi.waitFor(() => expect(host.querySelector('.review-bar.ask')?.textContent).toContain('still changing'));
+		await vi.waitFor(() => expect(host.querySelector('.review-bar.ask')?.textContent).toContain('A changed document message'));
 		expect(button('Approve')).toBeTruthy();
 	});
 

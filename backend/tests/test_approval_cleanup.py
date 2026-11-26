@@ -32,8 +32,35 @@ def test_rollback_discard_preserves_copy_reused_by_another_approval(isolated_db,
         db.close()
 
 
+def test_cleanup_skips_image_scan_for_referenced_page(isolated_db, tmp_path):
+    from plans.approval_records import _delete_unreferenced
+
+    db = get_db()
+    try:
+        thread = make_session(db, prefix='approval-page')
+        path = tmp_path / 'page.md'
+        path.write_text('page')
+        artifact = models.register_artifact(integration='workspace', type='document', external_id=str(path), parent_thread_id=thread, title='Page', db=db)
+        with write_transaction(db, scope='page_ref'):
+            record_approval(db, artifact_id=artifact['id'], node_id=None, source='bar', source_id='h', doc_sha256='a' * 64, images=[])
+        statements = []
+        db.set_trace_callback(statements.append)
+        _delete_unreferenced(db, [{'sha256': 'a' * 64, 'copy_path': str(path)}])
+        assert path.exists()
+        assert not any('json_each' in sql for sql in statements)
+    finally:
+        db.close()
+
+
 def test_cleanup_waits_for_commit_and_preserves_shared_images(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+    from plans import approved_versions
+    original_copies = approved_versions._copies
+    copy_reads = []
+    def checked_copies(row, db):
+        copy_reads.append(db.in_transaction)
+        return original_copies(row, db)
+    monkeypatch.setattr(approved_versions, '_copies', checked_copies)
     db = get_db()
     try:
         thread = make_session(db, prefix="approval-cleanup")
@@ -64,5 +91,6 @@ def test_cleanup_waits_for_commit_and_preserves_shared_images(isolated_db, tmp_p
             assert page.exists() and frame.exists()
         assert not page.exists()
         assert frame.exists()
+        assert copy_reads == [False]
     finally:
         db.close()

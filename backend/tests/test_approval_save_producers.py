@@ -32,6 +32,22 @@ def test_plain_save_records_only_for_an_approved_document(ownership_scope):
         ("bar", hashlib.sha256(b"first").hexdigest()), ("save", hashlib.sha256(b"second").hexdigest())]
 
 
+def test_save_without_project_uses_artifact_owner_scope(ownership_scope):
+    from pathlib import Path
+    from plans.approved_versions import _copies
+
+    scope = ownership_scope
+    path = scope["root"] / ".threads" / scope["owner"] / "scope-save.md"
+    _write_document(DocumentSave(str(path), "first", project_id="project-alpha", thread_id=scope["owner"], create=True), path, direct_user=True)
+    artifact = service.find_file_identity(str(path), db=scope["db"])
+    record_approval(scope["db"], artifact_id=artifact["id"], node_id=None, source="bar", source_id="hold",
+                    doc_sha256=hashlib.sha256(b"first").hexdigest(), images=[])
+    scope["db"].commit()
+    _write_document(DocumentSave(str(path), "second", project_id=None, thread_id=scope["owner"]), path, direct_user=True)
+    row = scope["db"].execute("SELECT a.*, i.path, i.external_id FROM artifact_approvals a JOIN artifact_identities i ON i.id=a.artifact_id WHERE a.artifact_id=? AND a.source='save'", (artifact["id"],)).fetchone()
+    assert Path(_copies(row, scope["db"])[0]["copy_path"]).read_bytes() == b"second"
+
+
 def test_live_publication_records_only_for_an_approved_document(ownership_scope):
     scope = ownership_scope
     path = scope["root"] / ".threads" / scope["owner"] / "live-approval.md"

@@ -106,7 +106,7 @@ export function createReviewBarState() {
 				settledAsk = read?.ask_raised_at ?? null;
 				phase = 'stale';
 				await load();
-				if (error.message.includes('still changing')) { phase = 'ask'; failure = error.message; }
+				if (error.cause === 'document_changed') { phase = 'ask'; failure = error.message; }
 			} else if (error instanceof ReviewRefusal && error.code === 'note_required') {
 				noteDemanded = true; phase = 'noting'; failure = NOTE_NEEDED;
 			} else {

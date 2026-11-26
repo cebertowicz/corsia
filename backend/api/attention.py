@@ -345,7 +345,7 @@ async def post_clear(artifact_id: str, body: ClearBody):
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
         raise HTTPException(
-            status_code=status, detail={"code": exc.code, "message": str(exc)},
+            status_code=status, detail={"code": exc.code, "message": str(exc), **({"cause": exc.cause} if exc.cause else {})},
         ) from exc
     except attention.AttentionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -391,7 +391,7 @@ async def post_dispose(artifact_id: str, body: DisposeBody):
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
         raise HTTPException(
-            status_code=status, detail={"code": exc.code, "message": str(exc)},
+            status_code=status, detail={"code": exc.code, "message": str(exc), **({"cause": exc.cause} if exc.cause else {})},
         ) from exc
     except D.DispositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

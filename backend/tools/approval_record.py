@@ -40,7 +40,36 @@ class ApprovalRecordTool(Tool):
         names = ("integration", "type", "external_id")
         if any(not isinstance(kwargs.get(name), str) for name in names):
             return "integration, type, and external_id are required strings."
-        from plans.public import approved_versions_for_pr
+        from tools.delegation import _require_context
+        context = _require_context(kwargs)
+        if isinstance(context, str):
+            return context
+        thread_id, actor = context
 
-        result = await run_in_db(approved_versions_for_pr, *(kwargs[name] for name in names))
-        return json.dumps(result)
+        def read_scoped():
+            from infra.database import get_db
+            from plans.public import approved_versions_for_pr
+            from tools.document_comment_target import resolve_doc_target
+            from tools.filesystem_gate import resolve_path
+
+            db = get_db()
+            try:
+                result = approved_versions_for_pr(*(kwargs[name] for name in names), db=db)
+                visible = []
+                for artifact in result['artifacts']:
+                    try:
+                        resolve_doc_target(doc_path=None, artifact_id=artifact['artifact_id'],
+                                           actor_thread_id=thread_id, user_id=actor['user_id'],
+                                           db=db, allow_register=False)
+                        resolve_path(artifact['path'], thread_id=thread_id)
+                    except (PermissionError, ValueError):
+                        continue
+                    visible.append(artifact)
+                result['artifacts'] = visible
+                if result['tie_status'] == 'tied' and not visible:
+                    result['tie_status'] = 'none tied'
+                return result
+            finally:
+                db.close()
+
+        return json.dumps(await run_in_db(read_scoped))

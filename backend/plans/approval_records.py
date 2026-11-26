@@ -25,10 +25,12 @@ def record_approval(
             "JOIN artifact_identities i ON i.id=a.artifact_id "
             "WHERE a.artifact_id=? AND a.source='save'", (artifact_id,),
         ).fetchall()
-        copies = [copy for row in previous for copy in _copies(row, db) if copy.get("sha256")]
         db.execute("DELETE FROM artifact_approvals WHERE artifact_id=? AND source='save'", (artifact_id,))
-        if copies:
-            after_commit(db, lambda: _delete_unreferenced(db, copies))
+        if previous:
+            def clean_previous():
+                copies = [copy for row in previous for copy in _copies(row, db) if copy.get("sha256")]
+                _delete_unreferenced(db, copies)
+            after_commit(db, clean_previous)
     db.execute(
         "INSERT INTO artifact_approvals (artifact_id,node_id,source,source_id,doc_sha256,images,at) "
         "VALUES (?,?,?,?,?,?,?)",
@@ -49,11 +51,13 @@ def _delete_unreferenced(db: sqlite3.Connection, copies: list[dict]) -> None:
         for copy in copies:
             digest = copy["sha256"]
             page = db.execute("SELECT 1 FROM artifact_approvals WHERE doc_sha256=? LIMIT 1", (digest,)).fetchone()
+            if page is not None:
+                continue
             image = db.execute(
                 "SELECT 1 FROM artifact_approvals a, json_each(a.images) i "
                 "WHERE json_extract(i.value, '$.sha256')=? LIMIT 1", (digest,),
             ).fetchone()
-            if page is None and image is None:
+            if image is None:
                 Path(copy["copy_path"]).unlink(missing_ok=True)
 
 
