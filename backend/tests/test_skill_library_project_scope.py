@@ -1,4 +1,4 @@
-"""Whole-project installs by the lead agent, and the library on/off by who wrote the item."""
+"""Whole-project installs by the conductor, and the library on/off by who wrote the item."""
 
 from __future__ import annotations
 
@@ -193,19 +193,19 @@ def _tool_for(monkeypatch, workspace: Path, fetched: list[str]):
     return skill_library
 
 
-def test_only_the_lead_agent_changes_the_project_copy(project, monkeypatch):
+def test_only_the_conductor_changes_the_project_copy(project, monkeypatch):
     fetched: list[str] = []
     skill_library = _tool_for(monkeypatch, project.workspace, fetched)
 
     result = skill_library._execute("install", "member", {"project_id": project.id}, None, "shared-skill", False, None, "project")
 
-    assert result["error"] == "not_lead_agent"
-    assert "propose it to the lead agent" in result["message"]
+    assert result["error"] == "not_conductor"
+    assert "propose it to the conductor" in result["message"]
     assert fetched == []
     assert not (project.root / "skills" / "shared-skill").exists()
 
 
-def test_lead_agent_installs_once_for_every_agent_then_removes_it(project, monkeypatch):
+def test_conductor_installs_once_for_every_agent_then_removes_it(project, monkeypatch):
     from core.skill_resolution import resolve_effective_skills
     from infra.database import get_db
 
@@ -230,6 +230,9 @@ def test_lead_agent_installs_once_for_every_agent_then_removes_it(project, monke
         db.close()
     assert [(row[0], row[1]) for row in registered] == [(f"project/{project.id}/shared-skill", "lead")]
 
+    found = skill_library._execute("search", "member", {"project_id": project.id}, "shared", None, False)
+    assert [(row["name"], row["state"]) for row in found["results"]] == [("shared-skill", "installed")]
+
     member_install = skill_library._execute("install", "member", {"project_id": project.id}, None, "shared-skill", False)
     assert member_install["error"] == "already_installed"
     assert "project scope" in member_install["message"]
@@ -244,3 +247,62 @@ def test_lead_agent_installs_once_for_every_agent_then_removes_it(project, monke
     removed = skill_library._execute("remove", "lead", {"project_id": project.id}, None, "shared-skill", False, None, "project")
     assert removed == {"outcome": "removed", "name": "shared-skill"}
     assert not (project.root / "skills" / "shared-skill").exists()
+
+
+def _project_copy_owner(external_id: str) -> list[str]:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return [row[0] for row in db.execute(
+            "SELECT registrations.parent_thread_id FROM artifact_identities AS identities "
+            "JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id "
+            "WHERE identities.external_id=? AND registrations.relationship_state IN ('owner-active', 'owner-pinned')",
+            (external_id,),
+        ).fetchall()]
+    finally:
+        db.close()
+
+
+def test_a_new_conductor_takes_over_the_project_copy_and_its_notices(project, monkeypatch):
+    from infra.conductor import set_scope_coordinator
+    from infra.database import get_db
+
+    fetched: list[str] = []
+    skill_library = _tool_for(monkeypatch, project.workspace, fetched)
+    assert skill_library._execute("install", "lead", {"project_id": project.id}, None, "shared-skill", False, None, "project")["outcome"] == "installed"
+    external_id = f"project/{project.id}/shared-skill"
+
+    db = get_db()
+    try:
+        set_scope_coordinator(project.id, "member", db=db)
+        db.commit()
+    finally:
+        db.close()
+
+    from library import producer
+
+    producer._follow_conductors(producer._installed_rows())
+    assert _project_copy_owner(external_id) == ["member"]
+    assert skill_library._execute("remove", "lead", {"project_id": project.id}, None, "shared-skill", False, None, "project")["error"] == "not_conductor"
+    removed = skill_library._execute("remove", "member", {"project_id": project.id}, None, "shared-skill", False, None, "project")
+    assert removed == {"outcome": "removed", "name": "shared-skill"}
+    assert _project_copy_owner(external_id) == []
+
+
+def test_the_new_conductor_owns_the_copy_once_it_changes_it(project, monkeypatch):
+    from infra.conductor import set_scope_coordinator
+    from infra.database import get_db
+
+    fetched: list[str] = []
+    skill_library = _tool_for(monkeypatch, project.workspace, fetched)
+    assert skill_library._execute("install", "lead", {"project_id": project.id}, None, "shared-skill", False, None, "project")["outcome"] == "installed"
+    db = get_db()
+    try:
+        set_scope_coordinator(project.id, "member", db=db)
+        db.commit()
+    finally:
+        db.close()
+
+    assert skill_library._execute("update", "member", {"project_id": project.id}, None, "shared-skill", False, None, "project")["outcome"] == "up_to_date"
+    assert _project_copy_owner(f"project/{project.id}/shared-skill") == ["member"]

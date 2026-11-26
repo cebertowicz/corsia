@@ -57,19 +57,22 @@ def effective(owner_id: str, project_id: str | None, workspace: Path, db, scope:
     return resolution.included, local
 
 
-def installed_library_origins(owner_id: str, db) -> dict[str, dict[str, Any]]:
-    """Read this owner's installed library copies with one indexed relation query."""
+def installed_library_origins(owner_id: str, db, project_id: str | None = None) -> dict[str, dict[str, Any]]:
+    """Read the library copies this owner loads: its own, and its project's, which its own copy of a name overrides."""
     from events.connectors.library import INSTALLED_SKILL_TYPE, LIBRARY_INTEGRATION
     from library.installed import read_origin
 
+    project_prefix = f"project/{project_id}/" if project_id else "\0"
     rows = db.execute(
         """SELECT identities.external_id, identities.path
              FROM artifact_identities AS identities
              JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
              WHERE identities.integration=? AND identities.type=? AND identities.state='active'
-               AND registrations.parent_thread_id=?
-               AND registrations.relationship_state IN ('owner-active', 'owner-pinned')""",
-        (LIBRARY_INTEGRATION, INSTALLED_SKILL_TYPE, owner_id),
+               AND (registrations.parent_thread_id=? OR substr(identities.external_id, 1, ?)=?)
+               AND registrations.relationship_state IN ('owner-active', 'owner-pinned')
+             ORDER BY substr(identities.external_id, 1, ?)=? DESC""",
+        (LIBRARY_INTEGRATION, INSTALLED_SKILL_TYPE, owner_id,
+         len(project_prefix), project_prefix, len(project_prefix), project_prefix),
     ).fetchall()
     origins: dict[str, dict[str, Any]] = {}
     for row in rows:

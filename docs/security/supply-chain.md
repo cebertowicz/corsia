@@ -51,7 +51,7 @@ Changing what the desktop app runs on its next update takes both the updater sig
 
 The skill library is a separate public repository. Agents can use the items the library's index records as written by CORSIA at any time; items anyone else shared stay off until you agree to use community improvements in your profile (`backend/tools/skill_library.py`, `backend/library/items.py`). CORSIA downloads the public index at startup and daily, and no setting stops that (`backend/library/producer.py`). For the items an agent can use:
 
-- Agents can search it and install a skill into their own chat without asking you. A project's lead agent can also install one for every agent in the project.
+- Agents can search it and install a skill into their own chat without asking you. A project's conductor can also install one for every agent in the project.
 - The library's own items are read from its `main` branch, and each file is checked against the SHA-256 recorded in the library's index, which is read from `main` too. The check catches a file that doesn't match the index, not a change by someone who can push to the library. Items the index lists from other repositories are pinned to a Git commit (`backend/library/items.py`, `backend/library/index.py`).
 - Agents are told of newer versions, but CORSIA never updates an installed copy on its own.
 - Contributions from outside the project aren't open yet, and no review checklist for library items is published.

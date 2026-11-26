@@ -25,17 +25,17 @@ def community_refusal(item: dict[str, Any], community: bool) -> dict[str, str] |
     return {"error": "community_off", "message": COMMUNITY_OFF.format(name=item["name"])}
 
 
-def project_refusal(owner_id: str, project_id: str | None, db) -> dict[str, str] | None:
-    """Only the project's lead agent installs, updates or removes a copy every agent in it sees."""
-    from infra.conductor import get_scope_coordinator
+def project_refusal(thread_id: str, project_id: str | None, db) -> dict[str, str] | None:
+    """Only the project's conductor installs, updates or removes a copy every agent in it sees (the fetch_pack rule)."""
+    from library.pack_fetch import is_scope_coordinator
 
     if not project_id:
         return {"error": "no_project", "message": "scope project needs a thread in a project; use the default scope"}
-    if get_scope_coordinator(project_id, db=db) != owner_id:
+    if not is_scope_coordinator(thread_id, project_id, db):
         return {
-            "error": "not_lead_agent",
-            "message": "only the project's lead agent changes a skill for the whole project; install it for yourself with the default scope, "
-            "or propose it to the lead agent with the skill name and why",
+            "error": "not_conductor",
+            "message": "only the project's conductor changes a skill for the whole project; install it for yourself with the default scope, "
+            "or propose it to the conductor with the skill name and why",
         }
     return None
 

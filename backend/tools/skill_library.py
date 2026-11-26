@@ -103,25 +103,34 @@ def _execute(
                               else _search(query, owner_id, project_id, db, thread_id=thread_id, community=community))
                 elif not isinstance(name, str) or not name.strip():
                     result = _error("name_required", f"{action} requires name from a search result or your skills index")
-                elif where == "project" and (refusal := _project_refusal(owner_id, project_id, db)) is not None:
+                elif where == "project" and (refusal := _project_refusal(thread_id, project_id, db)) is not None:
                     result = refusal
-                elif action == "fetch_pack":
-                    result = _fetch_pack(name, thread_id, project_id, db, community=community)
-                elif action == "install":
-                    result = _install(name, owner_id, project_id, db, community=community, scope=where)
-                elif action == "update":
-                    result = _update(
-                        name, owner_id, project_id, db, discard_local_edits, local_edits_digest,
-                        community=community, scope=where,
-                    )
                 else:
-                    result = _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_digest, scope=where)
+                    result = _change(action, name, thread_id, owner_id, project_id, db, discard_local_edits,
+                                     local_edits_digest, community=community, scope=where)
         except _LibraryIndexError as error:
             result = _error(error.code, error.message)
         _emit_action(action, thread_id, result)
         return result
     finally:
         db.close()
+
+
+def _change(
+    action: str, name: str, thread_id: str, owner_id: str, project_id: str | None, db, discard: bool,
+    local_edits_digest: object, *, community: bool, scope: str,
+) -> dict[str, Any]:
+    if scope == "project":
+        from library.installed import follow_conductor
+
+        follow_conductor(str(project_id), db)
+    if action == "fetch_pack":
+        return _fetch_pack(name, thread_id, project_id, db, community=community)
+    if action == "install":
+        return _install(name, owner_id, project_id, db, community=community, scope=scope)
+    if action == "update":
+        return _update(name, owner_id, project_id, db, discard, local_edits_digest, community=community, scope=scope)
+    return _remove(name, owner_id, project_id, db, discard, local_edits_digest, scope=scope)
 
 
 def _state(item: dict[str, Any], origins: dict[str, dict[str, Any]]) -> str:
@@ -144,7 +153,7 @@ def _search(
     from library.pack_fetch import fetched_pack_versions, pack_state
 
     index = _index()
-    origins = _installed_library_origins(owner_id, db)
+    origins = _installed_library_origins(owner_id, db, project_id)
     available = index.items if community else tuple(item for item in index.items if corsia_authored(item))
     items = search_items(available, query)
     pack_versions = fetched_pack_versions(thread_id or owner_id, db) if any(item.get("kind") == "pack" for item in items) else {}

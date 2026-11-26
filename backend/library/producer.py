@@ -59,7 +59,9 @@ def produce_once() -> int:
     index = load_index()  # Exactly one cache-backed raw-main read per producer refresh.
     items = {item["name"]: item for item in index.items}
     delivered = 0
-    for row in _installed_rows():
+    rows = _installed_rows()
+    _follow_conductors(rows)
+    for row in rows:
         payload = _notice_payload(row, items, index.generations)
         if payload is None:
             continue
@@ -74,6 +76,24 @@ def produce_once() -> int:
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
+
+
+def _follow_conductors(rows: list[dict[str, Any]]) -> None:
+    """Notices route to a copy's owner, so a project's copies go to its current conductor first."""
+    from infra.database import get_db, write_transaction
+    from library.installed import follow_conductor
+
+    projects = {row["external_id"].split("/")[1] for row in rows
+                if isinstance(row.get("external_id"), str) and row["external_id"].startswith("project/")}
+    if not projects:
+        return
+    db = get_db()
+    try:
+        for project_id in sorted(projects):
+            with write_transaction(db, scope="library_follow_conductor") as conn:
+                follow_conductor(project_id, conn)
+    finally:
+        db.close()
 
 
 def _offered(payload: dict[str, Any], items: dict[str, dict[str, Any]], use_community_improvements: bool) -> bool:
