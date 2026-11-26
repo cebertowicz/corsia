@@ -42,12 +42,32 @@ HYPERCORN_VERSION = version("hypercorn")
 
 # Restart, try again: the close code an explicit stop gives an open WebSocket.
 _SERVICE_RESTART = 1012
-# How long a stop lets the 1012 close frames reach their sockets before it
-# disconnects every transport. A peer that is not reading never gets it.
+# How long a stop waits for the 1012 close frames to be written before it
+# disconnects every transport. It is the one wait in a stop that a peer
+# controls, and a stop runs on every backend shutdown and every Devices-off,
+# whose callers have no timeout of their own.
+# Basis: a reading peer has its close frame 3-5 ms after the stop starts, and a
+# whole stop took at most 10.3 ms over 50 start/stop cycles (measured on h2 and
+# http/1.1), so this is about 100x the measured delivery, which is margin for a
+# busy event loop. A close write only waits longer when the peer's TLS write
+# buffer is over its high-water mark (512 KiB in asyncio), because it stopped
+# reading.
+# Too low: such a peer, or one on a stalled loop, gets an abort instead of 1012.
+# The web client reconnects the same way after either, so a person sees no
+# difference. Too high: every stop with a peer that stopped reading waits this
+# long before it disconnects anyone.
 _WEBSOCKET_CLOSE_SECONDS = 0.5
-# How long a disconnected connection's handler gets to finish by itself once
-# its requests are joined, before it is cancelled.
-_CONNECTION_END_SECONDS = 0.5
+# WebSocket keepalive, matching uvicorn's defaults (ping every 20 s, give up 20 s
+# after an unanswered ping), which the other listeners still use. Hypercorn has no
+# pong timeout: a connection that sends nothing for _SILENT_PEER_SECONDS is closed
+# instead. A live peer's pongs reset that clock at least every
+# _WEBSOCKET_PING_SECONDS, so a peer that has vanished, or is alive but not
+# answering, is cleaned up 20-40 s after the last byte it sent. The cut applies to
+# every connection: on http/1.1, one that sends nothing for 40 s is closed even
+# with a request still running. On h2, a WebSocket's pongs and the client's
+# WINDOW_UPDATE frames keep the shared connection alive.
+_WEBSOCKET_PING_SECONDS = 20
+_SILENT_PEER_SECONDS = 40
 
 
 _access_log = logging.getLogger("uvicorn.access")
@@ -87,14 +107,40 @@ class _Requests:
             elif message["type"] == "websocket.close":
                 self.websockets.pop(task, None)
 
+        request_read = False
+
+        async def tracked_receive() -> dict:
+            nonlocal request_read
+            message = await receive()
+            if message["type"] != "http.request" or not message.get("more_body", False):
+                request_read = True
+            return message
+
         async def logged_send(message: dict) -> None:
             """Send, and write the response's access line the way the main server writes its own."""
+            if (message["type"] == "http.response.body" and not message.get("more_body", False)
+                    and not request_read and scope.get("http_version") == "1.1"):
+                # Hypercorn closes an http/1.1 connection whose response ends before
+                # its request body has arrived, so a client that already sent its
+                # next request on it gets no response. Uvicorn, which this replaces,
+                # sent the response at once, discarded the rest of the body as it
+                # arrived, with no cap, and kept the connection; so does this. The
+                # response's bytes go out now and only its end waits for the body,
+                # which is read and dropped one message at a time. read_timeout ends
+                # a sender that stalls, and a stop cancels this like any request.
+                if message.get("body"):
+                    await send({"type": "http.response.body", "body": message["body"], "more_body": True})
+                while not request_read:
+                    await tracked_receive()
+                message = {"type": "http.response.body", "body": b"", "more_body": False}
             await send(message)
             if message["type"] == "http.response.start":
                 _log_access(scope, message["status"])
 
         try:
-            await self.app(scope, receive, tracked_send if scope.get("type") == "websocket" else logged_send)
+            await self.app(
+                scope, tracked_receive, tracked_send if scope.get("type") == "websocket" else logged_send,
+            )
         finally:
             self.tasks.discard(task)
             self.websockets.pop(task, None)
@@ -135,6 +181,8 @@ class DevicesServer:
         # Uvicorn, which this replaces, never closed a connection for its request count; HTTP/2 would
         # otherwise send GOAWAY after 1000 requests and move a long-lived page to a new connection.
         self.config.keep_alive_max_requests = sys.maxsize
+        self.config.websocket_ping_interval = _WEBSOCKET_PING_SECONDS
+        self.config.read_timeout = _SILENT_PEER_SECONDS
         # An existing logger is used as is, so Hypercorn installs no handler of its own.
         self.config.errorlog = logging.getLogger("hypercorn.error")
         self.started = False
@@ -208,9 +256,7 @@ class DevicesServer:
         # connection while a request is still finishing would have that
         # request schedule work in a task group that is shutting down.
         await _cancel_and_join(self._requests.tasks)
-        connections = list(self._connections)
-        _, unfinished = await asyncio.wait(connections, timeout=_CONNECTION_END_SECONDS) if connections else ((), ())
-        await _cancel_and_join(unfinished)
+        await _cancel_and_join(self._connections)
         # Server.wait_closed() is not awaited: from Python 3.12 it also waits
         # for connections still in their TLS handshake, which an explicit stop
         # does not wait for (connected() refuses them once they finish).

@@ -34,6 +34,14 @@ class _StubbornStream:
         await asyncio.Event().wait()
 
 
+class _RefuseUnread:
+    """Answers before reading the request body, as the Devices gate refuses a request."""
+
+    async def __call__(self, scope, receive, send):
+        await send({"type": "http.response.start", "status": 403, "headers": [(b"content-length", b"11")]})
+        await send({"type": "http.response.body", "body": b'{"no":true}'})
+
+
 def _app() -> FastAPI:
     app = FastAPI()
 
@@ -49,6 +57,9 @@ def _app() -> FastAPI:
         return StreamingResponse(stream(), media_type="text/event-stream")
 
     app.router.routes.append(Route("/stubborn", _StubbornStream()))
+    app.router.routes.append(Route("/refuse", _RefuseUnread(), methods=["POST"]))
+
+    app.state.ws_ended = []
 
     @app.websocket("/ws")
     async def echo(ws: WebSocket):
@@ -59,6 +70,9 @@ def _app() -> FastAPI:
                 await ws.send_text("echo:" + await ws.receive_text())
         except WebSocketDisconnect:
             pass
+        finally:
+            # Where the real app runs _cleanup_ws and disconnect_documents.
+            app.state.ws_ended.append(time.monotonic())
 
     return app
 
@@ -220,8 +234,6 @@ async def test_an_explicit_stop_ends_open_streams_and_websockets_promptly_and_a_
 ):
     """SSE on h2 (one that never reads http.disconnect) and on http/1.1, a WebSocket on each, and a TLS peer
     that never reads or answers a close_notify."""
-    # The last-resort cancel would hide a stop that waits on a peer or on a stream; take it out of reach.
-    monkeypatch.setattr(devices_server, "_CONNECTION_END_SECONDS", 30)
     base = await _started(listener)
     port = listener.port
     h2_client = httpx.AsyncClient(http2=True, verify=_tls(), trust_env=False, timeout=5)
@@ -271,6 +283,123 @@ async def test_an_explicit_stop_ends_open_streams_and_websockets_promptly_and_a_
     finally:
         await listener.stop()
     assert again.status_code == 200
+
+
+# Larger than one Hypercorn read (64 KiB), so the unread body arrives over several reads.
+_UPLOAD = 300 * 1024
+
+
+async def _refused_upload(port: int):
+    """An http/1.1 POST to /refuse that has sent its headers and the first 100 KiB of a 300 KiB body."""
+    reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=_tls(["http/1.1"]))
+    writer.write(b"POST /refuse HTTP/1.1\r\nhost: devices\r\ncontent-length: %d\r\n\r\n" % _UPLOAD)
+    writer.write(b"x" * (100 * 1024))
+    await writer.drain()
+    return reader, writer
+
+
+async def _read_until(reader, done) -> bytes:
+    received = b""
+    try:
+        while not done(received):
+            chunk = await asyncio.wait_for(reader.read(65536), 5)
+            if not chunk:
+                break
+            received += chunk
+    except (ConnectionError, ssl.SSLError, TimeoutError):
+        pass
+    return received
+
+
+async def test_an_http11_response_sent_before_its_request_body_arrived_keeps_the_connection(listener):
+    """Uvicorn, which this replaces, answered at once, dropped the rest of the body and served the next request."""
+    await _started(listener)
+    try:
+        reader, writer = await _refused_upload(listener.port)
+        # The whole refusal arrives while most of the body is still unsent.
+        refusal = await _read_until(reader, lambda got: got.endswith(b'{"no":true}'))
+        writer.write(b"x" * (_UPLOAD - 100 * 1024) + b"GET /ping HTTP/1.1\r\nhost: devices\r\n\r\n")
+        await writer.drain()
+        after = await _read_until(reader, lambda got: got.endswith(b'{"ok":true}'))
+        writer.transport.abort()
+    finally:
+        await listener.stop()
+
+    assert refusal.startswith(b"HTTP/1.1 403") and refusal.endswith(b'{"no":true}'), refusal
+    assert after.startswith(b"HTTP/1.1 200") and after.endswith(b'{"ok":true}'), after
+
+
+async def test_a_stop_does_not_wait_for_a_refused_upload_still_arriving(listener):
+    await _started(listener)
+    reader, writer = await _refused_upload(listener.port)
+    try:
+        refusal = await _read_until(reader, lambda got: got.endswith(b'{"no":true}'))
+        assert refusal.startswith(b"HTTP/1.1 403"), refusal
+        assert listener.server is not None and listener.server._requests.tasks
+        requests = list(listener.server._requests.tasks)
+
+        started = time.monotonic()
+        await listener.stop()
+        elapsed = time.monotonic() - started
+    finally:
+        writer.transport.abort()
+
+    assert elapsed < 2, elapsed
+    assert all(task.done() for task in requests)
+
+
+async def _upgraded_silent_peer(port: int):
+    """A WebSocket peer over http/1.1 that completes the upgrade and then never sends another byte, so it
+    answers no ping: a phone that left the network without a FIN, from the server's side."""
+    reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=_tls(["http/1.1"]))
+    writer.write(
+        b"GET /ws HTTP/1.1\r\nhost: devices\r\nupgrade: websocket\r\nconnection: Upgrade\r\n"
+        b"sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+    )
+    await writer.drain()
+    head = await reader.readuntil(b"\r\n\r\n")
+    assert head.startswith(b"HTTP/1.1 101"), head
+    return writer
+
+
+async def test_a_websocket_peer_that_goes_silent_is_disconnected_within_the_keepalive_bound(
+    listener, monkeypatch,
+):
+    """Uvicorn, which this replaces, pinged every 20 s and gave up 20 s later; a silent peer must still end."""
+    monkeypatch.setattr(devices_server, "_WEBSOCKET_PING_SECONDS", 0.2)
+    monkeypatch.setattr(devices_server, "_SILENT_PEER_SECONDS", 0.6)
+    await _started(listener)
+    ended = listener.app.state.ws_ended
+    try:
+        writer = await _upgraded_silent_peer(listener.port)
+        went_silent = time.monotonic()
+        for _ in range(500):
+            if ended:
+                break
+            await asyncio.sleep(0.01)
+        writer.transport.abort()
+    finally:
+        await listener.stop()
+
+    assert ended, "the app never learned its silent peer was gone"
+    assert 0.5 <= ended[0] - went_silent < 3, ended[0] - went_silent
+
+
+async def test_a_websocket_peer_that_answers_pings_stays_connected_past_the_silent_bound(listener, monkeypatch):
+    monkeypatch.setattr(devices_server, "_WEBSOCKET_PING_SECONDS", 0.2)
+    monkeypatch.setattr(devices_server, "_SILENT_PEER_SECONDS", 0.6)
+    await _started(listener)
+    try:
+        # The client sends no pings of its own: only its pongs to the server's pings keep it alive.
+        async with websockets.connect(
+            f"wss://127.0.0.1:{listener.port}/ws", ssl=_tls(), ping_interval=None,
+        ) as peer:
+            assert await peer.recv() == "ready"
+            await asyncio.sleep(1.5)
+            await peer.send("hi")
+            assert await peer.recv() == "echo:hi"
+    finally:
+        await listener.stop()
 
 
 async def test_requests_are_access_logged_like_the_main_servers_with_protocol_and_no_query(listener, caplog):
