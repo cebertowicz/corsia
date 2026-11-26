@@ -114,7 +114,9 @@ def draft_rows(db, user_id: str, *, subjects: bool = True) -> list[dict]:
         fallback = (artifact['title'] if artifact else None) or 'email draft'
         raw = _read_bytes(row['path']) if subjects else None
         missing = subjects and raw is None
-        title = _subject(raw, fallback) if subjects else fallback
+        if missing and not artifact_id:
+            continue
+        title = ('email draft' if missing else _subject(raw, fallback)) if subjects else fallback
         result.append({
             'key': f"draft:{row['id']}", 'external_id': row['id'],
             'renderer': 'draft', 'kind': 'draft', 'title': clip_title(f'Send: {title}'),

@@ -153,6 +153,24 @@ async def test_missing_unregistered_draft_is_omitted_without_affecting_other_row
 
 
 @pytest.mark.asyncio
+async def test_unreadable_unregistered_draft_is_omitted(mail, monkeypatch):
+    from infra import activity_draft_rows
+    from tools.action_drafts import create_draft
+
+    (mail.workspace / 'unreadable-email.md').write_bytes(b'Subject: Unreadable\n')
+    saved = create_draft(mail.thread, 'email', 'unreadable-email.md', b'Subject: Unreadable\n')
+    owner = _owner(mail.thread)['id']
+    monkeypatch.setattr(activity_draft_rows, '_read_bytes', lambda path: None)
+    db = get_db()
+    try:
+        assert not any(row['external_id'] == saved['draft_id'] for row in draft_rows(db, owner))
+        # Ranking does not read content; it retains metadata-only membership.
+        assert any(row['external_id'] == saved['draft_id'] for row in draft_rows(db, owner, subjects=False))
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_missing_registered_draft_remains_and_can_be_discarded(mail, monkeypatch):
     from api import email_drafts
     from registry import reconcile
@@ -170,9 +188,7 @@ async def test_missing_registered_draft_remains_and_can_be_discarded(mail, monke
         assert row['detail']['missing'] is True
         assert row['open'] is None
         assert row['detail']['artifact_id'] == artifact_id
-        assert row['title'] == 'Send: ' + db.execute(
-            'SELECT title FROM artifact_identities WHERE id=?', (artifact_id,),
-        ).fetchone()['title']
+        assert row['title'] == 'Send: email draft'
         assert draft_rows(db, owner['id'], subjects=False)[0]['external_id'] == saved['draft_id']
 
         async def tell(*args, **kwargs):

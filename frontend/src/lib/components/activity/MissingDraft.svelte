@@ -18,9 +18,9 @@
 	}
 </script>
 
-<p role="status">File no longer exists.</p>
+<p role="status">This draft’s file no longer exists, so it can’t be sent.</p>
 {#if artifactId}<Button size="sm" variant="secondary" loading={sending} disabled={offline} onclick={() => void discard()}>Don’t send</Button>{/if}
-{#if failure}<p role="alert">Couldn’t discard this draft. Try again.</p>{/if}
+{#if failure}<p role="alert">Couldn’t remove this draft. Try again.</p>{/if}
 
 <style>
 	p { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-relaxed); }

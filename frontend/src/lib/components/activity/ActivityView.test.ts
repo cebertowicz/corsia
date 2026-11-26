@@ -126,10 +126,29 @@ describe('Activity list', () => {
 		});
 		render(); await settle();
 		expect(rows()[0].textContent).toContain('File no longer exists');
-		expect(pane().textContent).toContain('File no longer exists');
+		expect(pane().textContent).toContain('This draft’s file no longer exists, so it can’t be sent.');
 		expect(buttonNamed('Send now')).toBeUndefined();
 		buttonNamed('Don’t send')!.click();
 		await vi.waitFor(() => expect(rows()).toHaveLength(0));
+	});
+
+	it('shows a failure when a missing draft cannot be removed', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => respond(500, {}));
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(alert()).toContain('Couldn’t remove this draft. Try again.'));
+		expect(rows()).toHaveLength(1);
+	});
+
+	it('opens an untitled missing draft chat with a natural label', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			source: activitySource('Untitled thread', 'thread-1'),
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		const onSelectThread = render(); await settle();
+		buttonNamed('Open the chat')!.click();
+		expect(onSelectThread).toHaveBeenCalledWith('thread-1');
 	});
 
 	it('keeps a draft’s unread document open when its review settles', async () => {
@@ -181,7 +200,7 @@ describe('Activity list', () => {
 		buttonNamed('Don’t send')!.click();
 		await vi.waitFor(() => expect(failedReads).toBeGreaterThan(0));
 		await settle();
-		expect(pane().textContent).toContain('File no longer exists.');
+		expect(pane().textContent).toContain('This draft’s file no longer exists, so it can’t be sent.');
 		expect(rows()).toHaveLength(1);
 	});
 
