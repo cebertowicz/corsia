@@ -58,7 +58,7 @@ def main() -> None:
         sock = loopback_socket()
         return sock, sock.getsockname()[1], None
 
-    # Only address selection changes: real TLS/Uvicorn/DNS-SD owners remain.
+    # Only address selection changes: real TLS/Hypercorn/DNS-SD owners remain.
     devices_listener._prebind = prebind
 
     @asynccontextmanager

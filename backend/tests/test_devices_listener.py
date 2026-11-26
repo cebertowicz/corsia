@@ -305,12 +305,13 @@ async def test_devices_app_authentication_uses_the_db_boundary(monkeypatch):
     assert calls == [(devices_listener.authenticate, ("token",))]
 
 
-def test_devices_server_override_is_pinned_to_the_verified_uvicorn_version():
-    assert devices_server.uvicorn.__version__ == devices_server._PINNED_UVICORN_VERSION, (
-        "DevicesServer._wait_tasks_to_complete overrides a private Uvicorn method and only "
-        f"runs on {devices_server._PINNED_UVICORN_VERSION}; Uvicorn is now "
-        f"{devices_server.uvicorn.__version__}. Re-verify the override against the new "
-        "release (SSE shutdown, transport abort, task join), then update _PINNED_UVICORN_VERSION."
+def test_devices_server_is_pinned_to_the_verified_hypercorn_version():
+    assert devices_server.HYPERCORN_VERSION == devices_server._PINNED_HYPERCORN_VERSION, (
+        "DevicesServer hands each connection to Hypercorn's TCPServer and WorkerContext, which are not "
+        f"public API, and was verified only on {devices_server._PINNED_HYPERCORN_VERSION}; Hypercorn is now "
+        f"{devices_server.HYPERCORN_VERSION}. Re-verify against the new release (h2 and http/1.1 serving, "
+        "SSE end and WebSocket 1012 on stop, task join, WebSocket over HTTP/2), then update "
+        "_PINNED_HYPERCORN_VERSION."
     )
 
 
@@ -538,10 +539,10 @@ def test_devices_listener_accepts_a_person_session_in_the_first_frame(devices_so
 @pytest.mark.asyncio
 async def test_listener_start_hands_the_announcement_its_change_callback(monkeypatch):
     class _Server:
-        def __init__(self, _config):
+        def __init__(self, _app, **_kwargs):
             self.should_exit = False
 
-        async def serve(self, sockets):
+        async def serve(self):
             return None
 
     class _Socket:
@@ -575,10 +576,13 @@ class _ClosableSocket:
 
 def _use_fake_server(monkeypatch, serve, sock):
     class _Server:
-        def __init__(self, _config):
+        def __init__(self, _app, **_kwargs):
             self.should_exit = False
 
-        async def serve(self, sockets):
+        def request_exit(self):
+            self.should_exit = True
+
+        async def serve(self):
             await serve(self)
 
     monkeypatch.setattr(devices_listener, "ensure_host_key", lambda: ("key", "cert"))
