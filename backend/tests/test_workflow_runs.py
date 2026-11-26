@@ -356,23 +356,45 @@ async def test_the_run_checks_read_named_nodes_only_on_a_plan_the_caller_may_rea
         db.close()
 
 
-async def test_a_coordinator_top_level_run_on_a_lane_plan_is_refused_like_any_other(
+async def test_a_coordinator_adds_plain_work_to_a_lane_plan_and_the_lane_starts_the_run(
     isolated_db, tmp_path, monkeypatch,
 ):
-    """A coordinator may add only top-level work to a lane's plan; a run there would be a
-    fragment, so it adds a plain phase or task and the lane starts the run under it."""
-    from plans.boundary import PlanActor
+    """A coordinator may add only top-level work to a lane's plan, and a run there would be
+    a fragment: both its run attempts are refused, its plain phase is taken, and the lane
+    starts the run under that phase. Driven through the plan tool as each thread."""
+    from infra.corsia_agent import set_corsia_agent
 
     run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
-    conductor = PlanActor(mk_session("conductor-for-runs"), "user-1", None)
+    lane_work = await run.work()
+    conductor = mk_session("conductor-for-runs")
     db = get_db()
     try:
-        with pytest.raises(PlanInputError, match="plain phase"):
-            validate_run_parent(
-                {"kind": "phase", "workflow_ref": "ship"}, db, run.plan_id, conductor,
-            )
-        validate_run_parent(
-            {"kind": "phase", "title": "Release notes"}, db, run.plan_id, conductor,
+        assert set_corsia_agent(conductor, db=db)
+        accept_thread_input(
+            conductor, role="user", content="Give the lane the release notes.", intent="apply_now",
+            message_id=f"workflow-run-authority-{conductor}", db=db,
         )
+        identity = open_turn(db, conductor, turn_id="conductor-turn")
     finally:
         db.close()
+
+    async def conductor_add(params: dict):
+        text = await execute_as(
+            run.registry, identity, conductor, "plan_update",
+            {"plan_id": run.plan_id, "mutation_id": f"c-{next(_IDS)}",
+             "operation": "add", "params": {"acceptance_criteria": "Notes shipped", **params}},
+        )
+        return text if text.startswith("Error") else json.loads(text)
+
+    top_level_run = await conductor_add({"kind": "phase", "title": "Run ship", "workflow_ref": "ship"})
+    assert top_level_run.endswith(RUN_PARENT_REFUSAL)
+    nested_run = await conductor_add(
+        {"kind": "phase", "title": "Run ship", "workflow_ref": "ship", "parent_id": lane_work},
+    )
+    assert nested_run.startswith("Error") and not nested_run.endswith(RUN_PARENT_REFUSAL)
+    assert run.rows("SELECT id FROM plan_nodes WHERE workflow_ref='ship'") == []
+
+    handed = (await conductor_add({"kind": "phase", "title": "Changelog"}))["node"]
+    assert handed["parent_id"] is None and handed["workflow_ref"] is None
+    started = (await run.start("ship", parent_id=handed["id"]))["node"]
+    assert started["parent_id"] == handed["id"]
