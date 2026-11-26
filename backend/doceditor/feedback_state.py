@@ -241,8 +241,12 @@ def unread_comment_rows(
     scope: tuple[str, ...] = (artifact_id,) if isinstance(artifact_id, str) else (artifact_id or ())
     scoped = artifact_id is not None
     within = f"IN ({','.join('?' * len(scope))})"
+    # The thread's watermark joins first so the read test runs before the per-comment ones: most
+    # comments are read, and SQLite tests a term at the first join that has all its tables.
     sql = f"""FROM doc_comments item
            JOIN doc_comments root ON root.id=COALESCE(item.parent_id, item.id)
+           LEFT JOIN doc_comment_thread_views thread_view
+             ON thread_view.user_id=? AND thread_view.root_id=root.id
            LEFT JOIN (
                SELECT DISTINCT parent_id FROM doc_comments
                WHERE author_kind='user' AND parent_id IS NOT NULL
@@ -253,8 +257,6 @@ def unread_comment_rows(
                WHERE author_kind='user' {f"AND artifact_id {within}" if scoped else ""}
                GROUP BY artifact_id
            ) first_person ON first_person.artifact_id=item.artifact_id
-           LEFT JOIN doc_comment_thread_views thread_view
-             ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE item.author_kind<>'user'
              {f"AND item.artifact_id {within} AND root.artifact_id {within}" if scoped else ""}
              AND ((item.parent_id IS NOT NULL
@@ -262,9 +264,9 @@ def unread_comment_rows(
                   OR ({_eligible_top_level('item')})
                   OR {directed_sql('item')})
              AND {past_watermark_sql('item', 'thread_view')}"""
-    # Text order: touched, first_person, thread_view, the scope, the two person-tag tests, then the directed set.
+    # Text order: thread_view, touched, first_person, the scope, the two person-tag tests, then the directed set.
     directed = (USER_AUTHOR_ID, user_id)
-    return sql, ((*scope, *scope, user_id, *scope, *scope, user_id, user_id, *directed) if scoped
+    return sql, ((user_id, *scope, *scope, *scope, *scope, user_id, user_id, *directed) if scoped
                  else (user_id, user_id, user_id, *directed))
 
 

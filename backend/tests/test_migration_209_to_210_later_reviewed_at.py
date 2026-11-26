@@ -17,7 +17,7 @@ def _plans_table(conn: sqlite3.Connection) -> None:
 
 
 def test_step_is_registered_and_current() -> None:
-    assert SCHEMA_VERSION == 210
+    assert SCHEMA_VERSION == 211
     assert MIGRATIONS[209] is migrate_209_to_210
 
 
