@@ -9,6 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A comment on an image, or on any text, that the server refuses now says why in its box in a document that is not live, as it already did in a live one, and a refused image comment names the image by its folder and file name instead of a path on your computer.
+- A comment that fails to post is now logged with how it was refused (its status and short code, never its words), so a failed comment can be traced to its cause.
 - A host access request now shows its details as plain labelled sections, with Reject as a button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
@@ -35,7 +36,6 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Revoke host access in its drawer is now a plain button; before, it was red.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
-- A comment that fails to post is now logged with how it was refused (its status and short code, never its words), so a failed comment can be traced to its cause.
 - The Send button on comment replies is the app's standard button and is easier to tap on a phone.
 - Email drafts have Send now and Don’t send buttons: one click sends the draft exactly as you see it.
 - Agents send a saved email, invite or text draft themselves, without waiting for a reply from you in chat; a draft changed since it was saved still isn't sent.
