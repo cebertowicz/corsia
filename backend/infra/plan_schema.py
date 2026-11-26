@@ -58,6 +58,10 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         -- time), or null when none is armed. Written and read by
         -- plans.later_review; also armed once by migration 195->196.
         later_review_at TEXT,
+        -- When the last review wake for this plan's Later pile was sent (ISO
+        -- time), or null when the pile has never been reviewed. Written and
+        -- read by plans.later_review; added by migration 209->210.
+        later_reviewed_at TEXT,
         UNIQUE(owner_kind, owner_id)
     );
     CREATE INDEX IF NOT EXISTS idx_plans_parent ON plans(parent_plan_id);

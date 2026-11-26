@@ -431,5 +431,6 @@ Source: `backend/infra/plan_schema.py`.
 | `top_folded_closed` | INTEGER | No | Yes | 0 | — |
 | `settled_events` | INTEGER | No | Yes | 0 | — |
 | `later_review_at` | TEXT | No | No | — | — |
+| `later_reviewed_at` | TEXT | No | No | — | — |
 
 Indexes: `idx_plans_parent` (parent_plan_id), `sqlite_autoindex_plans_1` (id, unique), `sqlite_autoindex_plans_2` (owner_kind, owner_id, unique).

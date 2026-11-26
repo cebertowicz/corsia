@@ -79,6 +79,282 @@ def _days_from_now(value: str, *, clock: str) -> float:
     return (late - early).total_seconds() / 86400
 
 
+def _fail_task(db, node_id):
+    service.transition_node(node_id, "failed", db=db)
+
+
+def test_last_above_line_settlement_brings_review_due_once(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    _fail_task(db, top.id)
+    now = service._now()
+    assert _review_at(db, plan.id) <= now
+    assert [r["id"] for r in later_review.due(db, now)] == [plan.id]
+    _sweep(db, now)
+    assert len(_wakes(db)) == 1
+    assert later_review.due(db, now) == []
+    _sweep(db, now)
+    assert len(_wakes(db)) == 1
+
+
+def _reviewed_once(db, plan_id: str) -> str:
+    """Empty the top over a pile, send its early review, and return the review time."""
+    top = task(db, plan_id, "Current work")
+    db.commit()
+    _fail_task(db, top.id)
+    now = service._now()
+    _sweep(db, now)
+    assert len(_wakes(db)) == 1
+    assert db.execute(
+        "SELECT later_reviewed_at FROM plans WHERE id=?", (plan_id,)
+    ).fetchone()["later_reviewed_at"] == now
+    return now
+
+
+def _top_empties_again(db, plan_id: str) -> list:
+    top = task(db, plan_id, "Next work")
+    db.commit()
+    _fail_task(db, top.id)
+    return [r["id"] for r in later_review.due(db, service._now())]
+
+
+def test_no_repeat_review_on_an_unchanged_pile(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    _reviewed_once(db, plan.id)
+    assert _top_empties_again(db, plan.id) == []
+
+
+def test_repeat_review_when_a_task_is_added_below_the_cut(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    _reviewed_once(db, plan.id)
+    _below_cut(db, plan.id, "New someday")
+    assert _top_empties_again(db, plan.id) == [plan.id]
+
+
+def test_repeat_review_when_a_task_is_moved_below_the_cut(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    moved = _below_cut(db, plan.id, "Created before the review")
+    _reviewed_once(db, plan.id)
+    for later, reason in ((False, None), (True, "Not now")):
+        plan_update(db, plan.id, "edit", {
+            "node_id": moved["id"], "expected_revision": revision(db, moved["id"]),
+            "later": later, **({"reason": reason} if reason else {}),
+        })
+    db.commit()
+    assert _top_empties_again(db, plan.id) == [plan.id]
+
+
+def test_repeat_review_when_priorities_change_and_not_before(db, tmp_path, monkeypatch):
+    import os
+    from infra import config
+
+    monkeypatch.setattr(config, "WORKSPACE", str(tmp_path))
+    priorities = tmp_path / ".threads" / "owner" / "context" / "PRIORITIES.md"
+    priorities.parent.mkdir(parents=True)
+    priorities.write_text("1. Ship the release\n")
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    reviewed = datetime.fromisoformat(_reviewed_once(db, plan.id)).timestamp()
+    os.utime(priorities, (reviewed - 3600, reviewed - 3600))
+    assert _top_empties_again(db, plan.id) == []
+    os.utime(priorities, (reviewed + 60, reviewed + 60))
+    assert _top_empties_again(db, plan.id) == [plan.id]
+
+
+def test_project_priorities_written_after_review_count_as_changed(db, tmp_path, monkeypatch):
+    import os
+    from core.workspace_layout import resolve_project_root
+    from infra import config
+    from infra.platform_paths import WorkspaceSelection
+
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr(config, "WORKSPACE", str(workspace))
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
+        workspace_id="test-workspace", root=workspace.resolve(), name="Test workspace",
+    ))
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj','Proj','t','t')")
+    db.execute("UPDATE threads SET project_id='proj' WHERE id='owner'")
+    db.commit()
+    (workspace / "projects" / "proj").mkdir(parents=True)
+    assert db.execute("SELECT project_id FROM threads WHERE id='owner'").fetchone()["project_id"] == "proj"
+    root = resolve_project_root(workspace, "proj", db=db)
+    assert root is not None and root != workspace.resolve()
+    priorities = root / "context" / "PRIORITIES.md"
+    priorities.parent.mkdir(parents=True)
+    priorities.write_text("1. Ship the release\n")
+    reviewed = service._now()
+    at = datetime.fromisoformat(reviewed).timestamp()
+    os.utime(priorities, (at - 3600, at - 3600))
+    assert later_review._priorities_written_after(db, "owner", reviewed) is False
+    os.utime(priorities, (at + 60, at + 60))
+    assert later_review._priorities_written_after(db, "owner", reviewed) is True
+
+
+def test_unreadable_priorities_file_is_logged_not_dropped(db, tmp_path, monkeypatch, caplog):
+    import errno
+    from pathlib import Path
+
+    path = tmp_path / "PRIORITIES.md"
+    monkeypatch.setattr(
+        "registry.priorities_ownership.agent_priorities_files",
+        lambda thread_id, *, workspace, db: [path],
+    )
+    real_stat = Path.stat
+
+    def denied(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(errno.EACCES, "denied", str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    with caplog.at_level("WARNING", logger="plans.later_review"):
+        assert later_review._priorities_written_after(db, "owner", service._now()) is False
+    assert any("PRIORITIES.md" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="plans.later_review"):
+        monkeypatch.setattr(Path, "stat", real_stat)
+        assert later_review._priorities_written_after(db, "owner", service._now()) is False
+    assert caplog.records == []
+
+
+def test_weekly_review_is_sent_on_an_unchanged_pile(db):
+    plan = owner_plan(db)
+    _below_cut(db, plan.id, "Someday")
+    _reviewed_once(db, plan.id)
+    _arm(db, plan.id, DUE)
+    _sweep(db)
+    assert len(_wakes(db)) == 2
+
+
+def test_review_is_armed_only_after_commit_and_not_after_rollback(db):
+    from infra.database import write_transaction
+    import pytest
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    before = _review_at(db, plan.id)
+    with pytest.raises(RuntimeError, match="rollback"):
+        with write_transaction(db, scope="test_later_rollback"):
+            _fail_task(db, top.id)
+            assert _review_at(db, plan.id) == before
+            raise RuntimeError("rollback")
+    assert _review_at(db, plan.id) == before
+    assert row(db, top.id)["state"] == "pending"
+    with write_transaction(db, scope="test_later_commit"):
+        _fail_task(db, top.id)
+        assert _review_at(db, plan.id) == before
+    assert _review_at(db, plan.id) <= service._now()
+
+
+def test_unscoped_settlement_keeps_weekly_review(db, caplog):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    before = _review_at(db, plan.id)
+    db.execute("UPDATE plans SET later_review_at=later_review_at WHERE id=?", (plan.id,))
+    with caplog.at_level("WARNING", logger="plans.later_review"):
+        _fail_task(db, top.id)
+    db.commit()
+    assert row(db, top.id)["state"] == "failed"
+    assert _review_at(db, plan.id) == before
+    assert any(
+        record.levelname == "WARNING" and plan.id in record.getMessage()
+        and "early Later review not scheduled" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_settlement_with_no_later_does_not_arm(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) is None
+    assert later_review.due(db, service._now()) == []
+
+
+def test_settlement_with_another_above_line_task_keeps_time(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    task(db, plan.id, "Other work")
+    _below_cut(db, plan.id, "Someday")
+    before = _review_at(db, plan.id)
+    db.commit()
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) == before
+
+
+def test_settlement_of_later_task_does_not_rearm(db):
+    plan = owner_plan(db)
+    one = _below_cut(db, plan.id, "Someday")
+    _below_cut(db, plan.id, "Other someday")
+    before = _review_at(db, plan.id)
+    _fail_task(db, one["id"])
+    assert _review_at(db, plan.id) == before
+
+
+def test_last_settlement_paused_plan_is_not_due(db):
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    lifecycle.transition(plan.id, "paused", expected_revision=service._plan_row(db, plan.id)["revision"],
+                         actor_id="user", provenance="test", db=db)
+    db.commit()
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) <= service._now()
+    assert later_review.due(db, service._now()) == []
+
+
+def test_last_settlement_scope_plan_does_not_arm(db):
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','Project','t','t')")
+    db.commit()
+    plan = service.ensure_plan("project_scope", "p", db=db)
+    top = task(db, plan.id, "Current work")
+    task(db, plan.id, "Someday", later=True)
+    _fail_task(db, top.id)
+    assert _review_at(db, plan.id) is None
+
+
+def test_accept_with_follow_up_keeps_review_time(db):
+    from plans import mutations
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    service.transition_node(top.id, "active", db=db)
+    mutations.request_review(top.id, evidence="verified", actor_id="owner", db=db)
+    before = _review_at(db, plan.id)
+    _, follow_up = service.accept_with_follow_up(
+        top.id, title="Follow up", acceptance_criteria="Done", verification_result="passed",
+        verified_by="test", db=db,
+    )
+    assert not row(db, follow_up.id)["later"]
+    assert _review_at(db, plan.id) == before
+
+
+def test_send_back_revision_keeps_review_time(db):
+    from plans import rejection
+
+    plan = owner_plan(db)
+    top = task(db, plan.id, "Current work")
+    _below_cut(db, plan.id, "Someday")
+    db.commit()
+    service.transition_node(top.id, "active", db=db)
+    service.transition_node(top.id, "review_requested", db=db)
+    before = _review_at(db, plan.id)
+    _, revision_node, _ = rejection.reject_submission(top.id, feedback="Revise", db=db)
+    assert not row(db, revision_node.id)["later"]
+    assert _review_at(db, plan.id) == before
+
+
 # --- the arm ---------------------------------------------------------------
 
 

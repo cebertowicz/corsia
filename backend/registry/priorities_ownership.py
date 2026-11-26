@@ -23,6 +23,29 @@ def is_priorities_path(path: Path, *, workspace: Path, db) -> bool:
     return _at_priorities_location(path, root, project=project_id is not None)
 
 
+def agent_priorities_files(thread_id: str, *, workspace: Path, db) -> list[Path]:
+    """The priorities files that rank one agent's work, whether or not they exist yet.
+
+    The agent's own file and, for an agent in a project, the project's file: the
+    same two locations ``is_priorities_path`` recognizes. A thread whose scope
+    root cannot be resolved, or whose own destination is unsafe, has none there.
+    """
+    from core.workspace_layout import resolve_project_root, resolve_thread_root, resolve_workspace_root
+
+    row = db.execute("SELECT project_id FROM threads WHERE id=?", (str(thread_id),)).fetchone()
+    project_id = row["project_id"] if row is not None else None
+    root = (resolve_project_root(workspace, str(project_id), db=db) if project_id
+            else resolve_workspace_root(workspace))
+    if root is None:
+        return []
+    files = [root / "context" / "PRIORITIES.md"] if project_id else []
+    try:
+        files.append(resolve_thread_root(root, str(thread_id)) / "context" / "PRIORITIES.md")
+    except (ValueError, OSError):
+        pass
+    return files
+
+
 def register_new_person_owner(identity, existing, metadata, title, description, retention, *, db) -> None:
     """Give a newly registered priorities file its person owner in the registration transaction."""
     if existing is not None or identity.zone != "workspace" or Path(identity.canonical).name != "PRIORITIES.md":
