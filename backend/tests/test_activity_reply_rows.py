@@ -1,8 +1,9 @@
 import json
+import os
 import sqlite3
 
 from infra.schema import SCHEMA_SQL
-from doceditor.activity_reply_rows import document_rows
+from doceditor.activity_reply_rows import document_rows, resolve_row_titles
 
 
 def test_document_unread_and_ownership():
@@ -90,16 +91,17 @@ def test_one_row_per_document_with_the_newest_reply():
     assert row['detail']['threads'] == [{'root_id': 'second', 'reply_id': 'd1-5'}, {'root_id': 'rootd1', 'reply_id': 'd14'}]
 
 
-def test_count_is_the_panes_unread_set_and_a_document_without_a_reply_has_no_row():
+def test_count_is_the_replies_to_the_person_and_a_document_without_a_reply_has_no_row():
     db = _doc_db()
     _doc(db, 'd1', 'one')
-    # An agent's top-level comment directed at the person is unread too, and counted on the row.
+    # An agent's top-level comment directed at the person is unread in the document, but it is not a
+    # reply to the person's comment: the row counts the one reply only (the approved count).
     db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('top','d1','agent','agent','one','look','u1','3','3')")
     _doc(db, 'd2', 'one', replies=())
     db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('top2','d2','agent','agent','one','look','u1','3','3')")
     from doceditor.feedback_state import unread_item_ids
-    assert unread_item_ids(db, 'u1', ['d1', 'd2']) == {'d1', 'd2'}
-    assert [(r['detail']['artifact_id'], r['detail']['unread']) for r in document_rows(db, 'u1')] == [('d1', 2)]
+    assert unread_item_ids(db, 'u1', ['d1', 'd2']) == {'d1', 'd2'}  # the document surface still counts every unread item
+    assert [(r['detail']['artifact_id'], r['detail']['unread']) for r in document_rows(db, 'u1')] == [('d1', 1)]
 
 
 def test_released_owner_has_no_reply_row():
@@ -127,3 +129,88 @@ def test_long_document_title_is_clipped_and_untitled_agent_reads_an_agent():
     [row] = document_rows(db, 'u1')
     assert row['title'].startswith('word') and len(row['title']) <= 160
     assert row['detail']['agents'] == ['An agent']
+
+
+def _file_doc(db, tmp_path, *, title: str, file_name: str, body: str) -> None:
+    """One registered document, its registry title and path as a plain file registration stores them."""
+    document = tmp_path / file_name
+    document.write_text(body)
+    db.execute("INSERT INTO artifact_identities(id,integration,type,external_id,title,path,created_at,updated_at) VALUES ('d1','local','document',?,?,?,'0','0')", (file_name, title, str(document)))
+    db.execute("INSERT INTO artifact_registrations(id,artifact_id,parent_thread_id,created_at,updated_at) VALUES ('rd1','d1','one','0','0')")
+    db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,body,created_at,updated_at) VALUES ('rootd1','d1','person','user','question','1','1')")
+    db.execute("INSERT INTO doc_comments(id,artifact_id,parent_id,author,author_kind,author_thread_id,body,created_at,updated_at) VALUES ('d12','d1','rootd1','agent','agent','one','answer','2','2')")
+
+
+def test_file_named_row_uses_the_documents_first_heading(tmp_path):
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
+              body='# Onboarding: who owns which file\n\nWho owns what.\n')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)  # what the queue does to the page it returns
+    [row] = rows
+    assert row['title'] == 'Onboarding: who owns which file'
+
+
+def test_a_registry_title_that_is_not_the_file_name_beats_the_heading(tmp_path):
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding guide', file_name='onboarding-notes.md',
+              body='# Written title\n\nText.\n')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'Onboarding guide'
+
+
+def test_the_file_name_is_kept_when_the_document_has_no_title(tmp_path):
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
+              body='Just text, no heading.\n')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'Onboarding notes.md'
+    # A file that went away keeps its registry name too; nothing is invented.
+    db.execute("UPDATE artifact_identities SET title='Gone.md', path=? WHERE id='d1'", (str(tmp_path / 'Gone.md'),))
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'Gone.md'
+
+
+def test_the_title_read_happens_only_for_the_returned_page(tmp_path):
+    """Building rows reads no file; only the page the queue resolves pays the head read."""
+    db = _doc_db()
+    _file_doc(db, tmp_path, title='Onboarding notes.md', file_name='Onboarding notes.md',
+              body='# Onboarding: who owns which file\n\nWho owns what.\n')
+    [row] = document_rows(db, 'u1')
+    assert row['title'] == 'Onboarding notes.md'  # built, unread
+    assert row['detail']['heading_path']
+    resolve_row_titles([row])  # the page cut kept this row
+    assert row['title'] == 'Onboarding: who owns which file'
+    assert 'heading_path' not in row['detail']  # internal mark consumed, never sent on
+
+
+def test_a_fifo_never_blocks_the_title_read(tmp_path):
+    from doceditor.activity_reply_rows import _first_heading
+    fifo = tmp_path / 'pipe.md'
+    os.mkfifo(fifo)
+    assert _first_heading(str(fifo)) == ''
+
+
+def test_a_long_or_repeated_space_file_name_still_resolves_to_the_heading(tmp_path):
+    """The registry-file-name match compares raw values, so a name that clip or _flat would
+    alter still recognises itself and gets its heading (the naming rule holds for it too)."""
+    db = _doc_db()
+    long_name = f"{'section' * 30}.md"  # longer than the clip length: its clipped title differs
+    _file_doc(db, tmp_path, title=long_name, file_name=long_name, body='# The long one\n\nText.\n')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'The long one'
+    spaced = 'Onboarding  notes.md'  # repeated space: _flat would collapse it
+    (tmp_path / spaced).write_text('# Spaced title\n\nText.\n')
+    db.execute("UPDATE artifact_identities SET title=?, path=? WHERE id='d1'", (spaced, str(tmp_path / spaced)))
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'Spaced title'

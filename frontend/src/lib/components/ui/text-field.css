@@ -15,7 +15,8 @@
 	padding: 0 var(--space-4);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
-	background: transparent;
+	/* The colour only: a select keeps Field's chevron, which is its background image. */
+	background-color: transparent;
 	box-shadow: none;
 	color: var(--text-primary);
 	font-family: inherit;
@@ -71,7 +72,7 @@ textarea.text-field,
 
 /* On a pane: the composer chip's glass fill. Inside a card or sheet there is none (glass-in-glass, shadow-in-card). */
 .field.chip .c :is(input, select, textarea) {
-	background: var(--glass-thin);
+	background-color: var(--glass-thin);
 	box-shadow: var(--glass-rim), var(--shadow-chip);
 }
 

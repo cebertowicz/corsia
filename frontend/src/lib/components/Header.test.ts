@@ -357,10 +357,10 @@ describe('Header glass layers', () => {
 		expect(phoneLayer).not.toMatch(/gradient/);
 	});
 
-	it('keeps the phone header box at its height, with the row below the iOS top-edge band', () => {
+	it('sizes the phone header and positions the row using the safe-area inset', () => {
 		const phoneHeader = rule(phone, '.shell-header');
 		expect(phoneHeader).toContain('height: var(--header-bottom);');
-		expect(phoneHeader).toContain('padding-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));');
+		expect(phoneHeader).toContain('padding-top: max(8px, calc(var(--safe-top) - 28px));');
 	});
 
 	it('makes the phone header solid when transparency is reduced', () => {

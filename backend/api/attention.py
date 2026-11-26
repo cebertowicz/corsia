@@ -266,8 +266,12 @@ def _queue_response(user_id: str, project_id: str | None, view: str | None):
         response = {'current': rows[0] if rows else None, 'count': len(rows),
                     'items': rows[:QUEUE_ITEMS_CAP], 'ranker': ranker}
         if view == 'activity':
-            response['notifications'] = {'count': len(notifications),
-                                         'items': notifications[:QUEUE_ITEMS_CAP]}
+            page = notifications[:QUEUE_ITEMS_CAP]
+            # Document rows take the page's cut before their title read: a poll pays at
+            # most one bounded head read per returned row, none for rows the cut drops.
+            from doceditor.activity_reply_rows import resolve_row_titles
+            resolve_row_titles(page)
+            response['notifications'] = {'count': len(notifications), 'items': page}
         return response
     finally:
         db.close()
