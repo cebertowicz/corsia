@@ -33,10 +33,7 @@ def decision_causes(node_plans, *, db) -> dict[str, list[dict]]:
         if row["state"] in decision_projection.OPEN_STATES
     ]
     open_rows = [row for row in rows if row["source_node_id"] in sources]
-    unraised = [
-        row for row in rows
-        if row["state"] != decision_projection.RAISED and row["node_id"] in sources
-    ]
+    unraised = [row for row in rows if awaits_raise(row["state"]) and row["node_id"] in sources]
     if not open_rows and not unraised:
         return {}
     causes: dict[str, list[dict]] = {}
@@ -71,6 +68,13 @@ def decision_causes(node_plans, *, db) -> dict[str, list[dict]]:
     return causes
 
 
+def awaits_raise(state: str) -> bool:
+    """Whether an open decision's own review task still waits on the agent tier's raise."""
+    from plans import decision_projection
+
+    return state in decision_projection.OPEN_STATES and state != decision_projection.RAISED
+
+
 def not_raised_cause(row: dict, *, reviewer: str) -> dict:
     """The wait on a decision's own review task before its raise (#3401).
 
@@ -80,7 +84,7 @@ def not_raised_cause(row: dict, *, reviewer: str) -> dict:
     return {
         "kind": "waiting",
         "reason_key": DECISION_NOT_RAISED,
-        "reason": "Not raised yet: the agent reviews it first",
+        "reason": "Waiting for an agent to review a decision on this task",
         "owner_kind": "thread",
         "owner_id": reviewer,
         "decision_id": row["id"],

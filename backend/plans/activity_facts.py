@@ -162,9 +162,7 @@ def decision_indexes(plan_ids: list[str], *, db) -> tuple[list[dict], set[str], 
     # A decision's own review task waits on the agent tier until the raise
     # (``decision_waits.not_raised_cause``), so it never reads as an ask (#3401).
     waits |= {
-        str(item["node_id"]) for item in facts
-        if item["decision_state"] in decision_projection.OPEN_STATES
-        and item["decision_state"] != decision_projection.RAISED
+        str(item["node_id"]) for item in facts if decision_waits.awaits_raise(item["decision_state"])
     }
     return facts, human_decisions, waits
 

@@ -104,7 +104,7 @@ def test_a_draft_review_task_waits_on_the_agent_in_the_plan_not_on_the_person(is
         assert execution["condition"] == "waiting"
         cause = execution["causes"][0]
         assert cause["reason_key"] == "decision_not_raised"
-        assert cause["reason"] == "Not raised yet: the agent reviews it first"
+        assert cause["reason"] == "Waiting for an agent to review a decision on this task"
         assert (cause["owner_kind"], cause["owner_id"]) == ("thread", "owner")
 
         reviewed = _step(db, "parent_review", decision, "owner", "review-4")
