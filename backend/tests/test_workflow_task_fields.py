@@ -339,13 +339,20 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
     finally:
         db.close()
     registry = registry_of(PlanUpdateTool(), PlanReadTool())
+    work = json.loads(await execute_as(
+        registry, identity, thread_id, "plan_update",
+        {
+            "plan_id": plan.id, "mutation_id": "work", "operation": "add",
+            "params": {"kind": "phase", "title": "Sample work", "acceptance_criteria": "Work done"},
+        },
+    ))["node"]
     phase_result = json.loads(await execute_as(
         registry, identity, thread_id, "plan_update",
         {
             "plan_id": plan.id, "mutation_id": "phase", "operation": "add",
             "params": {
                 "kind": "phase", "title": "Run sample", "acceptance_criteria": "Run recorded",
-                "workflow_ref": "sample", "size": "M",
+                "workflow_ref": "sample", "size": "M", "parent_id": work["id"],
             },
         },
     ))
@@ -384,6 +391,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
             "params": {
                 "kind": "phase", "title": "Run unversioned",
                 "acceptance_criteria": "Run recorded", "workflow_ref": "unversioned", "size": "M",
+                "parent_id": work["id"],
             },
         },
     ))
@@ -463,12 +471,12 @@ async def test_only_a_referenced_workflow_version_runs_git_and_a_fault_records_n
     plain = await add("no-workflow")
     assert calls == [] and plain["node"]["workflow_version"] is None
 
-    referenced = await add("referenced", workflow_ref="sample")
+    referenced = await add("referenced", workflow_ref="sample", parent_id=plain["node"]["id"])
     assert {"log", "status"} <= set(calls)
     assert len(referenced["node"]["workflow_version"]) == 40 + 1 + 40
 
     fail_status = True
-    faulted = await add("faulted", workflow_ref="sample")
+    faulted = await add("faulted", workflow_ref="sample", parent_id=plain["node"]["id"])
     assert faulted["node"]["workflow_version"] is None
     assert faulted["notice"] == f"{STEPS_CREATED}\nWorkflow version unavailable; recorded null."
 
@@ -505,6 +513,13 @@ async def test_registered_plan_tools_record_system_workflow_version(isolated_db,
     finally:
         db.close()
     registry = registry_of(PlanUpdateTool())
+    work = json.loads(await execute_as(
+        registry, identity, thread_id, "plan_update",
+        {
+            "plan_id": plan.id, "mutation_id": "system-work", "operation": "add",
+            "params": {"kind": "phase", "title": "System work", "acceptance_criteria": "Work done"},
+        },
+    ))["node"]
     result = json.loads(await execute_as(
         registry, identity, thread_id, "plan_update",
         {
@@ -512,7 +527,7 @@ async def test_registered_plan_tools_record_system_workflow_version(isolated_db,
             "params": {
                 "kind": "phase", "title": "Run system",
                 "acceptance_criteria": "System run recorded",
-                "workflow_ref": "task-discipline", "size": "M",
+                "workflow_ref": "task-discipline", "size": "M", "parent_id": work["id"],
             },
         },
     ))

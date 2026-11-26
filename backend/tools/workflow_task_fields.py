@@ -151,8 +151,11 @@ def _skill_body(name: str, step_id: str, skill) -> str:
         raise PlanInputError(f"step {step_id}'s instruction can't be read from {name}'s SKILL.md") from exc
 
 
-def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Workflow]) -> None:
-    """Require a supplied workflow reference to name an effective workflow skill."""
+def validate_creation_reference(
+    params: dict[str, Any], workflows: dict[str, Workflow], db, plan_id: str,
+) -> None:
+    """Require a supplied workflow reference to name an effective workflow skill, and a run
+    it starts to sit under a parent (``validate_run_parent``)."""
 
     reference = params.get("workflow_ref")
     if reference is None or not isinstance(reference, str):
@@ -163,6 +166,35 @@ def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Wor
             f"workflow_ref {reference!r} is not an effective workflow skill; "
             f"effective workflow refs: {available}"
         )
+    validate_run_parent(params, db, plan_id)
+
+
+RUN_PARENT_REFUSAL = (
+    "A workflow run starts under the plain phase (no workflow_ref) that holds its piece of "
+    "work: set parent_id to that phase, or add the phase first if the work has none."
+)
+
+
+def validate_run_parent(params: dict[str, Any], db, plan_id: str) -> None:
+    """Refuse an agent's run (a phase with workflow_ref) that would land at the top level.
+
+    An insert takes its parent from its ``before_node_id`` sibling, so only a parent that
+    resolves to none is refused. A sibling that can't be read is left to the mutation's own
+    error.
+    """
+
+    if params.get("kind") != "phase" or not isinstance(params.get("workflow_ref"), str):
+        return
+    if params.get("parent_id") is not None:
+        return
+    before = params.get("before_node_id")
+    if before is not None:
+        sibling = db.execute(
+            "SELECT parent_id FROM plan_nodes WHERE id=? AND plan_id=?", (before, plan_id),
+        ).fetchone()
+        if sibling is None or sibling["parent_id"] is not None:
+            return
+    raise PlanInputError(RUN_PARENT_REFUSAL)
 
 
 def creation_version(params: dict[str, Any], workflows: dict[str, Workflow]) -> str | None:
@@ -298,8 +330,10 @@ def _system_workflow_version(skill) -> str | None:
 
 START_NOTICE = (
     "[Workflow skill · When you apply it and any \"Applying these steps\" note covers this run, "
-    "start one run: plan_update add with kind \"phase\", workflow_ref \"{name}\", a difficulty "
-    "and a size. CORSIA builds the steps; don't add them yourself. More: skill task-discipline, "
+    "start one run: plan_update add with kind \"phase\", workflow_ref \"{name}\", a difficulty, "
+    "a size and parent_id: the plain phase (no workflow_ref) that holds this piece of work; add "
+    "that phase first if it has none. CORSIA builds the steps; don't add them yourself. More: "
+    "skill task-discipline, "
     "Declared workflows.]"
 )
 

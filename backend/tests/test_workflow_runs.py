@@ -79,10 +79,20 @@ class Run:
         )
         return text if text.startswith("Error") else json.loads(text)
 
+    async def work(self) -> str:
+        """The plain phase that holds this piece of work, where every run starts."""
+        if getattr(self, "work_id", None) is None:
+            phase = await self.update("add", {
+                "kind": "phase", "title": "Release notes", "acceptance_criteria": "Notes shipped",
+            })
+            self.work_id = phase["node"]["id"]
+        return self.work_id
+
     async def start(self, workflow: str, mutation_id: str | None = None, **params):
+        parent = {} if "parent_id" in params else {"parent_id": await self.work()}
         return await self.update("add", {
             "kind": "phase", "title": f"Run {workflow}", "acceptance_criteria": "Run recorded",
-            "workflow_ref": workflow, **{"size": "M", **params},
+            "workflow_ref": workflow, **parent, **{"size": "M", **params},
         }, mutation_id)
 
     def rows(self, sql: str, *args):
@@ -99,7 +109,11 @@ class Run:
         return self.rows("SELECT revision FROM plan_nodes WHERE id=?", node_id)[0]["revision"]
 
     def node_count(self) -> int:
-        return self.rows("SELECT COUNT(*) AS n FROM plan_nodes WHERE plan_id=?", self.plan_id)[0]["n"]
+        """Nodes in the plan, not counting the plain phase that holds the work."""
+        return self.rows(
+            "SELECT COUNT(*) AS n FROM plan_nodes WHERE plan_id=? AND id IS NOT ?",
+            self.plan_id, getattr(self, "work_id", None),
+        )[0]["n"]
 
 
 async def test_a_phase_add_builds_every_step_from_the_definition(isolated_db, tmp_path, monkeypatch):
@@ -236,4 +250,56 @@ async def test_a_run_that_cannot_be_built_creates_nothing(isolated_db, tmp_path,
     refused = await run.start(next(iter(skills)))
 
     assert isinstance(refused, str) and refusal in refused
+    assert run.node_count() == 0
+
+
+async def test_a_run_with_no_parent_is_refused_naming_the_fix(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+
+    refused = await run.start("ship", parent_id=None)
+
+    assert refused == (
+        f"Error: invalid request, fix and resend - {workflow_task_fields.RUN_PARENT_REFUSAL}"
+    )
+    assert run.node_count() == 0
+
+
+async def test_an_insert_refuses_a_top_level_run_and_takes_one_beside_a_nested_sibling(
+    isolated_db, tmp_path, monkeypatch,
+):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    work = await run.work()
+    first = (await run.start("ship"))["node"]
+    params = {
+        "kind": "phase", "title": "Run again", "acceptance_criteria": "Run recorded",
+        "workflow_ref": "ship", "size": "M",
+    }
+
+    refused = await run.update("insert", {**params, "before_node_id": work})
+    nested = await run.update("insert", {**params, "before_node_id": first["id"]})
+
+    assert refused.endswith(workflow_task_fields.RUN_PARENT_REFUSAL)
+    assert nested["node"]["parent_id"] == work
+    assert [step["title"] for step in nested["steps"]] == ["Draft it", "review", "polish"]
+
+
+async def test_a_plain_phase_still_starts_at_the_top_level(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+
+    work = await run.work()
+
+    assert run.rows("SELECT parent_id, workflow_ref FROM plan_nodes WHERE id=?", work) == [
+        {"parent_id": None, "workflow_ref": None},
+    ]
+
+
+async def test_track_is_no_longer_offered_and_names_the_kinds_left(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+
+    refused = await run.update("add", {
+        "kind": "track", "title": "Side work", "acceptance_criteria": "Done", "size": "S",
+        "intent": "Keep side work together",
+    })
+
+    assert isinstance(refused, str) and "must be one of ['phase', 'task']" in refused
     assert run.node_count() == 0
