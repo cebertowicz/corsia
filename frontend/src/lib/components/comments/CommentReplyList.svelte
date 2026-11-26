@@ -24,14 +24,14 @@
 		createdAt?: string;
 	};
 
-	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, view = 'recent', holdSheet = false, onOpen, onNewestReplyRendered }: {
+	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, view = 'recent', keepSheetHeight = false, onOpen, onNewestReplyRendered }: {
 		replies: CommentReplyData[];
 		newReplyIds?: ReadonlySet<string>;
 		collapseReplyIds?: ReadonlySet<string>;
 		/** `recent`: up to 5 whole, a longer thread from its earliest unread (or its last 2) with Show earlier; `all`: every reply; `summary`: up to 5 whole, a longer thread a row saying how many, then its unread replies, or the newest when none is. */
 		view?: 'recent' | 'all' | 'summary';
 		/** The document comment sheet keeps its height when Show earlier replies is pressed; the chat sheet does not. */
-		holdSheet?: boolean;
+		keepSheetHeight?: boolean;
 		/** The summary row opens the whole thread; without it the row shows every reply in place. */
 		onOpen?: () => void;
 		onNewestReplyRendered?: (element: HTMLElement | undefined) => void;
@@ -75,7 +75,7 @@
 	{#if summary}
 		<button class="ct-earlier ct-open-thread" onclick={(e) => { e.stopPropagation(); if (onOpen) onOpen(); else expanded = true; }}>{`${replies.length} replies${unreadCount ? ` · ${unreadCount} new` : ''}`}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg></button>
 	{:else if hiddenCount}
-		<button class="ct-earlier" onclick={(e) => { e.stopPropagation(); if (holdSheet) holdSheetHeight(e.currentTarget.closest<HTMLElement>('.drawer-panel')); expanded = true; }}>Show {hiddenCount} earlier {hiddenCount === 1 ? 'reply' : 'replies'}</button>
+		<button class="ct-earlier" onclick={(e) => { e.stopPropagation(); if (keepSheetHeight) holdSheetHeight(e.currentTarget.closest<HTMLElement>('.drawer-panel')); expanded = true; }}>Show {hiddenCount} earlier {hiddenCount === 1 ? 'reply' : 'replies'}</button>
 	{/if}
 	{#each replies.slice(visibleFrom) as reply, offset (reply.id ?? `${reply.author}:${offset}`)}
 		{@const index = visibleFrom + offset}

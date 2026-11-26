@@ -17,12 +17,12 @@ export function capSheetAboveText(panel: HTMLElement, text: { height: number; re
 	const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
 	if (!backdrop) return;
 	const room = backdrop.getBoundingClientRect().bottom - (text.regionTop + SHEET_GAP + text.height + SHEET_GAP);
-	const cap = Math.max(MIN_SHEET, Math.floor(room)), held = heightHeld.get(panel);
-	panel.style.setProperty('--drawer-text-cap', `${held === undefined ? cap : Math.min(cap, held)}px`);
+	const cap = Math.max(MIN_SHEET, Math.floor(room)), kept = heightKept.get(panel);
+	panel.style.setProperty('--drawer-text-cap', `${kept === undefined ? cap : Math.min(cap, kept)}px`);
 }
 
 /** Sheets that keep the height they had when the reader unfolded earlier replies (the cap each holds); forgotten with the element, when the sheet closes. */
-const heightHeld = new WeakMap<HTMLElement, number>();
+const heightKept = new WeakMap<HTMLElement, number>();
 
 /**
  * The reader unfolded earlier replies in a capped sheet: it keeps the height it has and the longer list scrolls inside it, so neither the
@@ -31,9 +31,9 @@ const heightHeld = new WeakMap<HTMLElement, number>();
  * up lets go of the hold (`liftSheetCap`).
  */
 export function holdSheetHeight(panel: HTMLElement | null): void {
-	if (!panel || raised.has(panel) || heightHeld.has(panel) || !panel.style.getPropertyValue('--drawer-text-cap')) return;
+	if (!panel || raised.has(panel) || heightKept.has(panel) || !panel.style.getPropertyValue('--drawer-text-cap')) return;
 	const cap = panel.getBoundingClientRect().height - (Number.parseFloat(panel.style.getPropertyValue('--drawer-pull')) || 0);
-	heightHeld.set(panel, cap);
+	heightKept.set(panel, cap);
 	panel.style.setProperty('--drawer-text-cap', `${cap}px`);
 	panel.style.transition = 'none';
 	requestAnimationFrame(() => requestAnimationFrame(() => panel.style.removeProperty('transition')));
@@ -74,7 +74,7 @@ export const sheetRaised = (panel: HTMLElement | null): boolean => !!panel && ra
 /** The reader pulled a capped sheet up: it grows to its full height, over the text if it must, and stays there until it closes. */
 export function liftSheetCap(panel: HTMLElement): void {
 	raised.add(panel);
-	heightHeld.delete(panel);
+	heightKept.delete(panel);
 	panel.style.removeProperty('--drawer-text-cap');
 }
 

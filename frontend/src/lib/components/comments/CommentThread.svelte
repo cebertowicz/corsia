@@ -240,7 +240,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if isSuggestion}<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />{/if}
 				{#if hasBody}<CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} holdSheet={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
+				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} keepSheetHeight={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
 	</div>
@@ -254,7 +254,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
-				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} holdSheet={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
+				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} keepSheetHeight={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
 				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} onSend={postReply} goesTo={comment.replyGoesTo} />{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
@@ -307,7 +307,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving && !preview}
-			<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} holdSheet={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
+			<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} keepSheetHeight={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
 		{/if}
 
 		{@render failure?.()}
