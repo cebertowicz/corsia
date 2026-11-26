@@ -662,7 +662,7 @@ def _agent_path(monkeypatch, page: FakePage, *loads: str, run=None):
     owner = SimpleNamespace(_run_admitted=run_admitted, _model_result=lambda _result, _record: "ok",
                             session_identity=lambda _thread: "session-1")
     runtime = SimpleNamespace(record=SimpleNamespace(binding="bound", session="session-1", profile=None, copy_of=None,
-                                                     shared=False))
+                                                     shared=False, site_profile=None))
 
     async def agent(args):
         return await browser_session_commands._run_action(owner, runtime, THREAD, args, None, 10, False)

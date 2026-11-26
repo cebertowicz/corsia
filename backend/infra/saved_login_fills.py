@@ -153,11 +153,15 @@ def thread_record(thread_id: str) -> tuple[str, str, str]:
 
 
 def _prune(now: float) -> list[_Approval]:
-    """Drop what has run out and return it. Only a grant runs out; a waiting request stays until decided."""
-    expired = [item for item in _approvals.values() if not item.live(now)]
-    for item in expired:
-        from host_access.browser_grant_effects import end
-        end(item, lambda: _approvals.pop(item.id), "expired")
+    """Drop what has run out and return it; a grant whose end fails stays, not live, for the next prune."""
+    from host_access.browser_grant_effects import end
+    expired = []
+    for item in [item for item in _approvals.values() if not item.live(now)]:
+        try:
+            end(item, lambda: _approvals.pop(item.id), "expired")
+            expired.append(item)
+        except Exception as exc:  # noqa: BLE001 - one profile's record must not fail every person's reads
+            logger.warning("saved-login grant end retried at the next prune: approval {} ({})", item.id, type(exc).__name__)
     return expired
 
 
@@ -253,9 +257,9 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     now_iso = utc_now_iso()
     with _lock:
-        expired = _prune(time.monotonic())
+        expired = _prune(now := time.monotonic())
         existing = next(
-            (item for item in _approvals.values() if item.thread_id == clean_thread and item.login_id == login.id),
+            (item for item in _approvals.values() if item.thread_id == clean_thread and item.login_id == login.id and item.live(now)),
             None,
         )
         if existing is None:
@@ -303,10 +307,10 @@ def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, An
     A standing grant is left out: the chat's lock chip is for timed grants only.
     """
     with _lock:
-        expired = _prune(time.monotonic())
+        expired = _prune(now := time.monotonic())
         items = [
             item for item in _approvals.values()
-            if item.user_id == user_id and not item.standing
+            if item.user_id == user_id and not item.standing and item.live(now)
             and (root_thread_id is None or root_thread_id in (item.root_thread_id, item.thread_id))
         ]
     _emit_expired(expired)

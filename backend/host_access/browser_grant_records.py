@@ -136,13 +136,12 @@ def observe(profile: str, url: object) -> None:
         log.warning("could not record origin for %s (%s)", domain, type(exc).__name__)
 
 
-async def observe_thread(thread_id: str, url: object) -> None:
-    """Resolve this session's saved profile and record an observed origin."""
-    from host_access.browser_launch import profile_dir
+async def observe_session(profile: str | None, url: object) -> None:
+    """Record an observed origin for the session's saved profile, held by the caller (no lookup per navigation)."""
+    if profile is None:
+        return
     try:
-        profile = await asyncio.to_thread(profile_dir, thread_id)
-        if profile is not None:
-            await asyncio.to_thread(observe, str(profile), url)
+        await asyncio.to_thread(observe, profile, url)
     except Exception as exc:
         domain = url_domain(url)
         if domain:

@@ -144,3 +144,18 @@ def test_an_end_with_no_app_loop_defers_the_clear_to_the_next_launch(tmp_path, m
     assert not records.fenced(target)
     assert records.pending(target) == {"example.com": (["https://login.example.com"], 1)}
     assert events == [(("browser_signout", "site_clear"), {"properties": {"outcome": "deferred", "cause": "expired"}})]
+
+
+def test_one_failed_grant_end_leaves_the_others_ending_and_reads_working(monkeypatch):
+    expired = {key: SimpleNamespace(id=key, live=lambda _now: False) for key in ("bad", "good")}
+    monkeypatch.setattr(fills, "_approvals", dict(expired))
+    def end(item, commit, _cause):
+        if item.id == "bad":
+            raise OSError("record write failed")
+        commit()
+    monkeypatch.setattr(effects, "end", end)
+    assert [item.id for item in fills._prune(0)] == ["good"]
+    assert list(fills._approvals) == ["bad"]  # kept for the next prune, still not live
+    monkeypatch.setattr(effects, "end", lambda item, commit, _cause: commit())
+    assert [item.id for item in fills._prune(0)] == ["bad"]
+    assert not fills._approvals

@@ -220,8 +220,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             current_session=partial(owner.session_identity, thread_id))
         note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
     # A command the guard let through marks against a saved-login fill; capture marks each document typing passes through.
-    async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation) as finished,
-                await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes):
+    async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation, profile=runtime.record.site_profile) as finished,
+                await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args, runtime.record.site_profile) as writes):
         if not pane:
             browser_pane_state.agent_acted(thread_id)
         if shared_write:

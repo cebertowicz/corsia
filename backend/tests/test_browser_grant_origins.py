@@ -21,7 +21,9 @@ def clear_grants():
 async def test_pane_navigation_records_and_forwards_even_when_write_fails(tmp_path, monkeypatch):
     profile = str(tmp_path / "profile")
     records.arm(profile, "https://example.com")
-    monkeypatch.setattr(browser_launch, "profile_dir", lambda _thread: profile)
+    monkeypatch.setattr(browser_launch, "profile_dir", lambda _thread: pytest.fail("no lookup per navigation"))
+    sessions = SimpleNamespace(site_profile=lambda _thread: profile)
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: sessions)
     monkeypatch.setattr(browser_pane, "_page_endpoint", AsyncMock(return_value="ws://test"))
 
     addresses = ["https://sub.example.com:8443/path", "https://elsewhere.org/"]
@@ -45,9 +47,8 @@ async def test_pane_navigation_records_and_forwards_even_when_write_fails(tmp_pa
 async def test_page_watch_reports_navigation_without_changing_loader_marks(tmp_path, monkeypatch):
     profile = str(tmp_path / "profile")
     records.arm(profile, "https://example.com")
-    monkeypatch.setattr(browser_launch, "profile_dir", lambda _thread: profile)
     seen = []
-    watch = browser_page_watch.PageWatch(seen.append, 1, on_url=lambda url: records.observe_thread("thread", url))
+    watch = browser_page_watch.PageWatch(seen.append, 1, on_url=lambda url: records.observe_session(profile, url))
     event = {"method": "Page.frameNavigated", "params": {"frame": {"loaderId": "L1", "url": "https://sub.example.com:8443/path"}}}
     answer = {"id": 7}
     messages = iter((json.dumps(event), json.dumps(answer)))

@@ -249,6 +249,11 @@ class BrowserSessionOwner(BrowserSessionIO):
         runtime = self._sessions.get(thread_id)
         return runtime.record.session if runtime is not None and runtime.record.terminal_state == "running" else None
 
+    def site_profile(self, thread_id: str) -> str | None:
+        """The saved profile this thread's running browser was admitted with; read from memory, no lookup."""
+        runtime = self._sessions.get(thread_id)
+        return runtime.record.site_profile if runtime is not None and runtime.record.terminal_state == "running" else None
+
     async def close_thread(self, thread_id: str) -> str:
         """Guard agent close, then use the shared producer teardown."""
         from host_access.browser_session_commands import close_thread
