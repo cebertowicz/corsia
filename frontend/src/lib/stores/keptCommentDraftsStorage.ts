@@ -1,9 +1,13 @@
 // Where `keptCommentDrafts` keeps a draft on this device, so it outlives a reload, a quit and an update restart: one
 // browser storage entry per draft, under the signed-in person's id. Only `keptCommentDrafts` calls this, so a draft has
-// one writer. Stored: the text, its tagged agents and its one client id; never the caret or why a post failed.
+// one writer. Stored: the text, its tagged agents, its one client id, the passage it was written on and, once pressed, what
+// its post needs; never the caret or why a post failed.
 import type { MentionOccurrence } from '$lib/components/comments/mentionSelection';
+import type { KeptPlace } from '$lib/keptPlace';
 
-export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string };
+/** What a pressed draft's post needs once no box holds it: kept from its press until it posts, is refused or is edited. */
+export type DraftSend = { artifactId: string; threadId: string | null };
+export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string; place?: KeptPlace; send?: DraftSend };
 
 export const DRAFT_STORAGE_PREFIX = 'corsia:commentDraft:v1:';
 /**
@@ -19,7 +23,26 @@ export type NotKept = 'too-long' | 'full' | 'refused';
 /** Written and removed in one go by a Sign out, so every other window of this origin hears whose drafts went. */
 export const SIGN_OUT_KEY = 'corsia:commentDraftSignOut:v1';
 
-/** A stored entry read back, or null when it is not one this version wrote (sign-in removes it). */
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isOffset = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
+/** A stored passage, or nothing when it is not one: the draft then comes back with its words and no place. */
+function parsePlace(value: unknown): KeptPlace | undefined {
+	const place = value as Partial<KeptPlace> | null | undefined;
+	if (!place || !isOffset(place.from) || !isOffset(place.to) || place.to < place.from) return undefined;
+	if (!isText(place.quote) || !place.quote || !isText(place.prefix) || !isText(place.suffix)) return undefined;
+	return { from: place.from, to: place.to, quote: place.quote, prefix: place.prefix, suffix: place.suffix };
+}
+/** A stored send, or nothing when it is not one: the draft then comes back typed, and waits for a press. */
+function parseSend(value: unknown): DraftSend | undefined {
+	const send = value as Partial<DraftSend> | null | undefined;
+	if (!send || !isText(send.artifactId) || !send.artifactId || !(send.threadId === null || isText(send.threadId))) return undefined;
+	return { artifactId: send.artifactId, threadId: send.threadId };
+}
+
+/**
+ * A stored entry read back, or null when it is not one this version wrote (sign-in removes it). An entry from before a
+ * draft kept its passage reads as it did; a place or a send that does not read goes alone, and the words stay.
+ */
 export function parseStoredDraft(value: string | null): StoredDraft | null {
 	if (!value) return null;
 	try {
@@ -29,7 +52,12 @@ export function parseStoredDraft(value: string | null): StoredDraft | null {
 		if (clientId !== undefined && typeof clientId !== 'string') return null;
 		const valid = tags.every((tag) => tag && typeof tag.agent_id === 'string' && Number.isInteger(tag.start) && Number.isInteger(tag.end)
 			&& tag.start >= 0 && tag.start < tag.end && tag.end <= body.length);
-		return valid ? { body, tags: tags.map(({ agent_id, start, end }) => ({ agent_id, start, end })), ...(clientId ? { clientId } : {}) } : null;
+		if (!valid) return null;
+		const place = parsePlace(parsed.place), send = parseSend(parsed.send);
+		return {
+			body, tags: tags.map(({ agent_id, start, end }) => ({ agent_id, start, end })),
+			...(clientId ? { clientId } : {}), ...(place ? { place } : {}), ...(send ? { send } : {}),
+		};
 	} catch {
 		return null;
 	}
