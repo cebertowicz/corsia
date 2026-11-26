@@ -80,7 +80,13 @@ def _is_move(data: dict | Exception) -> bool:
 
 
 def _merge_wheels(previous: dict | Exception, current: dict) -> dict | None:
-    """Sum adjacent wheels aimed at the same point, without crossing a reversal or other input."""
+    """Sum adjacent queued wheels aimed at the same point, without crossing a reversal or other input.
+
+    The pane's AnimationFrameCoalescer (frontend/src/lib/browserPaneInput.ts) already sums every wheel
+    inside one animation frame, reversals and pointer moves included; this rule applies only between
+    frames, where a backlog can last seconds and a moved pointer or a reversal is a new gesture.
+    A change to which wheels merge is made and checked in both places.
+    """
     if not isinstance(previous, dict) or any(
         item.get('type') != 'input_mouse' or item.get('eventType') != 'mouseWheel'
         for item in (previous, current)
