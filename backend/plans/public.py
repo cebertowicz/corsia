@@ -52,7 +52,9 @@ from plans.decision_fields import (
 )
 
 # Plan and node mutation and reads (tools/plans, api/plans).
-from plans.boundary import PlanActor, ensure_current_plan, mutate, read_current_plan
+from plans.boundary import (
+    PlanActor, authorize_thread_owner, ensure_current_plan, mutate, read_current_plan,
+)
 from plans.current import addressed_to, read_checkpoint_status, read_current_status
 from plans.withheld_projection import (
     admission_result as withhold_admission, for_plan as withhold_for_plan,
