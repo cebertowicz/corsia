@@ -106,7 +106,10 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
     }
     if (action === 'all') {
       await page.locator('[data-activity-row]').filter({ hasText: 'activity-reply.md' }).click();
-      if (width === 393) await page.getByRole('button', { name: /Notifications/ }).click();
+      if (width === 393) {
+        await page.getByRole('button', { name: 'Close comments' }).click();
+        await page.getByRole('button', { name: /Notifications/ }).click();
+      }
       await page.getByRole('button', { name: 'Mark all read' }).click();
       await expect(chatRow).toHaveCount(0);
       await expect(page.locator('[data-activity-row]').filter({ hasText: 'activity-reply.md' })).toContainText('All replies read');
