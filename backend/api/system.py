@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import psutil
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.setup import _trusted_json_post, _trusted_request
@@ -311,6 +312,11 @@ def _network_setup() -> str | None:
 _system_cache: dict = {"data": None, "ts": 0.0}
 _SYSTEM_CACHE_TTL = 5  # seconds
 
+# cpu_percent(interval=None) returns whole-host CPU % averaged since its previous call,
+# so it never blocks. That first call only opens the window and reads 0.0, so prime it
+# at import: the first poll then reports the interval since startup, not the priming.
+psutil.cpu_percent(interval=None)
+
 
 def _live_platform_status() -> dict:
     """The non-cached poller state included in each system status response."""
@@ -334,13 +340,9 @@ async def system_status(user: dict = Depends(require_user)):
             "network_setup": _network_setup(),
         }
 
-    import psutil
-
     GIB = 1024**3
 
     def _collect_system_stats():
-        import subprocess
-
         result = {}
         try:
             vm = psutil.virtual_memory()
@@ -363,24 +365,12 @@ async def system_status(user: dict = Depends(require_user)):
             result["memory"] = {"error": str(e)}
 
         try:
-            top = subprocess.run(
-                ["top", "-l", "1", "-n", "0"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            for line in top.stdout.split("\n"):
-                if "CPU usage" in line:
-                    parts = line.split(",")
-                    for part in parts:
-                        if "idle" in part:
-                            idle = float(part.strip().split("%")[0])
-                            result["cpu"] = {
-                                "usage_pct": round(100 - idle, 1),
-                                "idle_pct": idle,
-                            }
-                            break
-                    break
+            # Whole-host CPU % averaged since the previous poll's call (primed at import).
+            usage = psutil.cpu_percent(interval=None)
+            result["cpu"] = {
+                "usage_pct": round(usage, 1),
+                "idle_pct": round(100 - usage, 1),
+            }
         except Exception as e:
             result["cpu"] = {"error": str(e)}
 
