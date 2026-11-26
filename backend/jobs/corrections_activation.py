@@ -76,7 +76,11 @@ def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: i
 
 
 async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
-    """Send one accepted notice; persist the mark only after delivery accepts it."""
+    """Send one accepted notice; persist the mark only after delivery accepts it.
+
+    A first activation has no earlier figure to compare, so it sends nothing:
+    on a new install the CORSIA agent's thread is the person's first chat.
+    """
     from core.agent_roster_queries import corsia_agent_contact
     from infra.database import get_db
     from infra.settings import get_setting
@@ -88,7 +92,7 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
         try:
             activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
             activation = activations.get(key)
-            if not activation or activation.get("conductor_told_at"):
+            if not activation or activation.get("conductor_told_at") or activation.get("before_count") is None:
                 return None, None, None
             contact, gap = corsia_agent_contact(str(activation.get("owner_user_id") or ""), db)
             return contact, activation, gap
@@ -100,16 +104,13 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
         if activation is not None and gap:
             logger.warning("corrections activation conductor notice skipped: {}", gap)
         return
-    old = activation["before_count"]
-    installed = f"Corrections classifier version {version.version} was installed and activated. "
-    if old is None:
-        detail = installed + f"Corrections are now counted for the last {activation['weeks']} weeks."
-    else:
-        detail = installed + (
-            f"Corrections for the last {activation['weeks']} weeks were re-read with it; "
-            f"the weekly figure for chat-message corrections moved from {old:.1f} to {activation['after_count']:.1f}. "
-            "It compares chat messages only, so a change in which sources are read does not move it."
-        )
+    detail = (
+        f"Corrections classifier version {version.version} was installed and activated. "
+        f"Corrections for the last {activation['weeks']} weeks were re-read with it; "
+        f"the weekly figure for chat-message corrections moved from {activation['before_count']:.1f} "
+        f"to {activation['after_count']:.1f}. "
+        "It compares chat messages only, so a change in which sources are read does not move it."
+    )
     from events.delivery import deliver_to_thread
 
     sent = await deliver_to_thread(
