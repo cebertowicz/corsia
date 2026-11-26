@@ -116,6 +116,8 @@ async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> Pa
     state = _state(thread_id)
     marks, state.watches = state.marks, state.watches + 1  # a late settle can't mark the next session
     writes = PageWatch(marks.setdefault, browser_page_watch.WATCH_TIMEOUT, done=partial(_watch_done, thread_id))
+    from host_access import browser_grant_records
+    writes.on_url = lambda url: browser_grant_records.observe_thread(thread_id, url)
     try:
         await writes.start(endpoint)
     except BaseException:

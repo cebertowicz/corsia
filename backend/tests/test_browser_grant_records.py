@@ -56,3 +56,39 @@ def test_clearing_one_site_preserves_another_pending_site(tmp_path):
     records.end(profile, "https://other.org")
     assert records.complete(profile, "example.com", first)
     assert set(records.pending(profile)) == {"other.org"}
+
+
+def test_observed_origins_match_dedupe_and_leave_failed_write_unchanged(tmp_path, monkeypatch, caplog):
+    profile = str(tmp_path / "profile")
+    records.arm(profile, "https://login.example.com")
+    records.observe(profile, "https://sub.example.com:8443/path?private=value")
+    path = records._path(profile)
+    initial = path.read_bytes()
+    assert json.loads(initial)["origins"] == ["https://sub.example.com:8443"]
+    original_write = records._write
+    writes = []
+
+    def counting_write(*args):
+        writes.append(args)
+        return original_write(*args)
+
+    monkeypatch.setattr(records, "_write", counting_write)
+    records.observe(profile, "https://sub.example.com:8443/again")
+    records.observe(profile, "https://unrelated.org/path")
+    assert not writes and path.read_bytes() == initial
+
+    def fail(*_args):
+        raise OSError("private detail")
+
+    monkeypatch.setattr(records, "_write", fail)
+    records.observe(profile, "https://other.example.com/private")
+    assert path.read_bytes() == initial
+    assert "example.com (OSError)" in caplog.text
+    assert "private detail" not in caplog.text
+
+
+def test_old_record_loads_without_origins(tmp_path):
+    profile = str(tmp_path / "profile")
+    records._path(profile).write_text(json.dumps({"sites": ["https://example.com"]}))
+    assert records.origins(profile, "example.com") == []
+    assert records.pending(profile)["example.com"][0] == ["https://example.com"]

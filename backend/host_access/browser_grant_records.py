@@ -1,13 +1,16 @@
 """Private site-only journal for browser fill grants and pending clears."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from host_access.browser_domain import url_domain
 
+log = logging.getLogger(__name__)
 _lock = threading.RLock()
 # Active grants are deliberately process-only. On restart every journalled site is pending.
 _armed: dict[tuple[str, str], int] = {}
@@ -30,18 +33,28 @@ def _path(profile: str) -> Path:
     return Path(f"{profile}.grant-sites.json")
 
 
-def _read(profile: str) -> list[str]:
+def _data(profile: str) -> tuple[list[str], list[str]]:
     try:
         data = json.loads(_path(profile).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return []
-    sites = data.get("sites") if isinstance(data, dict) and set(data) == {"sites"} else None
-    if not isinstance(sites, list) or any(not isinstance(item, str) or _site(item) != item for item in sites):
+        return [], []
+    if not isinstance(data, dict) or not set(data) <= {"sites", "origins"}:
         raise ValueError("invalid browser site journal")
-    return sites
+    sites, origins = data.get("sites"), data.get("origins", [])
+    if not isinstance(sites, list) or not isinstance(origins, list):
+        raise ValueError("invalid browser site journal")
+    if any(not isinstance(item, str) or _site(item) != item for item in [*sites, *origins]):
+        raise ValueError("invalid browser site journal")
+    if any(url_domain(origin) not in {url_domain(site) for site in sites} for origin in origins):
+        raise ValueError("invalid browser site journal")
+    return sites, origins
 
 
-def _write(profile: str, sites: list[str]) -> None:
+def _read(profile: str) -> list[str]:
+    return _data(profile)[0]
+
+
+def _write(profile: str, sites: list[str], origins: list[str] | None = None) -> None:
     path = _path(profile)
     if not sites:
         path.unlink(missing_ok=True)
@@ -50,9 +63,53 @@ def _write(profile: str, sites: list[str]) -> None:
     from host_access.browser_session_launch import _write_private_json
 
     ensure_private_dir(path.parent)
-    # Match the private-write helper's object-shaped contract.
-    # A journal contains only site origins, not login or browser data.
-    _write_private_json(path, {"sites": sorted(set(sites))})
+    if origins is None:
+        _, origins = _data(profile)
+    domains = {url_domain(site) for site in sites}
+    kept = sorted({origin for origin in origins if url_domain(origin) in domains})
+    data = {"sites": sorted(set(sites))}
+    if kept:
+        data["origins"] = kept
+    _write_private_json(path, data)
+
+
+def observe(profile: str, url: object) -> None:
+    """Record a new matching origin without interrupting the navigation on failure."""
+    from host_access.browser_site_clear import _origin
+    if not isinstance(url, str):
+        return
+    domain = url_domain(url)
+    if not domain or not (origin := _origin(url, domain)):
+        return
+    try:
+        with _lock:
+            sites, origins = _data(profile)
+            if not any(url_domain(site) == domain for site in sites) or origin in origins:
+                return
+            _write(profile, sites, [*origins, origin])
+            key = (profile, domain)
+            if key in _pending or not _armed.get(key, 0):
+                _generation[key] = _generation.get(key, 0) + 1
+    except Exception as exc:
+        log.warning("could not record origin for %s (%s)", domain, type(exc).__name__)
+
+
+async def observe_thread(thread_id: str, url: object) -> None:
+    """Resolve this session's saved profile and record an observed origin."""
+    from host_access.browser_launch import profile_dir
+    try:
+        profile = await asyncio.to_thread(profile_dir, thread_id)
+        if profile is not None:
+            await asyncio.to_thread(observe, str(profile), url)
+    except Exception as exc:
+        domain = url_domain(url)
+        if domain:
+            log.warning("could not record origin for %s (%s)", domain, type(exc).__name__)
+
+
+def origins(profile: str, domain: str) -> list[str]:
+    with _lock:
+        return [origin for origin in _data(profile)[1] if url_domain(origin) == domain]
 
 
 def arm(profile: str, site: str) -> None:

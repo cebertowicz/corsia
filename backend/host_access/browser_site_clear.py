@@ -1,6 +1,6 @@
 """Clear one site's browser data using the origins CDP can identify.
 
-Closed origins without a matching cookie cannot be enumerated by this path.
+Closed origins are cleared when they were recorded or have a matching cookie.
 """
 from __future__ import annotations
 
@@ -77,7 +77,8 @@ async def _close_site_targets(cdp, targets: list, domain: str, origins: set[str]
                 raise RuntimeError("target close was not confirmed")
 
 
-async def clear(endpoint: str, site: str, *, settle_seconds: float = 0.25) -> None:
+async def clear(endpoint: str, site: str, *, recorded_origins: tuple[str, ...] = (),
+                settle_seconds: float = 0.25) -> None:
     """Close matching targets, delete cookies, clear known origins and verify cookies.
 
     Confirmed means every named-origin clear succeeded and the cookie re-read is empty.
@@ -93,6 +94,7 @@ async def clear(endpoint: str, site: str, *, settle_seconds: float = 0.25) -> No
         matched = [cookie for cookie in cookies if cookie_matches(cookie, domain)]
         hosts = {domain, *(cookie["domain"].lstrip(".").rstrip(".").lower() for cookie in matched)}
         origins = {f"{scheme}://{host}" for host in hosts for scheme in ("http", "https")}
+        origins.update(origin for value in recorded_origins if (origin := _origin(value, domain)))
         if origin := _origin(site, domain):
             origins.add(origin)
         targets = (await _call(cdp, "Target.getTargets")).get("targetInfos")

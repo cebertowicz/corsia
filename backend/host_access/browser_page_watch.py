@@ -40,11 +40,17 @@ def _page_ids(endpoint: str, timeout: float) -> frozenset[str]:
     return frozenset(str(target.get("id")) for target in page_targets(endpoint, timeout))
 
 
+async def _ignore_url(_url: object) -> None:
+    pass
+
+
 class PageWatch:
     """One agent command's watch: start it before the command runs, settle it before the pane gets the page back."""
 
-    def __init__(self, mark: Callable[[str], None], timeout: float, done: Callable[[], None] = lambda: None) -> None:
+    def __init__(self, mark: Callable[[str], None], timeout: float, done: Callable[[], None] = lambda: None,
+                 on_url: Callable[[object], Awaitable[None]] = _ignore_url) -> None:
         self._mark, self._timeout, self._done = mark, timeout, done
+        self.on_url = on_url
         self._cdp: CdpClient | None = None
         self._listener: asyncio.Task[dict] | None = None
         self._answer: int | None = None
@@ -65,7 +71,10 @@ class PageWatch:
     async def _open(self, cdp: CdpClient) -> None:
         await cdp.__aenter__()
         await cdp.call("Page.enable")
-        self._mark(_loader(((await cdp.call("Page.getFrameTree")).get("frameTree") or {}).get("frame")))
+        frame = ((await cdp.call("Page.getFrameTree")).get("frameTree") or {}).get("frame")
+        self._mark(_loader(frame))
+        if isinstance(frame, dict):
+            await self.on_url(frame.get("url"))
         self._pages = await asyncio.to_thread(_page_ids, self._endpoint, self._timeout)
         self._listener = asyncio.create_task(self._listen(cdp))
 
@@ -79,6 +88,8 @@ class PageWatch:
                 frame = params.get("frame")
                 if not (isinstance(frame, dict) and frame.get("parentId")):
                     self._mark(_loader(frame))
+                    if isinstance(frame, dict):
+                        await self.on_url(frame.get("url"))
             elif self._answer is not None and message.get("id") == self._answer:
                 return message
 
@@ -100,7 +111,10 @@ class PageWatch:
             if self._cdp is None or self._listener is None:
                 return
             answer, pages = await asyncio.wait_for(self._end_tree(self._cdp, self._listener), self._timeout)
-            self._mark(_loader(((answer.get("result") or {}).get("frameTree") or {}).get("frame")))
+            frame = ((answer.get("result") or {}).get("frameTree") or {}).get("frame")
+            self._mark(_loader(frame))
+            if isinstance(frame, dict):
+                await self.on_url(frame.get("url"))
             if pages - self._pages:
                 self._mark(ANY_DOCUMENT)
                 log.info("a page opened while an agent command ran; its page watch marks every document of the session")

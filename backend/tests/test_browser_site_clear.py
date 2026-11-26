@@ -68,6 +68,16 @@ async def test_clear_site_and_keep_unrelated_cookie(monkeypatch):
                if method in {"Storage.clearDataForOrigin", "Network.deleteCookies"})
 
 
+@pytest.mark.asyncio
+async def test_recorded_closed_origin_is_cleared(monkeypatch):
+    fake = FakeCdp()
+    monkeypatch.setattr(browser_site_clear.browser_cdp, "CdpClient", lambda *_a, **_kw: fake)
+    await browser_site_clear.clear("ws://test", "https://example.com", settle_seconds=0,
+                                   recorded_origins=("https://closed.example.com:8443",))
+    assert ("Storage.clearDataForOrigin", {"origin": "https://closed.example.com:8443",
+                                          "storageTypes": "all"}) in fake.calls
+
+
 def test_inherited_frame_security_origin_is_included():
     tree = {"frame": {"url": "about:blank", "securityOrigin": "https://sub.example.com:8443"}}
     assert browser_site_clear._frames(tree, "example.com") == {"https://sub.example.com:8443"}

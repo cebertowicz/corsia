@@ -110,6 +110,8 @@ async def agent_command(thread_id: str, session: str | None, endpoint: str, args
         return
     seen: set[str] = set()
     watch = _watch(seen.add, browser_page_watch.WATCH_TIMEOUT)
+    from host_access import browser_grant_records
+    watch.on_url = lambda url: browser_grant_records.observe_thread(thread_id, url)
     try:
         await watch.start(endpoint)
     except BaseException:

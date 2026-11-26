@@ -33,6 +33,13 @@ def _drop_kept(profile: str, domain: str) -> None:
                                     if not browser_site_clear.cookie_matches(cookie, domain)])
 
 
+async def _clear_site(endpoint: str, site: str, origins: tuple[str, ...]) -> None:
+    if origins:
+        await browser_site_clear.clear(endpoint, site, recorded_origins=origins)
+    else:
+        await browser_site_clear.clear(endpoint, site)
+
+
 async def recover_launch(runtime: Any) -> None:
     """Clear journalled sites before a saved-profile launch serves any command."""
     profile = runtime.record.profile
@@ -41,8 +48,9 @@ async def recover_launch(runtime: Any) -> None:
     try:
         for domain, (sites, generation) in records.pending(profile).items():
             await asyncio.to_thread(_drop_kept, profile, domain)
+            known = tuple(records.origins(profile, domain))
             for site in sites:
-                await browser_site_clear.clear(runtime.chrome.endpoint, site)
+                await _clear_site(runtime.chrome.endpoint, site, known)
             if not records.complete(profile, domain, generation):
                 raise RuntimeError("site clear superseded")
     except Exception as exc:
@@ -54,7 +62,7 @@ async def _acquire(lock: asyncio.Lock) -> None:
     await asyncio.wait_for(lock.acquire(), COMMAND_TIMEOUT)
 
 
-async def _clear_runtime(runtime: Any, sites: list[str]) -> bool:
+async def _clear_runtime(runtime: Any, sites: list[str], origins: tuple[str, ...]) -> bool:
     from host_access.browser_session_commands import require_settled
     await _acquire(runtime.action_lock)
     try:
@@ -68,7 +76,7 @@ async def _clear_runtime(runtime: Any, sites: list[str]) -> bool:
             if not runtime.chrome.endpoint:
                 raise RuntimeError("browser endpoint unavailable")
             for site in sites:
-                await browser_site_clear.clear(runtime.chrome.endpoint, site)
+                await _clear_site(runtime.chrome.endpoint, site, origins)
             return True
         finally:
             runtime.command_lock.release()
@@ -116,12 +124,13 @@ async def _clear_running(owner: Any, profile: str, domain: str) -> None:
             release_fence = True
             return
         sites, generation = pending
+        origins = tuple(records.origins(profile, domain))
         await asyncio.to_thread(_drop_kept, profile, domain)
         for runtime in runtimes:
             if await _profile(runtime) != profile:
                 continue
             try:
-                cleared = await _clear_runtime(runtime, sites)
+                cleared = await _clear_runtime(runtime, sites, origins)
                 holder_cleared |= cleared and runtime.record.profile == profile
             except Exception as exc:
                 log.warning("site clear failed for %s (%s)", domain, type(exc).__name__)
