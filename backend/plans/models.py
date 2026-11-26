@@ -96,6 +96,7 @@ class PlanState:
     progress: Progress
     moving: bool
     delegated_moving: bool = False
+    open_above: int = 0
     # In-memory facts used only by wait_causes.delegation_cause.
     parked_commitments: frozenset[str] = frozenset()
 

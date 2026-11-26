@@ -23,6 +23,7 @@ class PlanRollup:
     progress: dict
     nodes: list[dict]
     moving: bool = False
+    open_above: int = 0
     #: The loaded open tree when ``nodes`` are the open work and a window, not the whole plan
     #: (``plans.open_rollup``); None for the full projection.
     tree: Any = None
@@ -160,6 +161,7 @@ def _child_plan(
             progress=asdict(state.progress),
             nodes=[],
             moving=state.moving,
+            open_above=state.open_above,
         )
     next_depth = None if child_depth is None else child_depth - 1
     return _rollup_plans(connection, [child], next_depth, memo)[0]
@@ -226,6 +228,7 @@ def _rollup_plan(
         progress=asdict(state.progress),
         nodes=ordered,
         moving=state.moving,
+        open_above=state.open_above,
     )
 
 

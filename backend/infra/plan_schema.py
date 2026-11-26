@@ -41,6 +41,17 @@ HOLD_UPDATE_GUARD_SQL = """
     END;
 """
 
+#: The open tasks assigned to the person, by plan: Activity's queue finds the plans that
+#: hold one (``plans.activity_rows``) on every poll. Without this index that read steps
+#: through every node of every plan the person's threads own. It holds only open person
+#: tasks, so it stays as small as the person's to-do list.
+USER_OPEN_TASK_INDEX_SQL = """
+    CREATE INDEX IF NOT EXISTS idx_plan_nodes_user_open
+        ON plan_nodes(plan_id)
+        WHERE assignee='user' AND kind='task' AND state IN ('pending','active')
+          AND archived_at IS NULL;
+"""
+
 STRUCTURED_PLAN_SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS plans (
         id TEXT PRIMARY KEY,
@@ -127,6 +138,7 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_spawned_thread ON plan_nodes(spawned_thread_id);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_executor_thread ON plan_nodes(executor_thread_id);
     {NODE_AGGREGATE_INDEXES_SQL}
+    {USER_OPEN_TASK_INDEX_SQL}
 
     CREATE TABLE IF NOT EXISTS plan_node_dependencies (
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,

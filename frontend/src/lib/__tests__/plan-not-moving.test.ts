@@ -15,7 +15,7 @@ function entry(nodes: OperatorNode[], display: OperatorPlanEntry['display'] = pl
 			state: 'active', revision: 1, updated_at: 'now',
 		},
 		owner: { label: 'Thread', project_id: null, thread_id: 't1' },
-		progress: { done: 0, total: nodes.length, open: nodes.length, liveness: 'waiting' },
+		progress: { done: 0, total: nodes.length, open: nodes.length, open_above: nodes.length, liveness: 'waiting' },
 		display,
 		current_node_ids: [],
 		next_node_ids: [],

@@ -348,7 +348,7 @@ Source: `backend/infra/plan_schema.py`.
 | `child_folded_failed` | INTEGER | No | Yes | 0 | — |
 | `child_folded_closed` | INTEGER | No | Yes | 0 | — |
 
-Indexes: `idx_plan_nodes_commitment` (commitment_id, created_at), `idx_plan_nodes_executor_thread` (executor_thread_id), `idx_plan_nodes_folded` (plan_id, parent_id, folded_at, id), `idx_plan_nodes_follow_up` (follow_up_of), `idx_plan_nodes_intent_node` (intent_node_id), `idx_plan_nodes_last_changed` (parent_id, own_last_changed), `idx_plan_nodes_open` (plan_id, parent_id, order_key), `idx_plan_nodes_recent` (plan_id, own_last_changed), `idx_plan_nodes_spawned_thread` (spawned_thread_id), `idx_plan_nodes_stale` (plan_id), `idx_plan_nodes_tree` (plan_id, parent_id, order_key), `idx_plan_nodes_updated` (updated_at), `idx_plan_nodes_user_failed` (plan_id, own_last_changed), `idx_plan_nodes_workflow_ref` (workflow_ref), `sqlite_autoindex_plan_nodes_1` (id, unique).
+Indexes: `idx_plan_nodes_commitment` (commitment_id, created_at), `idx_plan_nodes_executor_thread` (executor_thread_id), `idx_plan_nodes_folded` (plan_id, parent_id, folded_at, id), `idx_plan_nodes_follow_up` (follow_up_of), `idx_plan_nodes_intent_node` (intent_node_id), `idx_plan_nodes_last_changed` (parent_id, own_last_changed), `idx_plan_nodes_open` (plan_id, parent_id, order_key), `idx_plan_nodes_recent` (plan_id, own_last_changed), `idx_plan_nodes_spawned_thread` (spawned_thread_id), `idx_plan_nodes_stale` (plan_id), `idx_plan_nodes_tree` (plan_id, parent_id, order_key), `idx_plan_nodes_updated` (updated_at), `idx_plan_nodes_user_failed` (plan_id, own_last_changed), `idx_plan_nodes_user_open` (plan_id), `idx_plan_nodes_workflow_ref` (workflow_ref), `sqlite_autoindex_plan_nodes_1` (id, unique).
 
 ### `plan_pane_views`
 

@@ -211,7 +211,7 @@ describe('no surface shows a past time as a clock time', () => {
 	it('child chip: a late child wait reads due now in its text, title and name', () => {
 		const node = {
 			id: 'n1', title: 'Check CI',
-			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, liveness: 'waiting' }, wait: { label: 'CI on PR #1193', until: past, more: 0 } },
+			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'waiting' }, wait: { label: 'CI on PR #1193', until: past, more: 0 } },
 		} as unknown as OperatorNode;
 		component = mount(PlanChildControls, { target: host, props: { node, expanded: false, onToggle: () => {}, onOpen: () => {} } });
 		flushSync();

@@ -32,6 +32,17 @@ REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
+def corsia_authored(item: dict[str, Any]) -> bool:
+    """Whether CORSIA itself wrote this item, as the library's maintainers record it.
+
+    Only these items stay available after the person says no to what other CORSIA
+    users have shared; the library repository alone also holds outside contributions.
+    """
+    source = item.get("source")
+    return (item.get("author") == "corsia" and isinstance(source, dict)
+            and source.get("repository") == LIBRARY_REPOSITORY)
+
+
 def source_ref(item: dict[str, Any]) -> str:
     """The stable human-readable source reference for an indexed item."""
     source = item["source"]

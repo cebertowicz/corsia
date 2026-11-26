@@ -80,6 +80,7 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         wait_causes.child_is_working(execution) for execution in executions
     )
     moving = running or delegated_moving
+    has_later = node_states.later_ready(connection)
     state = PlanState(
         progress=Progress(
             done=done, total=len(counted) + settled_done + settled_failed,
@@ -91,6 +92,11 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
         ),
         moving=moving,
         delegated_moving=delegated_moving,
+        open_above=sum(
+            row["state"] not in service._TERMINAL_STATES
+            and (not has_later or not row["later"])
+            for row in counted
+        ),
         parked_commitments=parked_work.parked_commitments(
             incomplete,
             {

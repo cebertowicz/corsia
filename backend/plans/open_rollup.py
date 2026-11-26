@@ -159,7 +159,7 @@ def rollup_open(
     state = projections._plan_state(connection, str(plan["id"]), memo, plan=plan, tree=tree)
     return rollup.PlanRollup(
         plan=rollup._plan_data(plan), progress=asdict(state.progress), nodes=ordered,
-        moving=state.moving, tree=tree,
+        moving=state.moving, open_above=state.open_above, tree=tree,
     )
 
 

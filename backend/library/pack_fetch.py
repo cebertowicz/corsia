@@ -20,8 +20,8 @@ _PACK_REGISTRATION_SQL = INSTALLED_ROWS_SQL + """ AND identities.external_id=? A
 logger = logging.getLogger(__name__)
 
 
-def can_fetch(thread_id: str, project_id: str | None, db) -> bool:
-    """Check the current coordinating agent designation for this scope."""
+def is_scope_coordinator(thread_id: str, project_id: str | None, db) -> bool:
+    """Whether this thread is the scope's current conductor (or, outside a project, the CORSIA agent)."""
     return get_scope_coordinator(project_id or WORKSPACE_SCOPE, db=db) == thread_id
 
 
@@ -35,7 +35,7 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
     from registry.models import update_surfacing
     from registry.registration_writer import register_artifact
 
-    if not can_fetch(thread_id, project_id, db):
+    if not is_scope_coordinator(thread_id, project_id, db):
         return {"error": "not_conductor", "message": "Only the designated project conductor or workspace CORSIA agent can fetch a blueprint. Ask the conductor; if none exists, continue without the pack."}
     if item.get("kind") != "pack" or item.get("pack_kind") != "blueprint":
         return {"error": "not_blueprint", "message": "Only blueprint packs can be fetched; install a single skill with install instead."}

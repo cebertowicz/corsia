@@ -30,7 +30,7 @@ describe('advanceLiveLine', () => {
 function step(id: string, parentId: string | null, threadId: string | null): OperatorNode {
 	const base = operatorNode({ id, parent_id: parentId });
 	if (!threadId) return base;
-	return { ...base, child: { available: true, plan_id: `${id}-plan`, thread_id: threadId, progress: { done: 0, total: 1, open: 1, liveness: 'advancing' } } };
+	return { ...base, child: { available: true, plan_id: `${id}-plan`, thread_id: threadId, progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing' } } };
 }
 
 /** How the server shows a step: its label, and its own condition. */

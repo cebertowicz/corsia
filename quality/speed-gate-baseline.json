@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "The lesson report reads candidate read_file rows only from Turns with a guidance receipt, seeking each Turn on its index; its coverage line names that scope (a few more bytes). The comment box now names who a new comment goes to, so GET /artifacts/{id}/comments resolves the document's recipients even when it has no comments: 3 more statements (13 to 16) on the gate's comment-free fixture; with comments the added work is a fixed 10 statements, not growing with comment count.",
+  "reason": "The attention queue, raised and rollup reads reach open person tasks, raised identities and identity keys through indexes (schema 211) instead of scanning plan nodes and identities: steps 35,059 to 5,703 on the queue and 30,187 to 1,165 on raised and rollup; only these steps counts are re-recorded.",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -49,17 +49,17 @@
     "/api/attention/queue": {
       "bytes": 37,
       "statements": 6,
-      "steps": 35059
+      "steps": 5703
     },
     "/api/attention/raised": {
       "bytes": 12,
       "statements": 3,
-      "steps": 30187
+      "steps": 1165
     },
     "/api/attention/rollup": {
       "bytes": 63,
       "statements": 3,
-      "steps": 30187
+      "steps": 1165
     },
     "/api/auth/status": {
       "bytes": 18,
