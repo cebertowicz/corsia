@@ -505,6 +505,11 @@ def test_short_and_long_browser_url_forms(base, value, written):
     assert blanking.blank(f"{base}{written}", [value]) == f"{base}[hidden]"
 
 
+@pytest.mark.parametrize("value,written", [("abc ", "abc"), ("abcdefgh ", "abcdefgh"),
+                                           (" abc", "%20abc"), (" abcdefgh", "%20abcdefgh")])
+def test_url_ending_with_a_value_whose_edge_space_is_serialized_or_trimmed(value, written):
+    assert blanking.blank(f"https://example.com/{written}", [value]) == "https://example.com/[hidden]"
+
 
 def test_blanking_large_page_with_many_values_is_fast():
     values = [f"secret-{n:04d}-value" for n in range(200)]
