@@ -21,18 +21,29 @@ export function fitPrefix(head: string, widthOf: (text: string) => number, avail
  * lays the chip out with the whole start (the room it leaves is then known), then writes the longest start that fits with a
  * real "…" and no spare room. It runs again when the list the chip sits in changes width. Call it on the span holding the start.
  */
-export function fitMiddleEllipsis(node: HTMLElement, head: string) {
+export function fitMiddleEllipsis(node: HTMLElement, name: { head: string; tail: string }) {
 	const text = node.firstChild;
 	if (!(text instanceof Text) || typeof ResizeObserver === 'undefined' || typeof document.createRange().getBoundingClientRect !== 'function') return {};
 	const range = document.createRange();
 	range.selectNodeContents(node);
-	let start = head;
+	let { head, tail } = name;
 	const widthOf = (value: string) => { text.data = value; return range.getBoundingClientRect().width; };
 	const fit = () => {
-		text.data = start;
-		const available = node.getBoundingClientRect().width;
-		if (available <= 0) return;
-		text.data = fitPrefix(start, widthOf, available);
+		const end = node.nextElementSibling?.firstChild;
+		const endText = end instanceof Text ? end : null;
+		const extensionAt = tail.lastIndexOf('.');
+		const removable = Array.from(extensionAt < 0 ? tail : tail.slice(0, extensionAt));
+		const extension = extensionAt < 0 ? '' : tail.slice(extensionAt);
+		if (endText) endText.data = tail;
+		text.data = head;
+		if (node.getBoundingClientRect().width <= 0) return;
+		for (let removed = 0; ; removed++) {
+			text.data = head;
+			const available = node.getBoundingClientRect().width;
+			text.data = fitPrefix(head, widthOf, available);
+			if (node.scrollWidth <= node.clientWidth || !endText || removed >= removable.length) break;
+			endText.data = removable.slice(removed + 1).join('') + extension;
+		}
 	};
 	// The list's width is what limits a chip; the chip's own width follows its text and must not be watched.
 	const observer = new ResizeObserver(fit);
@@ -40,7 +51,7 @@ export function fitMiddleEllipsis(node: HTMLElement, head: string) {
 	fit();
 	void document.fonts?.ready.then(fit);
 	return {
-		update(next: string) { start = next; fit(); },
+		update(next: { head: string; tail: string }) { ({ head, tail } = next); fit(); },
 		destroy() { observer.disconnect(); },
 	};
 }

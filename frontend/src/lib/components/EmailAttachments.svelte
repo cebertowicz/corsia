@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AttachmentRow from './AttachmentRow.svelte';
+	import IconButton from './ui/IconButton.svelte';
 	import type { MessageCard } from '$lib/api/messageCards';
 	import { CARD_STATE_LABELS } from '$lib/api/messageCards';
 	import type { EmailAttachment } from '$lib/emailDraft';
@@ -7,10 +8,18 @@
 	// The files the send will attach, as the draft record pins them. Each chip is the transcript's file chip, so it opens
 	// the file the way the canvas opens that type today. One pill holds the file's icon, name and size (all of it opens the file).
 	// A long name is cut in the middle to the room the size leaves, and the full name stays in the chip's title and accessible name.
-	let { attachments, threadId }: {
+	let { attachments, threadId, removable = false, onremove }: {
 		attachments: EmailAttachment[];
 		threadId: string | null;
+		removable?: boolean;
+		onremove?: (index: number, path: string) => Promise<void>;
 	} = $props();
+	let busy = $state(false);
+	async function remove(index: number, path: string) {
+		if (busy || !onremove) return;
+		busy = true;
+		try { await onremove(index, path); } finally { busy = false; }
+	}
 
 	const card = (item: EmailAttachment): MessageCard => ({
 		kind: 'artifact', artifact_id: null, title: item.name, type: item.type === 'image' ? 'image' : 'document',
@@ -25,9 +34,10 @@
 
 {#if attachments.length}
 	<ul class="email-attachments" aria-label="Attachments">
-		{#each attachments as item, i (item.path || i)}
+		{#each attachments as item, i (i)}
 			<li class="attachment">
 				<AttachmentRow card={card(item)} {threadId} variant="chip" middleEllipsis chipAside={item.unavailable ? CARD_STATE_LABELS.unavailable : size(item.size)} />
+				{#if removable}<IconButton class="attachment-remove" variant="ghost" size="sm" ariaLabel={`Remove ${item.name}`} disabled={busy} onclick={() => void remove(i, item.path)}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton>{/if}
 			</li>
 		{/each}
 	</ul>
@@ -55,6 +65,8 @@
 	.attachment :global(button.tile.chip:focus-visible) { outline: none; }
 	@media (pointer: coarse) {
 		.attachment { min-height: calc(var(--space-6) + var(--space-3)); }
+		.attachment :global(.attachment-remove) { width: var(--touch-target); flex: 0 0 var(--touch-target); }
+		.attachment :global(.attachment-remove::after) { content: ''; position: absolute; inset: auto; left: 0; top: 50%; width: 100%; height: var(--touch-target); transform: translateY(-50%); }
 	}
 	@media (max-width: 48rem) {
 		.attachment { max-width: 100%; }

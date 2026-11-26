@@ -6,6 +6,8 @@ import type { Page } from '@playwright/test';
 export type ServerEmail = { id: string; sender: string; date: string; body: string };
 export type ServerAttachment = { name: string; path: string; size: number; type: 'image' | 'document'; unavailable: boolean };
 export type ServerContext = {
+	state: 'open' | 'sending' | 'sent' | 'discarded';
+	target_version: string;
 	status: 'ready' | 'error';
 	reason: 'account' | 'unreadable' | null;
 	replied_to: string | null;
@@ -55,14 +57,14 @@ export const FONT = 'Couldn’t read your usual font, so this email may go out i
 /** A reply to Dana's email: the answered email went to Alex from Dana, so only those two addresses are on it. */
 export function reply(over: Partial<ServerContext> = {}): ServerContext {
 	return {
-		status: 'ready', reason: null, replied_to: ANSWERED_ID, answered: ['dana.whitfield@example.com', 'alex.rivera@example.com'],
+		state: 'open', target_version: 'shown-target', status: 'ready', reason: null, replied_to: ANSWERED_ID, answered: ['dana.whitfield@example.com', 'alex.rivera@example.com'],
 		conversation: FOUR, attachments: [], notes: [], ...over,
 	};
 }
 
 /** A new email: no conversation to read. */
 export function fresh(over: Partial<ServerContext> = {}): ServerContext {
-	return { status: 'ready', reason: null, replied_to: null, answered: null, conversation: [], attachments: [], notes: [], ...over };
+	return { state: 'open', target_version: 'shown-target', status: 'ready', reason: null, replied_to: null, answered: null, conversation: [], attachments: [], notes: [], ...over };
 }
 
 /** The read failed: the draft's account can't be used, or the account answered but the thread couldn't be read. */

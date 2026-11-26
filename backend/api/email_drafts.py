@@ -75,6 +75,44 @@ def _attachments(thread_id: str, pinned: list[dict[str, Any]]) -> list[dict[str,
     return shown
 
 
+class RemoveAttachment(BaseModel):
+    path: str
+
+
+@router.delete("/{artifact_id}/attachments/{index}")
+async def remove_attachment(
+    artifact_id: str, index: int, body: RemoveAttachment, user: dict = Depends(require_human_user),
+) -> dict[str, Any]:
+    """Remove the displayed attachment from the person's open draft under its existing lock."""
+    draft = await run_in_db(_draft_for, artifact_id, user["id"])
+    if draft is None:
+        raise HTTPException(404, "Email draft not found")
+    async with draft_lock(str(draft["id"])):
+        draft = await run_in_db(_draft_for, artifact_id, user["id"])
+        if draft is None:
+            raise HTTPException(404, "Email draft not found")
+        if draft["state"] != "open":
+            raise HTTPException(409, {"state": draft["state"]})
+        target = draft_target(draft)
+        pinned = target.get("attachments") or []
+        shown = await asyncio.to_thread(_attachments, draft["thread_id"], pinned)
+        if index < 0 or index >= len(shown) or shown[index]["path"] != body.path:
+            raise HTTPException(409, {"state": "stale"})
+        data = await asyncio.to_thread(_read_bytes, str(draft["path"]))
+        if data is None:
+            raise HTTPException(409, {"state": "stale"})
+        target["attachments"] = pinned[:index] + pinned[index + 1:]
+        try:
+            await run_in_db(record_draft, str(draft["id"]), data, target)
+        except DraftError:
+            raise HTTPException(409, {"state": "stale"}) from None
+        saved = await run_in_db(_draft_for, artifact_id, user["id"])
+        if saved is None:
+            raise HTTPException(404, "Email draft not found")
+        return {"attachments": await asyncio.to_thread(_attachments, draft["thread_id"], target["attachments"]),
+                "target_version": target_version(saved)}
+
+
 async def _conversation(backend: MailBackend, account_id: str, target: dict[str, Any]) -> dict[str, Any]:
     """The conversation newest first, read with one provider call, and the addresses of the email being answered."""
     emails = sorted(await backend.conversation(account_id, target), key=lambda email: email.date, reverse=True)

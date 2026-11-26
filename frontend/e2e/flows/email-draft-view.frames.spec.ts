@@ -72,6 +72,7 @@ const CHATS: Record<keyof typeof DOCS, { user: string; assistant: string; tail: 
 const VIEWPORTS = [
 	{ name: '1440', viewport: { width: 1440, height: 1000 }, phone: false },
 	{ name: '393', viewport: { width: 393, height: 852 }, phone: true },
+	{ name: '320', viewport: { width: 320, height: 852 }, phone: true },
 ] as const;
 const THEMES = ['light', 'dark'] as const;
 const CHAT_TITLE = 'Reply to Dana about Saturday';
@@ -276,14 +277,22 @@ const SCENARIOS: Scenario[] = [
 	} },
 	// A new email, and the attachment chips.
 	{ name: '5-new-email', doc: 'fresh', context: fresh(), thin: true, act: async (page) => { await expect(page.locator('.email-conversation')).toHaveCount(0); } },
-	{ name: '5c-attachments', doc: 'reply', thin: true, context: (files) => reply({ attachments: attachments(files, [['north-trailhead-map.png', 412_000], ['volunteer-waiver.pdf', 1_840_000]]) }), act: toChips },
+	{ name: '5c-attachments', doc: 'reply', context: (files) => reply({ attachments: attachments(files, [['north-trailhead-map.png', 412_000], ['volunteer-waiver.pdf', 1_840_000]]) }), act: toChips },
+	{ name: '5c-after-remove', doc: 'reply', context: (files) => reply({ attachments: attachments(files, [['north-trailhead-map.png', 412_000], ['volunteer-waiver.pdf', 1_840_000]]) }), act: async (page) => {
+		await page.route(/\/api\/email-drafts\/[^/]+\/attachments\/\d+$/, async (route) => {
+			const directory = path.dirname(route.request().postDataJSON().path as string);
+			await route.fulfill({ json: { target_version: 'after-remove', attachments: attachments(directory, [['volunteer-waiver.pdf', 1_840_000]]) } });
+		});
+		await toChips(page);
+		await page.getByRole('button', { name: 'Remove north-trailhead-map.png' }).click();
+	} },
 	{ name: '5d-attachment-image-opened', doc: 'reply', thin: true, context: (files) => reply({ attachments: attachments(files, [['north-trailhead-map.png', 412_000], ['volunteer-waiver.pdf', 1_840_000]]) }), act: async (page) => {
 		await chipFor(page, 'north-trailhead-map.png').getByRole('button').first().click();
 		await expect(page.locator('[role="tab"]').filter({ hasText: 'north-trailhead-map.png' })).toBeVisible({ timeout: 10_000 });
 		await page.waitForTimeout(1500);
 	} },
-	{ name: '14-attachment-unavailable', doc: 'reply', thin: true, context: (files) => reply({ attachments: attachments(files, [['north-trailhead-map.png', 412_000], ['volunteer-waiver.pdf', 1_840_000, true]]) }), act: async (page) => {
-		await expect(chipFor(page, 'volunteer-waiver.pdf')).toContainText('Unavailable');
+	{ name: '14-attachment-unavailable', doc: 'reply', context: (files) => reply({ attachments: attachments(files, [['north-trailhead-map.png', 412_000], ['volunteer-waiver.pdf', 1_840_000, true]]) }), act: async (page) => {
+		await expect(page.getByRole('group', { name: /volunteer-waiver\.pdf.*Unavailable/ })).toBeVisible();
 		await toChips(page);
 	} },
 	{ name: '17-attachments-long', doc: 'reply', thin: true, context: (files) => reply({ attachments: attachments(files, [[LONG_PDF, 3_120_000], [LONG_PNG, 412_000], ['waiver.pdf', 1_840_000]]) }), act: async (page) => {
@@ -479,7 +488,7 @@ async function seedAndOpen(request: APIRequestContext, browser: Browser, testInf
 	await openThread();
 	await expect(page.locator('.cm-content')).toContainText('Alex Rivera');
 	await expect.poll(() => reads.reads(artifactId), { message: 'the view read the draft context' }).toBeGreaterThan(0);
-	return { page, context, docPath, threadId };
+	return { page, context, docPath, threadId, artifactId };
 }
 
 test.describe('@surface:email-draft-view frames', () => {
@@ -519,6 +528,95 @@ test.describe('@surface:email-draft-view frames', () => {
 			}
 		}
 	});
+});
+
+test.describe('@surface:email-draft-view attachment removal', () => {
+	test.beforeEach(async ({ request }) => { await setFocusMode(request, false); });
+	test.afterEach(async ({ request }) => { await setFocusMode(request, true); });
+
+	for (const mode of ['unavailable', 'available', 'stale', 'touch', 'sent'] as const) {
+		test(`removes or retains attachments: ${mode}`, async ({ request, browser }, testInfo) => {
+			const tree = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
+			const workspace = (await tree.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path as string;
+			const scenario = SCENARIOS.find((item) => item.name === (mode === 'unavailable' || mode === 'stale' ? '14-attachment-unavailable' : '5c-attachments'))!;
+			const { page, context, threadId, artifactId } = await seedAndOpen(request, browser, testInfo, scenario, workspace, Date.now(), VIEWPORTS[mode === 'touch' ? 1 : 0], 'light');
+			if (mode === 'sent') {
+				await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent' } });
+				await clickSend(page);
+				await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+			} else {
+				const shown = await page.evaluate(async (id) => await (await fetch(`/api/email-drafts/${encodeURIComponent(id)}/context`)).json(), artifactId);
+				const index = mode === 'unavailable' || mode === 'stale' ? 1 : 0;
+				let reads = 0;
+				if (mode === 'stale') await page.route(/\/api\/email-drafts\/[^/]+\/context$/, async (route) => { reads++; await route.fulfill({ json: shown }); });
+				await page.route(/\/api\/email-drafts\/[^/]+\/attachments\/\d+$/, async (route) => {
+					expect(route.request().postDataJSON()).toEqual({ path: shown.attachments[index].path });
+					if (mode === 'stale') return route.fulfill({ status: 409, json: { detail: { state: 'stale' } } });
+					return route.fulfill({ json: { target_version: 'after-remove', attachments: shown.attachments.filter((_: unknown, i: number) => i !== index) } });
+				});
+				const name = shown.attachments[index].name as string;
+				const button = page.getByRole('button', { name: `Remove ${name}` });
+				await expect(button).toBeVisible();
+				if (mode === 'unavailable') await expect(page.getByText('Remove it to send.', { exact: false })).toBeVisible();
+				if (mode === 'touch') {
+					const open = chipFor(page, name).getByRole('button').first();
+					const hitArea = await button.evaluate((el) => {
+						const rect = el.getBoundingClientRect();
+						const pseudo = getComputedStyle(el, '::after');
+						const width = parseFloat(pseudo.width), height = parseFloat(pseudo.height);
+						const x = rect.left + parseFloat(pseudo.left) + width / 2;
+						const y = rect.top + parseFloat(pseudo.top) - height / 2;
+						return {
+							width, height, centeredX: x - (rect.left + rect.width / 2),
+							centeredY: y + height / 2 - (rect.top + rect.height / 2),
+							hits: [1, height / 2, height - 1].map((offset) => el.contains(document.elementFromPoint(x, y + offset))),
+							target: parseFloat(getComputedStyle(el).getPropertyValue('--touch-target')),
+						};
+					});
+					expect(hitArea.width).toBeGreaterThanOrEqual(hitArea.target);
+					expect(hitArea.height).toBeGreaterThanOrEqual(hitArea.target);
+					expect(Math.abs(hitArea.centeredX)).toBeLessThan(1);
+					expect(Math.abs(hitArea.centeredY)).toBeLessThan(1);
+					expect(hitArea.hits).toEqual([true, true, true]);
+					expect(await open.evaluate((el) => {
+						const rect = el.getBoundingClientRect();
+						return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+					})).toBe(true);
+					await button.tap();
+				}
+				else {
+					const preceding = mode === 'unavailable' || mode === 'stale'
+						? page.getByRole('button', { name: 'Remove north-trailhead-map.png' })
+						: chipFor(page, name).getByRole('button').first();
+					await preceding.focus();
+					await page.keyboard.press('Tab');
+					await expect(button).toBeFocused();
+					await page.keyboard.press('Enter');
+				}
+				if (mode === 'stale') await expect.poll(() => reads).toBeGreaterThan(0);
+				else {
+					await expect(chipFor(page, name)).toHaveCount(0);
+					const remaining = shown.attachments[index === 0 ? 1 : 0].name as string;
+					await expect(page.getByRole('button', { name: `Remove ${remaining}` })).toBeFocused();
+					if (mode === 'unavailable') {
+						await expect(page.getByText('Remove it to send.', { exact: false })).toHaveCount(0);
+						const sent = await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent' } });
+						await clickSend(page);
+						expect(sent.bodies[0]).toMatchObject({ target_version: 'after-remove' });
+					}
+					if (mode === 'touch') {
+						const sent = await answerDraftAction(page, 'send', { status: 200, body: { state: 'sent' } });
+						await clickSend(page);
+						expect(sent.bodies[0]).toMatchObject({ target_version: 'after-remove' });
+						await chipFor(page, remaining).getByRole('button').first().tap();
+						await expect(page.getByRole('button', { name: `${remaining} · Open files, 2` })).toBeVisible();
+					}
+				}
+			}
+			await context.close();
+			await request.delete(`/api/threads/${threadId}`, { params: { token: TEST_TOKEN } });
+		});
+	}
 });
 
 /** A flat-colour PNG with a lighter band, built with node's zlib; it stands in for the attached map. */

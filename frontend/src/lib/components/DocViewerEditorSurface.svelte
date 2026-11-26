@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { mount, unmount, untrack } from 'svelte';
+	import { mount, tick, unmount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import type { ChangeDesc } from '@codemirror/state';
 	import type { SuggestionHistoryEntry } from '$lib/cm/suggestionHistory';
@@ -22,7 +22,7 @@
 	import EmailSendBar from './EmailSendBar.svelte';
 	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, refusedEntries, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
-	import { fetchEmailDraftContext, readEmailDraftState } from '$lib/api/emailDrafts';
+	import { fetchEmailDraftContext, readEmailDraftState, removeEmailAttachment } from '$lib/api/emailDrafts';
 	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 	import DocStaleChoice from './DocStaleChoice.svelte';
@@ -139,6 +139,22 @@
 	});
 	const email = $derived<EmailDraftContext | null>(context?.read ?? null);
 	const attachments = $derived(email?.attachments ?? []);
+	async function removeAttachment(index: number, path: string) {
+		const id = artifactId;
+		if (!id) return;
+		const result = await removeEmailAttachment(id, index, path);
+		if (artifactId !== id) return;
+		if (result.state === 'stale') { readAttempt += 1; return; }
+		if (result.state !== 'removed' || !context || context.artifactId !== id) return;
+		context = { ...context, read: { ...context.read, attachments: result.attachments, targetVersion: result.targetVersion } };
+		await tick();
+		requestAnimationFrame(() => {
+			const view = editor?.editorView();
+			const buttons = view?.dom.querySelectorAll<HTMLButtonElement>('.attachment-remove');
+			const next = buttons?.[Math.min(index, buttons.length - 1)];
+			if (next) next.focus(); else view?.focus();
+		});
+	}
 	// Which entries the send would refuse is the server's reading of the header (refusedEntries says how an edit it
 	// hasn't read is shown).
 	const rereads = $derived(!!liveText);
@@ -153,9 +169,9 @@
 		answered: email.answered ?? null,
 		header: draft?.header ?? null,
 		rereads,
-		attachmentsKey: JSON.stringify([attachments, email.threadId ?? $activeThreadId]),
+		attachmentsKey: JSON.stringify([attachments, email.threadId ?? $activeThreadId, email.state, sendEnded]),
 		mountAttachments: attachments.length ? (host) => {
-			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: email.threadId ?? $activeThreadId } });
+			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: email.threadId ?? $activeThreadId, removable: email.state === 'open' && !sendEnded, onremove: removeAttachment } });
 			return () => void unmount(chips);
 		} : null,
 	} : null);

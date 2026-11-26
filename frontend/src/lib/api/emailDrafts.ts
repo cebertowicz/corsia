@@ -45,6 +45,22 @@ export async function fetchEmailDraftContext(artifactId: string): Promise<EmailD
 	};
 }
 
+export async function removeEmailAttachment(artifactId: string, index: number, path: string): Promise<
+	{ state: 'removed'; attachments: EmailDraftContext['attachments']; targetVersion: string } | { state: 'stale' | 'failed' }
+> {
+	try {
+		const res = await apiFetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/attachments/${index}`, {
+			method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+		});
+		if (res.status === 409) return { state: 'stale' };
+		if (!res.ok) return { state: 'failed' };
+		const body = await res.json();
+		return { state: 'removed', attachments: body.attachments, targetVersion: body.target_version };
+	} catch {
+		return { state: 'failed' };
+	}
+}
+
 export type DraftActionResult =
 	| { state: 'sent'; not_delivered_to?: string[] }
 	| { state: 'discarded' | 'sending' | 'unconfirmed' | 'failed'; reason?: string }
