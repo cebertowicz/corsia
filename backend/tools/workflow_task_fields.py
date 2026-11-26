@@ -16,7 +16,7 @@ from infra.guidance_git import GitFault, file_version, workspace_repository
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from infra.system_package import system_package_dir
 from plans.public import PlanInputError
-from tools import workflow_run_parent
+from tools.workflow_run_parent import validate as validate_run_placement
 
 
 @dataclass(frozen=True)
@@ -174,7 +174,7 @@ def prepare_mutation(
 
     if operation in {"add", "insert"}:
         validate_creation_reference(params, workflows)
-    workflow_run_parent.validate(operation, params, db, plan_id, actor)
+    validate_run_placement(operation, params, db, plan_id, actor)
     if operation not in {"add", "insert"}:
         return None, ()
     return creation_version(params, workflows), creation_run(params, workflows)
