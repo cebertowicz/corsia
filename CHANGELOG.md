@@ -24,7 +24,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
-- Comments and suggestions that span more than one line stay on their text again; since the last build they showed as detached and couldn't be accepted.
+- Comments and suggestions that span more than one line stay on their text when the document changes elsewhere, and can be accepted.
 - Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
 - Document tables no longer leave an empty band underneath on touch screens.
 - First run is shorter and shows how you steer your agents: your profile becomes yours when you approve your About you doc (or at the end of setup if you skip it), agents then suggest changes to it for you to accept, setup explains workflows, the access step drops the Auto-approve paragraph, and the opening message is cut from 241 words to 143: what an agent is, that CORSIA is one too, and a one-line project.

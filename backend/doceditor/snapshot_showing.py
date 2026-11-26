@@ -106,6 +106,23 @@ def _ambiguous_duplicate(old: str, new: str, start: int, end: int, quote: str, *
     return matches != 1
 
 
+def _copy_beside(text: str, start: int, end: int, quote: str) -> bool:
+    """Whether another copy of quote overlaps text[start:end] or is separated from it only by whitespace.
+
+    Only such a copy makes a line diff unable to tell which block was added or removed; a copy
+    elsewhere is told apart by the lines around it.
+    """
+    pos = text.find(quote)
+    while pos >= 0:
+        stop = pos + len(quote)
+        if pos != start and ((pos < end and stop > start)
+                             or (pos >= end and not text[end:pos].strip())
+                             or (stop <= start and not text[stop:start].strip())):
+            return True
+        pos = text.find(quote, pos + 1)
+    return False
+
+
 def _word_content(fragment: str) -> int:
     fragment = re.sub(r'^\s*(?:(?:[-+*]|\d+[.)])\s*)+', '', fragment)
     return sum(char.isalnum() for char in fragment)
@@ -132,10 +149,9 @@ def evaluate(old: str, new: str, old_span: tuple[int, int], new_span: tuple[int,
         if (kind not in ('equal', 'paired') or target != new_start
                 or end_kind not in ('equal', 'paired') or end_target != new_end):
             return False, False, 'line_' + kind
-        if old != new:
-            old_count, new_count = old.count(quote), new.count(quote)
-            if old_count != new_count and max(old_count, new_count) > 1 and min(old_count, new_count) > 0:
-                return False, True, 'duplicate_ambiguous'
+        if old != new and old.count(quote) != new.count(quote) and (
+                _copy_beside(old, a, b, quote) or _copy_beside(new, c, d, quote)):
+            return False, True, 'duplicate_ambiguous'
         before, after = _fragments(old, a, b)
         current_before, current_after = _fragments(new, c, d)
         return (new[c:d] == quote and before == current_before and after == current_after), False, 'context'

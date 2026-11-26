@@ -61,12 +61,14 @@ def test_removed_duplicate_does_not_move_to_other_block():
     assert comment['orphaned']
 
 
-def test_surviving_separated_duplicate_remains_detached():
+def test_surviving_separated_duplicate_stays_on_its_block():
     block = 'First line here.\nSecond line here.\n'
     source = 'head\n' + block + 'middle\n' + block + 'tail\n'
     current = 'head\nmiddle\n' + block + 'tail\n'
     comment = resolve(source, current, block, start=source.rindex(block))
-    assert comment['orphaned']
+    assert not comment['orphaned']
+    assert comment['from_off'] == current.index(block)
+    assert current[comment['from_off']:comment['to_off']] == block
 
 
 def test_duplicate_replaced_elsewhere_with_same_count_is_ambiguous():
@@ -77,10 +79,35 @@ def test_duplicate_replaced_elsewhere_with_same_count_is_ambiguous():
 
 
 @pytest.mark.parametrize('old_copies,new_copies', [(2, 1), (1, 2)])
-def test_adjacent_duplicate_count_change_is_ambiguous(old_copies, new_copies):
+@pytest.mark.parametrize('which', ['first', 'last'])
+@pytest.mark.parametrize('gap', ['', '\n'])
+def test_adjacent_duplicate_count_change_is_ambiguous(old_copies, new_copies, which, gap):
     block = 'First line here.\nSecond line here.\n'
-    source = 'head\n' + block * old_copies + 'tail\n'
-    current = 'head\n' + block * new_copies + 'tail\n'
+    source = 'head\n' + gap.join([block] * old_copies) + 'tail\n'
+    current = 'head\n' + gap.join([block] * new_copies) + 'tail\n'
     # The same current text results whichever copy was removed or inserted.
-    comment = resolve(source, current, block)
+    start = source.index(block) if which == 'first' else source.rindex(block)
+    comment = resolve(source, current, block, start=start)
     assert comment['orphaned']
+
+
+@pytest.mark.parametrize('source,current,quote', [
+    ('A\nX\nY\nB\n', 'A\nX\nY\nB\nX\nY\n', 'X\nY'),
+    (SOURCE, SOURCE + '\nLater section.\n\nFirst line here.\nSecond line here.\n',
+     'First line here.\nSecond line here.'),
+    (SOURCE, 'First line here.\nSecond line here.\n\nIntro.\n\n' + SOURCE,
+     'First line here.\nSecond line here.'),
+])
+def test_copy_added_away_from_anchor_keeps_it_placed(source, current, quote):
+    comment = resolve(source, current, quote)
+    assert not comment['orphaned']
+    assert current[comment['from_off']:comment['to_off']] == quote
+
+
+def test_copy_removed_away_from_anchor_keeps_it_placed():
+    quote = 'First line here.\nSecond line here.'
+    source = SOURCE + '\nLater section.\n\n' + quote + '\n'
+    current = SOURCE
+    comment = resolve(source, current, quote)
+    assert not comment['orphaned']
+    assert current[comment['from_off']:comment['to_off']] == quote
