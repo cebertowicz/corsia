@@ -92,6 +92,42 @@ def require_reviewer(db, plan, source, actor) -> None:
     require_tier(actor, (reviewer,) if reviewer else (author,))
 
 
+#: Named on the author's own review or raise of delegated work (#3401). The
+#: author already reads this plan, so naming the tier discloses no identity.
+PARENT_RAISES = (
+    "the agent that delegated this work to you reviews and raises this decision,"
+    " not you"
+)
+
+#: Named on a raise before the review (#3401): the step and who takes it.
+REVIEW_FIRST = (
+    "this decision is still a draft: call plan_decision parent_review on it"
+    " first, then raise. You are its reviewer: on your own plan you review and"
+    " raise your own decisions; on work you delegated you review the worker's"
+)
+
+
+def require_raise_tier(db, plan, actor) -> None:
+    """Tell a delegated author that review and raise are its parent's (#3401).
+
+    Without this the author meets the fixed scope refusal and cannot tell the
+    step is someone else's. Anyone else falls through to ``require_reviewer``.
+    """
+    author, reviewer = tiers(db, plan)
+    if (
+        reviewer and reviewer != author
+        and actor.kind == "thread" and actor.thread_id == author
+    ):
+        raise service.PlanError(PARENT_RAISES)
+
+
+def require_reviewed_for_raise(decision: dict) -> None:
+    """A raise needs the review first; a draft is told which step it lacks."""
+    if decision["state"] == "draft":
+        raise service.PlanError(REVIEW_FIRST)
+    require_state(decision, ("parent_reviewed",))
+
+
 def require_author_or_reviewer(db, plan, source, actor) -> None:
     """Either tier may change, reorder, or withdraw a queued decision (E8)."""
     author, reviewer = tiers(db, plan)
