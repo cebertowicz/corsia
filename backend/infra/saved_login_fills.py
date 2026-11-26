@@ -1,4 +1,4 @@
-"""The person's timed yes before an agent's saved login is filled into a page.
+"""The person's timed yes before an agent's saved login or saved item is filled into a page.
 
 An agent may have a saved login (``infra.saved_logins``) typed into a page only
 under a grant: the person approved this agent's thread filling this login, for
@@ -18,12 +18,22 @@ never decides a fill.
 - :func:`may_fill` is the fill executor's check: true only under a live grant
   for exactly that thread and login. A grant is not a host-access lease.
 
-Thread identity (C3): the thread id comes from the call's server-side context,
-never a tool argument; inside an agent's turn any other thread is refused.
+A saved item (``infra.saved_items``) goes through this same store, decisions,
+list, events and durations: ``infra.saved_item_fills`` raises its request and
+reads its grant. Each approval's ``kind`` says which it is, ``'login'`` or
+``'item'``; an item's approval has no login (``login_id`` None) and carries the
+entry's name and label, and its site is the one the person approved, not one a
+login was saved for. Code that acts on a site when a grant starts or ends (such
+as signing the person out of a login's site) acts only on ``kind == 'login'``:
+CORSIA never signed in anywhere for an item, so its grant has no such effect.
+
+Thread identity (C3, ``infra.saved_fill_identity``): the thread id comes from the
+call's server-side context, never a tool argument; inside an agent's turn any
+other thread is refused.
 
 Requests and grants live in this process's memory only, standing grants
 included, so a restart fails closed until the person approves again. Nothing
-here reads or holds a password.
+here reads or holds a password or an item's value.
 """
 
 from __future__ import annotations
@@ -43,6 +53,11 @@ from host_access.browser_domain import url_domain
 from infra import product_events, saved_logins
 from infra.host_access_leases import MAX_LEASE_DURATION_SECONDS
 from infra.key_store_values import KeyStoreError
+from infra.saved_fill_identity import (
+    FillApprovalError as FillApprovalError, FillApprovalNotFound as FillApprovalNotFound,
+    FillApprovalNotTheirs as FillApprovalNotTheirs, FillDurationError as FillDurationError,
+    context_thread as _context_thread, own_thread as _own_thread, thread_record as thread_record,
+)
 from infra.time import utc_now, utc_now_iso
 
 #: The longest grant: the host-access lease cap, the existing limit on any
@@ -53,32 +68,16 @@ MIN_GRANT_SECONDS = 1
 
 AWAITING_USER = "awaiting_user"
 ACTIVE = "active"
+#: An approval's kind: a saved login, or a saved item (``infra.saved_items``).
+LOGIN = "login"
+ITEM = "item"
 
 _NO_REQUEST = "This sign-in request is closed. Ask the agent to try again if it still needs to sign in."
 _NO_GRANT = "This approval has ended."
 _NOT_CURRENT = "This request has new details. Review them, then approve or reject it."
-_NO_THREAD = "A fill request needs the agent's own thread."
-_OTHER_THREAD = "A fill request can only be made for the agent's own thread."
 _DURATION = f"Pick a duration from {MIN_GRANT_SECONDS} to {MAX_GRANT_SECONDS} seconds."
 _OUT_OF_DATE = "The saved login for {site} ({username}) is out of date. The person has a step to sign in to {site} themselves."
 _NOT_THEIRS = "No saved login you may use has that id."
-_AGENT_FALLBACK = "An agent"
-
-
-class FillApprovalError(ValueError):
-    """A fill request or decision was refused. The text is safe to show: at most a site and username, never a password."""
-
-
-class FillApprovalNotFound(FillApprovalError):
-    """No such request or grant for this person."""
-
-
-class FillApprovalNotTheirs(FillApprovalError):
-    """The login isn't the caller's person's: answered as no such login, with nothing about the login itself."""
-
-
-class FillDurationError(FillApprovalError):
-    """The duration is not a whole number of seconds within the cap; nothing was granted."""
 
 
 @dataclass(frozen=True)
@@ -88,8 +87,11 @@ class _Approval:
     root_thread_id: str
     user_id: str
     agent: str
-    login_id: str
+    #: The saved login's id; None for an item.
+    login_id: str | None
+    #: The site the value may be filled on: the login's own site, or the one the person approved for an item.
     site: str
+    #: The login's username; empty for an item.
     username: str
     created_at: str
     updated_at: str
@@ -103,10 +105,17 @@ class _Approval:
     requested_duration_seconds: int | None = None
     #: The person chose "Until I turn it off": an active grant with no deadline.
     standing: bool = False
+    #: LOGIN or ITEM. Only a login's grant may act on its site when it starts or ends.
+    kind: str = LOGIN
+    #: An item's key store entry name and its label; None for a login.
+    item: str | None = None
+    item_label: str | None = None
 
     @property
     def application_hash(self) -> str:
         fields = [self.id, self.thread_id, self.login_id, self.site, self.username, self.created_at]
+        if self.kind == ITEM:
+            fields += [self.kind, self.item, self.item_label]
         return hashlib.sha256(json.dumps(fields).encode("utf-8")).hexdigest()
 
     def live(self, now: float) -> bool:
@@ -117,39 +126,6 @@ class _Approval:
 
 _lock = threading.Lock()
 _approvals: dict[str, _Approval] = {}
-
-
-def _context_thread() -> str | None:
-    from infra import state
-
-    return state._current_thread_id.get(None)
-
-
-def _own_thread(thread_id: object) -> str:
-    """The thread id, refused when it is empty or names a thread other than the running turn's own."""
-    if not isinstance(thread_id, str) or not thread_id:
-        raise FillApprovalError(_NO_THREAD)
-    running = _context_thread()
-    if running is not None and running != thread_id:
-        raise FillApprovalError(_OTHER_THREAD)
-    return thread_id
-
-
-def thread_record(thread_id: str) -> tuple[str, str, str]:
-    """The thread's owner, its visible root and the agent's name, from the server's own records."""
-    from core.thread_identity import root_visible_thread_id
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        row = db.execute("SELECT user_id, title FROM threads WHERE id = ?", (thread_id,)).fetchone()
-        if row is None:
-            raise FillApprovalError(_NO_THREAD)
-        root = root_visible_thread_id(thread_id, db=db) or thread_id
-    finally:
-        db.close()
-    title = row["title"].strip() if isinstance(row["title"], str) else ""
-    return row["user_id"], root, title or _AGENT_FALLBACK
 
 
 def _prune(now: float) -> list[_Approval]:
@@ -196,10 +172,13 @@ def end_for_login(login_id: str, *, deleted: bool) -> None:
     """End every request and grant for the login, standing ones included: ``fill_revoked`` on a delete,
     ``fill_expired`` when it goes out of date. The paths that make a login unusable call this as they do,
     so a re-save can't revive a grant."""
-    ended = _remove(lambda item: item.login_id == login_id)
+    _ended(_remove(lambda item: item.kind == LOGIN and item.login_id == login_id), deleted)
+
+
+def _ended(ended: list[_Approval], deleted: bool) -> None:
     for item in ended:
         _emit("fill_revoked" if deleted else "fill_expired", item)
-        logger.info("saved-login fill ended with its login: approval {}", item.id)
+        logger.info("saved-{} fill ended with its {}: approval {}", item.kind, item.kind, item.id)
         _notify(item)
 
 
@@ -216,6 +195,8 @@ def _public(item: _Approval) -> dict[str, Any]:
         #: The site's registrable domain from the Public Suffix List, so a shortened site always keeps it whole.
         "domain": url_domain(item.site),
         "username": item.username,
+        #: The saved item's label, which the panel shows instead of a username; None for a login.
+        "item_label": item.item_label,
         "revision": item.revision,
         "application_hash": item.application_hash,
         "max_duration_seconds": MAX_GRANT_SECONDS,
@@ -257,26 +238,35 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         raise FillApprovalNotTheirs(_NOT_THEIRS)
     if login.status != saved_logins.STATUS_OK:
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
+    return open_request(
+        clean_thread, (user_id, root, agent), requested,
+        lambda item: item.kind == LOGIN and item.login_id == login.id,
+        login_id=login.id, site=login.site, username=login.username,
+    )
+
+
+def open_request(clean_thread: str, record: tuple[str, str, str], requested: int | None, same, **fields: Any,
+                 ) -> dict[str, Any]:
+    """Raise a waiting request with ``fields`` (login or item) for an already-checked thread, or return the
+    request waiting or grant live for this thread that ``same`` matches, as it is. For this module and
+    ``infra.saved_item_fills`` only."""
+    user_id, root, agent = record
     now_iso = utc_now_iso()
     with _lock:
         expired = _prune(time.monotonic())
-        existing = next(
-            (item for item in _approvals.values() if item.thread_id == clean_thread and item.login_id == login.id),
-            None,
-        )
+        existing = next((item for item in _approvals.values() if item.thread_id == clean_thread and same(item)), None)
         if existing is None:
             item = _Approval(
                 id=uuid.uuid4().hex, thread_id=clean_thread, root_thread_id=root, user_id=user_id, agent=agent,
-                login_id=login.id, site=login.site, username=login.username,
                 created_at=now_iso, updated_at=now_iso, revision=1, state=AWAITING_USER,
-                requested_duration_seconds=requested,
+                requested_duration_seconds=requested, **fields,
             )
             _approvals[item.id] = item
     _emit_expired(expired)
     if existing is not None:
         return _public(existing)
     _emit("fill_requested", item, None if requested is None else {"requested_minutes": _minutes(requested)})
-    logger.info("saved-login fill requested: approval {} thread {} login {}", item.id, clean_thread, login.id)
+    logger.info("saved-{} fill requested: approval {} thread {}", item.kind, item.id, clean_thread)
     _notify(item)
     return _public(item)
 
@@ -284,23 +274,36 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
 def may_fill(thread_id: str, login_id: str) -> bool:
     """True only while the person's grant for exactly this thread and login is live, the running
     turn is that thread, and the login is usable and theirs, so a grant never retries a refused password."""
-    if not isinstance(thread_id, str) or not isinstance(login_id, str) or not thread_id or not login_id:
+    if not isinstance(login_id, str) or not login_id:
         return False
-    running = _context_thread()
-    if running is not None and running != thread_id:
-        return False
-    now = time.monotonic()
-    with _lock:
-        grant = next((
-            item for item in _approvals.values()
-            if item.state == ACTIVE and item.live(now) and item.thread_id == thread_id and item.login_id == login_id
-        ), None)
+    grant = live_grant(thread_id, lambda item: item.kind == LOGIN and item.login_id == login_id)
     if grant is None:
         return False
     if _login_usable(login_id, grant.user_id):
         return True
     end_for_login(login_id, deleted=False)
     return False
+
+
+def live_grant(thread_id: object, same) -> _Approval | None:
+    """The live grant for this thread that ``same`` matches, when the running turn is that thread; else None.
+    For this module and ``infra.saved_item_fills`` only."""
+    if not isinstance(thread_id, str) or not thread_id:
+        return None
+    running = _context_thread()
+    if running is not None and running != thread_id:
+        return None
+    now = time.monotonic()
+    with _lock:
+        return next((
+            item for item in _approvals.values()
+            if item.state == ACTIVE and item.live(now) and item.thread_id == thread_id and same(item)
+        ), None)
+
+
+def end_where(same, *, deleted: bool) -> None:
+    """End every request and grant ``same`` matches, as :func:`end_for_login` does. For ``infra.saved_item_fills``."""
+    _ended(_remove(same), deleted)
 
 
 def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, Any]]:

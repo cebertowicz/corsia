@@ -8,7 +8,8 @@
 	import type { FillChoice, HostAccessFill } from '$lib/api/hostAccess';
 
 	/**
-	 * A pending request to fill a saved login: which agent, which site and username, and for how long.
+	 * A pending request to fill a saved login or a saved item: which agent, which site, which username (a login)
+	 * or item (by its label), and for how long. Only the head label, the first line and that row differ.
 	 * HostAccessPendingRequestDrawer renders it and owns the shared sheet layout (.pending-drawer,
 	 * .decision-*); like the script sheet it draws the §0.1 roles: sentence-case section labels, status
 	 * as coloured text, no boxes. The duration is the person's pick, never the agent's: the agent's asked-for
@@ -59,11 +60,15 @@
 </script>
 
 <div class="pending-drawer">
-	<HostAccessDrawerHead label="Sign in with a saved login" title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
+	<HostAccessDrawerHead label={request.item_label ? 'Use a saved item' : 'Sign in with a saved login'} title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 	<div class="decision-body fill-body">
-		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it.</p>
+		<p class="explainer">{request.item_label ? 'CORSIA fills it in on this site for the agent. The agent never sees it.' : 'CORSIA fills in the password on this site for the agent. The agent never sees it.'}</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
-		<section><span class="section-label">Username</span><p>{request.username}</p></section>
+		{#if request.item_label}
+			<section><span class="section-label">Saved item</span><p>{request.item_label}</p></section>
+		{:else}
+			<section><span class="section-label">Username</span><p>{request.username}</p></section>
+		{/if}
 		{#if options.length}
 			<section>
 				<!-- The sheet's own section label, like Site and Username; Field keeps the select's accessible name. -->

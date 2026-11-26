@@ -266,7 +266,7 @@ describe('HostAccessLeaseControl', () => {
 	it('approves a saved-login fill for the picked duration, then revokes it from its chip', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com', item_label: null,
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -1325,7 +1325,7 @@ describe('HostAccessLeaseControl', () => {
 	it('keeps a stale saved-login fill rejectable through its own route', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com', item_label: null,
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -1441,7 +1441,7 @@ describe('HostAccessLeaseControl', () => {
 	const FILL_TRIGGER = 'Review a request to sign in with a saved login';
 	const fillRequest: HostAccessFill = {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com', item_label: null,
 		revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 		max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -1540,7 +1540,7 @@ describe('HostAccessLeaseControl', () => {
 	it('keeps a gone request on its path: a refused fill Reject (404) reads the list again without it', async () => {
 		const waitingFill: HostAccessFill = {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com', item_label: null,
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
 			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
@@ -1853,7 +1853,7 @@ it('offers Until I turn it off on a saved-login request only, never on a host-ac
 	const { default: HostAccessPendingRequestDrawer } = await import('./HostAccessPendingRequestDrawer.svelte');
 	const fill: HostAccessFill = {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
-		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com', item_label: null,
 		revision: 1, application_hash: 'hash-fill', decision_capability: 'decision-fill',
 		max_duration_seconds: 1800, requested_duration_seconds: 900, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-07-18T16:00:00+00:00', updated_at: '2026-07-18T16:00:00+00:00',

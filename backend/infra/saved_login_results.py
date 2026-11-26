@@ -44,3 +44,19 @@ def fill_failed(thread_id: str, login_id: str) -> str:
 def fill_unknown(thread_id: str, login_id: str) -> None:
     """Record a fill whose outcome is unknown, leaving login state unchanged."""
     _record(thread_id, login_id, "unknown")
+
+
+def item_fill_recorded(thread_id: str, item: str, site: str, result: Literal["filled", "unknown"]) -> None:
+    """Record a saved item's fill in the same history: the item's entry name, never its value.
+
+    ``filled`` once the page kept the value; ``unknown`` when it may be in the page but that wasn't confirmed.
+    The row's ``login_id`` is empty: it names no login.
+    """
+    if not isinstance(thread_id, str) or not thread_id:
+        raise KeyStoreError("A saved item's use needs the thread that used it.")
+    with write_transaction(None, scope="saved_item_fill_result") as conn:
+        conn.execute(
+            "INSERT INTO saved_login_fill_audit (created_at, login_id, item, site, thread_id, result) "
+            "VALUES (?, '', ?, ?, ?, ?)",
+            (utc_now_iso(), item, site, thread_id, result),
+        )

@@ -35,13 +35,15 @@
 	} = $props();
 
 	const fill = $derived(lease.kind === 'fill');
+	// A fill grant's kind is its name: a saved login, or a saved item (it has an item label).
+	const kindName = $derived(lease.kind === 'fill' && lease.item_label ? 'Saved item' : 'Saved login');
 </script>
 
 <div class="active-chip">
 	<button
 		type="button"
 		class="active-chip-trigger"
-		aria-label={fill ? 'Saved login' : 'Host access'}
+		aria-label={fill ? kindName : 'Host access'}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		onclick={onOpen}
@@ -69,7 +71,7 @@
 		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
 	</button>
 	{#key lease.id}
-		<AdaptiveDrawer ariaLabel={`${fill ? 'Saved login' : 'Host access'} — ${owner(lease)}`} flushBottom opaque headless {open} onClose={onClose}>
+		<AdaptiveDrawer ariaLabel={`${fill ? kindName : 'Host access'} — ${owner(lease)}`} flushBottom opaque headless {open} onClose={onClose}>
 			<HostAccessActiveLeaseDrawer
 				{lease}
 				{nowMs}

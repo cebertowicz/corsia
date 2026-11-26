@@ -102,6 +102,12 @@ async def target_node(run: RunCommand, endpoint: str, selector: str) -> int | No
         return (await _locate_in_page(run, cdp, selector, scroll=False))[0]
 
 
+async def locate_target(run: RunCommand, page: CdpClient, selector: str) -> Located | None:
+    """The node an agent ref or CSS selector names, in the page or a frame, located exactly as a write
+    locates it (scrolling it into view as the native fill does); None when it can't be located."""
+    return (await _locate(run, page, selector))[0]
+
+
 async def is_dropdown(run: RunCommand, endpoint: str, selector: str) -> bool:
     """Whether an agent's ref or CSS selector names a native <select>, read through the DOM domain only.
 

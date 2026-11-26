@@ -95,7 +95,7 @@ def _snapshot_objects(db: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def test_the_step_is_registered_at_207() -> None:
-    assert SCHEMA_VERSION == 209
+    assert SCHEMA_VERSION == 210
     assert MIGRATIONS[207] is migrate_207_to_208
 
 
@@ -122,7 +122,7 @@ def test_upgrade_from_207_keeps_suggestion_history_and_adds_snapshots() -> None:
                    ('event', 'artifact', '{}', 'before', 'after'))
         db.commit()
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.from_version, result.to_version) == (207, 209)
+        assert (result.from_version, result.to_version) == (207, 210)
         assert db.execute('SELECT event_id FROM doc_suggestion_history').fetchone() == ('event',)
         assert _snapshot_objects(db)
 

@@ -118,7 +118,10 @@ export interface HostAccessFill {
 	 * domain; null only when the site has no host.
 	 */
 	domain: string | null;
+	/** The saved login's username; empty for a saved item. */
 	username: string;
+	/** A saved item's label (not a login), shown instead of a username; null for a saved login. */
+	item_label: string | null;
 	revision: number;
 	application_hash: string;
 	max_duration_seconds: number;

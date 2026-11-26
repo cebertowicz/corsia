@@ -174,14 +174,16 @@ async def _fill(thread_id: str, login: saved_logins.SavedLogin, runtime: Any, co
     async with browser_cdp.CdpClient(endpoint) as cdp:
         async with asyncio.timeout_at(deadline):
             loader = browser_cdp.loader_id(await cdp.call("Page.getFrameTree"))
-            clean = await _clean(thread_id, session, loader, domain, browser, endpoint)
+            clean = await clean_page(thread_id, session, loader, domain, browser, endpoint)
         if not clean:
             return "not_clean"
         return await _fill_on(cdp, thread_id, login, session, endpoint, loader, domain, deadline)
 
 
-async def _clean(thread_id: str, session: str | None, loader: str, domain: str, browser: str, endpoint: str) -> bool:
-    """No agent change in the session, no agent script in this document or on the saved site, no linked window."""
+async def clean_page(thread_id: str, session: str | None, loader: str, domain: str, browser: str,
+                     endpoint: str) -> bool:
+    """No agent change in the session, no agent script in this document or on the saved site, no linked window.
+    The saved-item fill (browser_item_fill) runs this same check."""
     if (browser_fill_marks.session_marked(thread_id, session) or browser_fill_marks.scripted(thread_id, loader)
             or browser_fill_marks.site_marked(thread_id, session, domain)):
         return False

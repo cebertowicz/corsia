@@ -87,7 +87,7 @@ def tab(monkeypatch) -> Tab:
 
 async def _refused(document: str, site: str) -> bool:
     # A marked session refuses before the fill opens any connection of its own.
-    return not await browser_login_fill._clean(THREAD, "s1", document, site, "ws://browser", "ws://page")
+    return not await browser_login_fill.clean_page(THREAD, "s1", document, site, "ws://browser", "ws://page")
 
 
 @pytest.mark.asyncio

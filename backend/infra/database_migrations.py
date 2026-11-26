@@ -268,6 +268,7 @@ from infra.migration_205_to_206_activity_ranking import migrate_205_to_206
 from infra.migration_206_to_207_suggestion_history import migrate_206_to_207
 from infra.migration_207_to_208_comment_source_snapshots import migrate_207_to_208
 from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
+from infra.migration_209_to_210_saved_item_fill_audit import migrate_209_to_210
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -971,6 +972,7 @@ MIGRATIONS[205] = migrate_205_to_206
 MIGRATIONS[206] = migrate_206_to_207
 MIGRATIONS[207] = migrate_207_to_208
 MIGRATIONS[208] = migrate_208_to_209
+MIGRATIONS[209] = migrate_209_to_210
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

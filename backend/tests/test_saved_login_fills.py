@@ -260,10 +260,10 @@ def test_no_agent_tool_names_the_fill_approval_module():
         and "saved_login_fills" in path.read_text(encoding="utf-8", errors="replace")
     }
     # The person's approval routes, the person's login delete route, the fill executor and the rejected-fill
-    # recorder.
+    # recorder; and the saved-item approvals, which open and read their requests through it.
     assert callers == {
         "api/host_access.py", "api/saved_logins.py",
-        "host_access/browser_login_fill.py", "infra/saved_login_results.py",
+        "host_access/browser_login_fill.py", "infra/saved_login_results.py", "infra/saved_item_fills.py",
     }
 
 

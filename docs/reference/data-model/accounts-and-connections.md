@@ -269,6 +269,7 @@ Source: `backend/infra/key_store_schema.py`.
 | `site` | TEXT | No | Yes | — | — |
 | `thread_id` | TEXT | No | Yes | — | — |
 | `result` | TEXT | No | Yes | — | — |
+| `item` | TEXT | No | No | — | — |
 
 Indexes: `idx_saved_login_fill_audit_login_created` (login_id, created_at).
 

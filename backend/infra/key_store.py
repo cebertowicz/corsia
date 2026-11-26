@@ -254,6 +254,14 @@ def _delete_row(name: str, db: sqlite3.Connection | None, scope: str) -> None:
     with write_transaction(db, scope=scope) as conn:
         conn.execute("DELETE FROM key_store_entries WHERE name = ?", (name,))
         key_store_values.sweep_after_commit(conn)
+    _end_fills(name)
+
+
+def _end_fills(name: str) -> None:
+    """End every approval to fill this entry into a page (``infra.saved_item_fills``): its value is gone."""
+    from infra.saved_item_fills import end_for_item  # Imported here: the fill approvals read this module.
+
+    end_for_item(name)
 
 
 def drop_managed_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
@@ -269,6 +277,7 @@ def clear_value(name: str, *, db: sqlite3.Connection | None = None) -> None:
     with write_transaction(db, scope="key_store_clear") as conn:
         conn.execute("UPDATE key_store_entries SET set_at = NULL, value_ref = NULL WHERE name = ?", (name,))
         key_store_values.sweep_after_commit(conn)
+    _end_fills(name)
 
 
 def removal_refusal(name: str) -> str | None:

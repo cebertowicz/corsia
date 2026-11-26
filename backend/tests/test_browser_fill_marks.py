@@ -264,7 +264,7 @@ def tool_path(synthetic_browser, monkeypatch, on_page):
 
 
 def _clean(calls) -> bool:
-    """What browser_login_fill._clean asks of the marks, for the session the commands ran in."""
+    """What browser_login_fill.clean_page asks of the marks, for the session the commands ran in."""
     session = calls[-1][0]
     assert session is not None
     return not (marks.scripted(THREAD, "L1") or marks.site_marked(THREAD, session, "example.com")

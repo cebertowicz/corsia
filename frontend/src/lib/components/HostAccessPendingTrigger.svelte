@@ -44,7 +44,7 @@
 		<span class="pending-owner">{request.script_name}</span>
 		<span class="pending-status" class:stale class:deciding>{stale ? 'Couldn’t check' : deciding ? 'Saving…' : 'Needs approval'}</span>
 	{:else if request.kind === 'fill'}
-		<span class="eyebrow">Saved login</span>
+		<span class="eyebrow">{request.item_label ? 'Saved item' : 'Saved login'}</span>
 		<span class="pending-owner fill">{owner(request)}</span>
 		<span class="pending-site" title={request.site} use:fitLabel={siteLabels(request.site, request.domain)}></span>
 		{#if stale}<StatePill state="error" label="Couldn’t check" size="sm" />{/if}
