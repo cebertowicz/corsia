@@ -11,7 +11,7 @@ import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { commentDraft, discardCommentDraft } from '$lib/stores/commentDraft';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
-import { RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
+import { ANSWER_ALLOWANCE_MS, RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
 import { toasts } from '$lib/stores/toast';
 import { docComments } from '$lib/stores/docComments';
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn(), postComment: vi.fn() }));
@@ -329,7 +329,11 @@ it('keeps the draft and re-enables Comment without posting when a reservation re
 	submit.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
+	// The budget alone doesn't end an ask already out: a slow server still has its allowance to answer.
 	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
+	expect(submit.disabled).toBe(true);
+	expect(toasts.show).not.toHaveBeenCalled();
+	await vi.advanceTimersByTimeAsync(ANSWER_ALLOWANCE_MS - RESERVE_BUDGET_MS);
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
 	expect(toasts.show).toHaveBeenCalledWith('Couldn’t attach your comment. Your draft is kept. Try again.', 'error');
 	expect(submit.textContent).toBe('Retry');

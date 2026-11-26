@@ -29,8 +29,11 @@ _OUTCOMES = frozenset({"delivered", "failed", "timeout", "earlier"})
 # others, from ``CommentActionError`` in comment_validation, image_regions, doc_images and comment_recipients, plus
 # ``selection_changed`` and ``not_commentable``, are 20 or fewer), so six characters of room remain. The browser's own
 # pattern in frontend/src/lib/stores/commentPostTiming.ts repeats this number.
+# A live document's capture that ended before any POST says so with ``cap`` in the status's place and its way of ending
+# as the code (``failed:cap:unanswered``; the codes are ``CaptureCode`` in frontend/src/lib/stores/captureFailed.ts,
+# the longest 10). ``cap`` is shorter than a status, so the longest outcome below is unchanged.
 _CODE_CHARS = 32
-_FAILED = re.compile(rf"failed:\d{{3}}(?::[a-z][a-z_]{{0,{_CODE_CHARS - 1}}})?")
+_FAILED = re.compile(rf"failed:(?:\d{{3}}|cap)(?::[a-z][a-z_]{{0,{_CODE_CHARS - 1}}})?")
 _LONGEST_OUTCOME = len("failed:999:") + _CODE_CHARS
 _NUMBER_KEYS = frozenset({"n", "a", "cap", "ens", "pn", "rec", "total", "post", "app", "recms"})
 

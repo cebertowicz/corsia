@@ -15,11 +15,17 @@ export class PostTimeoutError extends Error {
  */
 const CONNECTION_WAIT_MS = 50_000;
 /**
- * How long a comment's POST (and the document registration it waits on) has, from the call to its whole answer: the
- * connection wait above, plus 10 s for the server's own save (the slowest measured took 2.2 s, 2026-11-18). Cost: a
- * server that never answers takes this long to end the post failed.
+ * How long the server has for its own part of a comment request once the request reaches it: 10 s, against the slowest
+ * measured comment save of 2.2 s (2026-11-18). A live document's capture gives its ask for the comment's range the same
+ * allowance, since that ask never waits for a browser connection.
  */
-export const COMMENT_POST_TIMEOUT_MS = CONNECTION_WAIT_MS + 10_000;
+export const SERVER_SAVE_MS = 10_000;
+/**
+ * How long a comment's POST (and the document registration it waits on) has, from the call to its whole answer: the
+ * connection wait above, plus the server's own allowance. Cost: a server that never answers takes this long to end the
+ * post failed.
+ */
+export const COMMENT_POST_TIMEOUT_MS = CONNECTION_WAIT_MS + SERVER_SAVE_MS;
 /**
  * How long the look for a comment an unanswered post may have stored waits before the post ends failed: the
  * connection wait above, since the look sits in the same queue as the post it follows, plus 5 s for the server (about
