@@ -130,6 +130,23 @@ def test_a_request_for_another_persons_login_is_refused_on_the_server(agent, out
 
 
 @pytest.mark.asyncio
+async def test_the_executor_answers_another_persons_out_of_date_login_with_no_step_for_this_person(agent, monkeypatch):
+    theirs = saved_logins.save_login(site=SITE, username="other@example.com", password=agent.sentinel + "-other",
+                                     saved_by="someone")
+    saved_logins.mark_out_of_date(theirs)
+    declared = []
+
+    async def person_step(*args):
+        declared.append(args)
+        return "step"
+
+    monkeypatch.setattr(fill, "_person_step", person_step)
+    text = await fill.fill_saved_login(THREAD, theirs)
+    assert declared == [] and text == saved_login_fills._NOT_THEIRS
+    assert _requests() == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("page_url", [None, "http://example.com/login", "https://elsewhere.example/login", "about:blank"])
 async def test_the_list_covers_only_the_current_pages_site(agent, page_url):
     agent.page_url = page_url

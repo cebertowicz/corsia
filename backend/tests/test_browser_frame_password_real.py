@@ -299,3 +299,27 @@ async def test_a_password_field_in_a_cross_origin_frame_opens_the_step_and_stays
         resolve_search = _resolver(endpoint, await _element_box(endpoint, "q"))
         with pytest.raises(BrowserSessionError, match="until you open another page or reload"):
             await browser_control.require_page_access(THREAD, probe, ("get", "value", "@e1"), resolve=resolve_search)
+
+
+@pytest.mark.asyncio
+async def test_the_saved_login_list_reads_a_password_pages_address_without_a_step(plan, monkeypatch):  # noqa: F811
+    """browser_fill's no-match list reads the page's address with no agent command, so no step opens for it."""
+    import tools.browser_saved_login as choice
+    from host_access.processes import PROCESS_OWNER
+
+    with _sites('form') as url, _chrome(url.replace('/page.html', '/phone.html')) as endpoint:
+        class Owner:
+            async def has_session(self, _thread_id):
+                return True
+
+            async def page_endpoint(self, _thread_id):
+                return endpoint
+
+        monkeypatch.setattr(PROCESS_OWNER, "browser_sessions", lambda: Owner())
+        assert (await _until(lambda: _visible_password(endpoint))) is True
+        assert await choice._page_url(THREAD) == url.replace('/page.html', '/phone.html')
+        assert _steps(plan["db"]) == []
+
+
+async def _visible_password(endpoint: str) -> bool | None:
+    return True if (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes else None

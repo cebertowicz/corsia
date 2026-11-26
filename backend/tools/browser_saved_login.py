@@ -11,8 +11,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from host_access import browser_cli, browser_login_fill
-from tools.browser_runtime import _run
+from host_access import browser_cdp, browser_login_fill
 
 EXCLUSIVE = "Error: saved_login fills a saved login on its own; leave out selector and text."
 BAD_LOGIN = "Error: saved_login needs a site (its https address) and a username."
@@ -53,13 +52,20 @@ async def _on_page(thread_id: str) -> str:
 
 
 async def _page_url(thread_id: str) -> str | None:
-    """The thread's current page address, without opening a browser that isn't open."""
+    """The thread's current page address, without opening a browser that isn't open.
+
+    Read from the page target, not through an agent command: an agent command on a page showing a password field
+    would open the person's sign-in step and be refused, and this read only chooses which usernames to list.
+    """
     from host_access.processes import PROCESS_OWNER
 
-    if not await PROCESS_OWNER.browser_sessions().has_session(thread_id):
+    owner = PROCESS_OWNER.browser_sessions()
+    if not await owner.has_session(thread_id):
         return None
-    result = await _run(["get", "url"], thread_id=thread_id, notice=False)
-    if result.startswith("Error"):
+    try:
+        async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
+            info: Any = (await cdp.call("Target.getTargetInfo")).get("targetInfo")
+    except Exception:  # no page to read: the list is left out, as with no browser
         return None
-    url: Any = browser_cli.json_object(result).get("url")
+    url = info.get("url") if isinstance(info, dict) else None
     return url if isinstance(url, str) else None

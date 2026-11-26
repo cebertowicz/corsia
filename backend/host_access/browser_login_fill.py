@@ -139,6 +139,8 @@ async def _ask(thread_id: str, login_id: str, requested_seconds: int | None) -> 
     try:
         await asyncio.to_thread(
             partial(saved_login_fills.request_fill, thread_id, login_id, requested_seconds=requested_seconds))
+    except saved_login_fills.FillApprovalNotTheirs as refusal:
+        return str(refusal)  # nothing about another person's login reaches this person, a sign-in step included
     except saved_login_fills.FillApprovalError as refusal:
         text = str(refusal)
         try:

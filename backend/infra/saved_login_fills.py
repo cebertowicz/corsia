@@ -73,6 +73,10 @@ class FillApprovalNotFound(FillApprovalError):
     """No such request or grant for this person."""
 
 
+class FillApprovalNotTheirs(FillApprovalError):
+    """The login isn't the caller's person's: answered as no such login, with nothing about the login itself."""
+
+
 class FillDurationError(FillApprovalError):
     """The duration is not a whole number of seconds within the cap; nothing was granted."""
 
@@ -250,7 +254,7 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         raise FillApprovalError(str(exc)) from None
     user_id, root, agent = thread_record(clean_thread)
     if login.saved_by != user_id:
-        raise FillApprovalError(_NOT_THEIRS)
+        raise FillApprovalNotTheirs(_NOT_THEIRS)
     if login.status != saved_logins.STATUS_OK:
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     now_iso = utc_now_iso()

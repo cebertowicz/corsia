@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from host_access.browser_login_fill import MAX_MINUTES
 from tools.base import Tool
 from tools.browser_input import BrowserInputTool as BrowserInputTool
 from tools.browser_runtime import _declare_person_step, _execution_context, _run
@@ -137,8 +138,8 @@ class BrowserFillTool(Tool):
             },
             "minutes": {
                 "type": "integer",
-                "description": "With saved_login: how long your task needs the login, 1-30 minutes. The person "
-                               "decides.",
+                "description": "With saved_login: how long your task needs the login, 1-"
+                               f"{MAX_MINUTES} minutes. The person decides.",
             },
         },
         "required": [],
