@@ -9,8 +9,7 @@
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 // The same holds for a comment typed on a passage of a chat (`chatDraftKey`) and a reply typed in a chat's comment thread.
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
-import { clippedWindow } from '$lib/cm/visible-region';
-import type { DocViewerTarget } from '$lib/docViewerTarget';
+import { elementOnScreen as onScreen } from '$lib/elementOnScreen';
 import { onSignOut, user } from './auth';
 import { newClientId } from './documentWire';
 import { createDraftStorage, type NotKept, type StoredDraft } from './keptCommentDraftsStorage';
@@ -155,22 +154,6 @@ function focused(key: string): boolean {
 	const active = typeof document === 'undefined' ? null : document.activeElement;
 	return Boolean(active) && [...(boxes.get(key) ?? [])].some((box) => box.contains(active));
 }
-/**
- * Whether `box` takes room inside what the person sees now: the visual viewport (a phone's keyboard and pinch zoom
- * shrink it) and the part every clipping ancestor shows (`clippedWindow`), so a box its scroller has scrolled away is not
- * on screen. Nor is a box drawn invisible where it lies: hidden (`visibility`, which it inherits) or inside an inert
- * surface (a Popover not yet placed is inert as well as clipped away).
- */
-function onScreen(box: Element): boolean {
-	if (getComputedStyle(box).visibility !== 'visible' || box.closest('[inert]')) return false;
-	const rect = box.getBoundingClientRect(), view = window.visualViewport, { rect: clip } = clippedWindow(box);
-	const left = Math.max(rect.left, view?.offsetLeft ?? 0, clip.left);
-	const top = Math.max(rect.top, view?.offsetTop ?? 0, clip.top);
-	const right = Math.min(rect.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth), clip.right);
-	const bottom = Math.min(rect.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight), clip.bottom);
-	return right > left && bottom > top;
-}
-
 /** `use:showsDraft={key}` on a box's root: registered under the draft's key while mounted (`keptCommentDrafts.shown`). */
 export function showsDraft(node: Element, key: string) {
 	let drop = register(key, node);
@@ -180,24 +163,7 @@ export function showsDraft(node: Element, key: string) {
 	};
 }
 
-/** One document, whichever tab or viewer shows it. */
-export function documentDraftKey(target: Pick<DocViewerTarget, 'path' | 'projectId'> | null): string {
-	return target ? `document:${JSON.stringify([target.projectId ?? '', target.path])}` : '';
-}
-/** One image: an image artifact, or one image inside a document. */
-export function imageDraftKey(artifactId: string | null, image = ''): string {
-	return artifactId ? `image:${JSON.stringify([artifactId, image])}` : '';
-}
-/** A new comment on one passage of a chat: the chat, the message and the passage's offsets, so two passages never share a draft. */
-export function chatDraftKey(threadId: string, messageId: string, anchor: { from_off: number; to_off: number }): string {
-	return `chat:${JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off])}`;
-}
-/** The scope of a reply to a chat's comment thread (`replyDraftKey`): the thread's id is a comment's own UUID, so it keys the reply wherever the card is shown. */
-export const CHAT_REPLY_SCOPE = 'chat';
-/** A reply to one thread, under the document or image it is written on (`documentDraftKey`, `imageDraftKey`); a thread's id alone keys it where there is neither. */
-export function replyDraftKey(scope: string, commentId: string): string {
-	return `reply:${JSON.stringify([scope, commentId])}`;
-}
+export { CHAT_REPLY_SCOPE, chatDraftKey, documentDraftKey, imageDraftKey, replyDraftKey } from './commentDraftKeys';
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
