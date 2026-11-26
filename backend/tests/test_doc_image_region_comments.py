@@ -149,9 +149,9 @@ def test_a_moved_doc_pin_is_placed_on_the_current_image(integration_client, doc)
     [
         ("Plain words here.\n", "Plain words", "image"),
         ("![Remote](https://example.com/a.png)\n", "![Remote](https://example.com/a.png)", "web image"),
-        ("![Gone](img/missing.png)\n", "![Gone](img/missing.png)", "could not be found"),
+        ("![Gone](img/missing.png)\n", "![Gone](img/missing.png)", "couldn’t be found"),
         ("![Notes](notes.md)\n", "![Notes](notes.md)", "not an image"),
-        ("![Folder](img/folder.png)\n", "![Folder](img/folder.png)", "not a file"),
+        ("![Folder](img/folder.png)\n", "![Folder](img/folder.png)", "isn’t a file"),
     ],
 )
 def test_a_doc_region_needs_an_image_stored_in_the_workspace(integration_client, doc, text, markdown, detail):
@@ -163,6 +163,18 @@ def test_a_doc_region_needs_an_image_stored_in_the_workspace(integration_client,
 
     assert r.status_code == 400, r.text
     assert detail in r.text
+    assert str(doc.parent.resolve()) not in r.text and str(doc.parent) not in r.text
+
+
+def test_a_refused_doc_image_is_named_from_the_workspace_root(integration_client, doc, integration_workspace):
+    artifact_id = _register(integration_client, doc)
+    (doc.parent / "img" / "cart.png").unlink()
+
+    r = _post(integration_client, artifact_id, doc, CART, {"x": 0.1, "y": 0.1})
+
+    assert r.status_code == 400, r.text
+    named = (doc.parent / "img" / "cart.png").relative_to(integration_workspace).as_posix()
+    assert r.json() == {"detail": f"the image {named} couldn’t be found.", "kind": "region_target"}
 
 
 def test_a_doc_region_without_its_image_is_refused(integration_client, doc):
@@ -273,7 +285,7 @@ def test_a_doc_pin_does_not_move_onto_an_image_now_outside_the_scope(integration
     r = integration_client.patch(_url(f"/api/comments/{comment['id']}"), json={"region": {"x": 0.5, "y": 0.5}})
 
     assert r.status_code == 400, r.text
-    assert "outside this document's scope" in r.text
+    assert "isn’t in this project or workspace" in r.text
 
 
 def test_listing_comments_never_reads_an_image_now_outside_the_scope(integration_client, doc, tmp_path_factory,
@@ -370,7 +382,7 @@ async def test_a_project_document_never_reads_an_image_in_another_project(integr
         doc_path=str(doc), quote=str(secret), region={"x": 0.1, "y": 0.1}, body="b", _thread_id=r.json()["thread_id"],
     )
 
-    assert str(created).startswith("Error") and "outside" in str(created), created
+    assert str(created).startswith("Error") and "isn’t in this project or workspace" in str(created), created
 
 
 def test_listing_scopes_its_reader_once_however_many_images(integration_client, doc, monkeypatch):

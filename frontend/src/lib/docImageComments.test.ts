@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DocComment } from '$lib/stores/docComments';
 import cases from '../../../backend/tests/fixtures/diagram-fences.json';
+import { ChangeSet } from '@codemirror/state';
 import { changedLabel, commentsAtImage, diagramAtAnchor, groupRows, imageGroupKey, isDiagramPin, remapOccurrence, sharedImage } from './docImageComments';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
@@ -45,6 +46,40 @@ describe('comments on images inside a document', () => {
 		const image = { from: 10, to: 24, src: 's' };
 		expect(remapOccurrence(image, (pos) => pos + 5)).toEqual({ from: 15, to: 29, src: 's' });
 		expect(remapOccurrence(image, (pos) => pos)).toBe(image);
+	});
+
+	describe('through an edit of the document text', () => {
+		const text = 'x'.repeat(10) + '![Mock](a.png)' + 'y'.repeat(6);
+		const image = { from: 10, to: 24, src: 's' };
+		const through = (from: number, insert: string, to = from) => {
+			const changes = ChangeSet.of({ from, to, insert }, text.length);
+			return remapOccurrence(image, (pos, assoc) => changes.mapPos(pos, assoc));
+		};
+
+		it('moves past text inserted exactly where the image starts, because that text is above it, not part of it', () => {
+			expect(through(10, 'new line\n\n')).toEqual({ from: 20, to: 34, src: 's' });
+		});
+
+		it('moves past text that replaces what stood right above the image', () => {
+			expect(through(4, 'a longer heading\n\n', 10)).toEqual({ from: 22, to: 36, src: 's' });
+		});
+
+		it('leaves text inserted exactly where the image ends below it', () => {
+			expect(through(24, '\n\nnew text')).toBe(image);
+		});
+
+		it('still stretches over text inserted inside the markdown', () => {
+			expect(through(15, 'ZZ')).toEqual({ from: 10, to: 26, src: 's' });
+		});
+
+		it('collapses an image whose markdown is deleted, so nothing is posted on it', () => {
+			const gone = through(8, '', 26);
+			expect(gone.from).toBe(gone.to);
+		});
+
+		it('collapses, never reverses, when an edit replaces text from above the image into its markdown with new text', () => {
+			expect(through(8, 'abc', 26)).toEqual({ from: 8, to: 8, src: 's' });
+		});
 	});
 });
 

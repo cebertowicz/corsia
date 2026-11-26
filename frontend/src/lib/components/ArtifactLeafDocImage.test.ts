@@ -433,6 +433,32 @@ describe('an image of a document opened in the canvas', () => {
 		);
 	});
 
+	it('moves with its markdown when text is inserted exactly where the image starts, and stays when text is added at its end', async () => {
+		await mountLeaf();
+		const original = activeInstance();
+		await openImageFromDocument();
+		const editor = EditorView.findFromDOM(host.querySelector<HTMLElement>('.doc-host .cm-content')!)!;
+
+		editor.dispatch({ changes: { from: 9, insert: 'Added above\n\n' } });
+		await settle();
+		expect(tabDocumentImage(THREAD, original)).toMatchObject({ from: 22, to: 49 });
+
+		editor.dispatch({ changes: { from: 49, insert: '\n\nAdded below' } });
+		await settle();
+		expect(tabDocumentImage(THREAD, original)).toMatchObject({ from: 22, to: 49 });
+	});
+
+	it('keeps an open image on its markdown when the leaf shows a document of another thread, as the image is held under the leaf’s own thread', async () => {
+		await mountLeaf('expanded', { targetThreadId: OTHER });
+		const original = activeInstance();
+		await openImageFromDocument();
+		expect(tabDocumentImage(THREAD, original)).toMatchObject({ from: 9, to: 36 });
+
+		EditorView.findFromDOM(host.querySelector<HTMLElement>('.doc-host .cm-content')!)!.dispatch({ changes: { from: 0, insert: 'Intro\n' } });
+		await settle();
+		expect(tabDocumentImage(THREAD, original)).toMatchObject({ from: 15, to: 42 });
+	});
+
 	it('keeps the pane as the user left it when they toggle it while the viewer is open', async () => {
 		await mountLeaf();
 		showImage();
