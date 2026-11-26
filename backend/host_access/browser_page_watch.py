@@ -1,4 +1,7 @@
-"""Mark every document an agent command that can type passes through (capture rule 7).
+"""A page watch: mark every document an agent command passes through.
+
+Two callers depend on it: login capture's rule 7 (browser_login_capture, a command that can type) and the
+saved-login fill's marks (browser_fill_marks, a command that can run script). A change here changes both.
 
 A second CDP connection to the agent's page sees each main-frame Page.frameNavigated while the command runs,
 back/forward cache restores included, and a restored document keeps its loader id (checked on Chrome for
@@ -18,6 +21,11 @@ from host_access.browser_cdp import CdpClient
 from host_access.browser_cdp_targets import page_targets
 
 log = logging.getLogger(__name__)
+# How long a watch may take to start, and to settle after its command; both callers use it. A watch opened in about
+# 2 ms and settled in 1-5 ms on Chrome for Testing 152 (PR #3242); a script command's watch makes the same calls.
+# Waiting holds the agent's command, then the pane; expiring marks every document, so capture makes no offer and
+# the fill refuses the session, and the person's own sign-in still goes through. Five seconds is three orders above.
+WATCH_TIMEOUT = 5.0
 # Stands for "a document whose loader couldn't be read": the thread's every document counts as marked.
 ANY_DOCUMENT = ""
 
@@ -32,7 +40,7 @@ def _page_ids(endpoint: str, timeout: float) -> frozenset[str]:
     return frozenset(str(target.get("id")) for target in page_targets(endpoint, timeout))
 
 
-class AgentWrites:
+class PageWatch:
     """One agent command's watch: start it before the command runs, settle it before the pane gets the page back."""
 
     def __init__(self, mark: Callable[[str], None], timeout: float, done: Callable[[], None] = lambda: None) -> None:
@@ -95,7 +103,7 @@ class AgentWrites:
             self._mark(_loader(((answer.get("result") or {}).get("frameTree") or {}).get("frame")))
             if pages - self._pages:
                 self._mark(ANY_DOCUMENT)
-                log.info("a page opened while an agent typed; saved-login capture makes no offer in this session")
+                log.info("a page opened while an agent command ran; its page watch marks every document of the session")
         except BaseException as exc:
             self._fail(exc)
             if not isinstance(exc, Exception):
@@ -111,8 +119,8 @@ class AgentWrites:
 
     def _fail(self, exc: BaseException) -> None:
         self._mark(ANY_DOCUMENT)
-        log.info("saved-login capture couldn't follow the page an agent typed into (%s); no offer is made in this "
-                 "session", type(exc).__name__)
+        log.info("a page watch couldn't follow an agent command's page (%s); it marks every document of the session",
+                 type(exc).__name__)
 
     async def _close(self) -> None:
         listener, cdp, self._listener, self._cdp = self._listener, self._cdp, None, None
@@ -122,17 +130,17 @@ class AgentWrites:
             try:
                 await cdp.__aexit__(None, None, None)
             except Exception as exc:  # noqa: BLE001 - the marks are already set; no close error changes them
-                log.info("saved-login capture's page watch didn't close cleanly (%s)", type(exc).__name__)
+                log.info("an agent command's page watch didn't close cleanly (%s)", type(exc).__name__)
 
-    async def __aenter__(self) -> AgentWrites:
+    async def __aenter__(self) -> PageWatch:
         return self
 
     async def __aexit__(self, *_: object) -> None:
         await self.settle()
 
 
-class NoWrites(AgentWrites):
-    """A command that can't type, or one from the pane: nothing to mark."""
+class NoWatch(PageWatch):
+    """A command its caller has no need to watch (for capture: one that can't type, or one from the pane)."""
 
     def __init__(self) -> None:
         super().__init__(lambda _loader: None, 0)

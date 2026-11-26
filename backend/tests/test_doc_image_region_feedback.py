@@ -123,5 +123,5 @@ def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(iso
         db.close()
 
     assert "Marked-up image (numbered boxes)" not in description, description
-    assert "Marked-up image unavailable:" in description and "outside" in description, description
+    assert "Marked-up image unavailable:" in description and "isn’t in this project or workspace" in description, description
     assert outside.resolve() not in read

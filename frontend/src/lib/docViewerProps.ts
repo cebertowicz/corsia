@@ -22,6 +22,8 @@ export type DocViewerProps = {
 	offScreen?: boolean;
 	/** Keep a reply landing visible beneath the host's notice and the comments popover. */
 	protectReplyLanding?: boolean;
+	/** The thread whose tab holds this document's open image: the leaf's own thread; the document's thread when not given. */
+	tabThreadId?: string | null;
 	/** The tab's reply landing was acted on, or had no readable replies; the tab drops it. */
 	onLanded?: () => void;
 };

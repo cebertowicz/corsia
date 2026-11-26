@@ -66,6 +66,26 @@ describe('each await on a comment post ends inside its bound', () => {
 	});
 });
 
+describe('a post waiting its turn for a browser connection', () => {
+	it('goes out once, under its draft\'s id, when its request only starts 20 s after the press', async () => {
+		// The browser queues a request while its few connections per origin are held: nothing is sent until one frees,
+		// and an abort meanwhile cancels it unsent.
+		const fetch = vi.fn((_input: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+			const sent = setTimeout(() => resolve(new Response(JSON.stringify({ comment: { id: 'draft-1', body: 'Too vague' } }), { status: 200 })), 20_000);
+			init?.signal?.addEventListener('abort', () => { clearTimeout(sent); reject(new DOMException('aborted', 'AbortError')); });
+		}));
+		vi.stubGlobal('fetch', fetch);
+		const post = watch(postTop('artifact', 'draft-1', fields));
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(post.error).toBeUndefined();
+		expect(post.settled).toBe(true);
+		const posts = fetch.mock.calls.filter(([, init]) => init?.method === 'POST');
+		expect(posts).toHaveLength(1);
+		expect(JSON.parse(String(posts[0][1]?.body)).client_id).toBe('draft-1');
+		expect(posts[0][1]?.signal?.aborted).toBe(false);
+	});
+});
+
 describe('the timing header', () => {
 	const headerOf = (call: unknown[]) => new Headers((call[1] as RequestInit).headers).get(COMMENT_TIMING_HEADER);
 
@@ -116,6 +136,22 @@ describe('the timing header', () => {
 		const headers = fetch.mock.calls.map(headerOf);
 		for (const header of headers.slice(0, 3)) expect(header).toMatch(/^pn=1,rec=0,out=failed,total=\d+$/);
 		expect(headers[3]).toBeNull();
+	});
+
+	it.each([
+		['a refusal with its code', new Error('400 {"detail":"the image a.png couldn’t be found.","kind":"region_target"}'), 'failed:400:region_target'],
+		['a selection refusal', new Error('409 {"detail":"The text you selected changed.","kind":"selection_changed"}'), 'failed:409:selection_changed'],
+		['a refusal with no code', new Error('404 {"detail":"Not found"}'), 'failed:404'],
+		['a body that is not JSON', new Error('502 <html>Bad gateway</html>'), 'failed:502'],
+		['a code that is a sentence', new Error('400 {"kind":"the image /Users/me/a.png couldn’t be found"}'), 'failed:400'],
+		['a lost connection', new TypeError('Failed to fetch'), 'failed']
+	])('names how a post failed by its status and its code only: %s', async (_name, error, expected) => {
+		vi.useRealTimers();
+		await timedPost('draft-1', () => Promise.reject(error)).catch(() => {});
+		const fetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ comments: [], feedback: {} }), { status: 200 })));
+		vi.stubGlobal('fetch', fetch);
+		await fetchComments('artifact');
+		expect(headerOf(fetch.mock.calls[0])).toMatch(new RegExp(`^pn=1,rec=0,out=${expected},total=\\d+$`));
 	});
 
 	it('lets the last finished post win: an earlier request\'s late success does not clear a newer report', async () => {

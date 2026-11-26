@@ -30,6 +30,17 @@ describe('document editor theme', () => {
 		expect(css).not.toMatch(/@media[^{]*\{ ?font-size/);
 	});
 
+	it('keeps room for the narrow floating offer but uses ordinary table padding on touch', () => {
+		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docTheme] }), parent: document.body });
+		const css = mountedCss().replace(/\s+/g, ' ');
+		view.destroy();
+		const narrow = css.match(/@media \(max-width: 768px\) ?\{[^@]*?\.cm-md-table ?\{ ?padding-bottom: ([^;}]+)/);
+		const coarse = css.match(/@media \(pointer: coarse\) ?\{[^@]*?\.cm-md-table ?\{ ?padding-bottom: ([^;}]+)/);
+		expect(narrow?.[1]).toBe('calc(var(--touch-target) + 0.6em)');
+		expect(coarse?.[1]).toBe('0.6em');
+		expect(coarse!.index).toBeGreaterThan(narrow!.index!);
+	});
+
 	it('paints the selection from the accent selection role, never a share chosen here, and keeps the matched-text wash faint', () => {
 		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docTheme] }), parent: document.body });
 		const css = mountedCss().replace(/\s+/g, ' ');

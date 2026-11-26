@@ -10,7 +10,7 @@ metadata:
 
 **Applying these steps:** when you take on work this skill's description covers, start one run (skill `task-discipline`, Declared workflows). Before you start it, check that no workflow made for this kind of work fits: one that fits comes first. Only the agent answerable for the whole result starts a run; a worker doing part of a run, or a reviewer checking one, works inside that run and starts none of its own.
 
-This is the floor under work that has no workflow of its own. It carries the steps every kind of work needs; it does not know the rules of any field. Its four required steps are Ground, Work, Review and Hand over. Pre-mortem is optional.
+This is the floor under work that has no workflow of its own. It carries the steps every kind of work needs; it does not know the rules of any field. Its three required steps are Ground, Work and Review. Pre-mortem is optional.
 
 ## Ground
 
@@ -54,13 +54,16 @@ Optional. Do it when the result will be sent outside, is hard to undo, is large,
 - Put anything that needs the person's own hands (a signature, a sign-in) as its own step, so only what depends on it waits. Hold every wait with a watch (skill `plans-and-workers`); when it ends, re-read what was already done or sent before acting again.
 - When what you find contradicts the plan, change the steps and say what changed. If the work turns into a different kind, `fail` the step you are on with that reason (this ends the run) and start the fitting workflow, naming this run.
 - Hand bounded parts to a worker with a brief that stands alone; check what it returns against the work itself, never its own account.
-- Do not send, publish, pay, file or delete anything here: draft it. It goes out in Hand over.
+- Do not send, publish, pay, file or delete anything here: draft it. It goes out after Review, as Hand over says.
+- When the result is ready, before the person sees it (any draft to be sent, published, paid, filed or deleted included), hand the Review step with `delegate_task` on that step to a new worker that has not seen the work. The hand-off is the brief, written as skill `review-work`'s Brief says; a failed review comes back to you as its Findings says.
 
 ## Review
 
-CORSIA builds this step as a run of skill `review-work` under it: work through those steps on the result before the person sees it, including any draft to be sent, published, paid, filed or deleted. Start no second review run.
+For the fresh reviewer. Load skill `review-work` and check the result as its Check says. Your verdict settles this step: PASS, or each failure, worst first. Change nothing, send nothing, and start no run of your own.
 
 ## Hand over
+
+For the agent that did the work. When the review passes, the run ends; there is no step for this. Do it before you call the work done.
 
 Check the result yourself against Done when, the way the person will use it and where: the thing itself, as they will meet it. A check of something standing in for it (a draft instead of what goes out, a few items instead of the whole, another copy or device) does not count; if you cannot make the real check, say so in what you hand over.
 

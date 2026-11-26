@@ -22,6 +22,7 @@ from PIL import Image
 from doceditor import diagram_pins, live_events
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.document_scope import ProjectNotFound, scope_bases
+from doceditor.image_label import image_label
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
@@ -43,7 +44,8 @@ _EPSILON = 1e-6
 # What a marked-up copy can fail with: a missing or unreadable file, a format
 # Pillow cannot decode, or an image past the decode budget.
 RENDER_ERRORS = (OSError, ValueError, Image.DecompressionBombError)
-_REFUSED = {"missing": "could not be found", "outside": "is outside this document's scope", "not_file": "is not a file"}
+# The composer shows these to the person: "Couldn’t" is the failure phrase, and the roots ``scope_bases`` reads are a project or workspace.
+_REFUSED = {"missing": "couldn’t be found", "outside": "isn’t in this project or workspace", "not_file": "isn’t a file"}
 
 
 def parse_region(value: Any) -> tuple[float, float, float, float]:
@@ -137,7 +139,7 @@ def checked_image(db, path: str, bases: list[Path]) -> Path:
     try:
         return checked_read(path, bases, db=db)
     except ReadRefused as exc:
-        raise CommentActionError("region_target", f"the image {path} {_REFUSED[exc.reason]}.") from exc
+        raise CommentActionError("region_target", f"the image {image_label(path)} {_REFUSED[exc.reason]}.") from exc
 
 
 def comment_image(db, row: Mapping[str, Any], path: str | None, bases: list[Path]) -> Path | None:

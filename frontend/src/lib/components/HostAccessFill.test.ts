@@ -30,6 +30,27 @@ function target(): HTMLElement {
 	return element;
 }
 
+function durationSelect(host: HTMLElement): HTMLSelectElement | null {
+	return host.querySelector<HTMLSelectElement>('select[id^="fill-duration-"]');
+}
+
+function optionTexts(host: HTMLElement): string[] {
+	return [...(durationSelect(host)?.options ?? [])].map((option) => option.textContent?.trim() ?? '');
+}
+
+function selected(host: HTMLElement): string | undefined {
+	const select = durationSelect(host);
+	return select ? select.options[select.selectedIndex]?.textContent?.trim() : undefined;
+}
+
+/** Pick a choice the way the native picker does: set the value, then fire change. */
+function choose(host: HTMLElement, value: string): void {
+	const select = durationSelect(host)!;
+	select.value = value;
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	flushSync();
+}
+
 function pending(request: HostAccessFill, props: Record<string, unknown> = {}) {
 	const host = target();
 	const onApprove = vi.fn();
@@ -51,14 +72,11 @@ it('names the agent, site and username, and approves for the duration the person
 	expect(text).toContain('https://example.com');
 	expect(text).toContain('me@example.com');
 	expect(text).toContain('Needs approval');
-	expect(text).toContain('The agent never sees it, and you can revoke this approval at any time.');
-	const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-	expect(radios.map((radio) => radio.textContent?.trim())).toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
-	expect(radios[0].getAttribute('aria-checked')).toBe('true');
-	radios[1].click();
-	flushSync();
-	expect(radios[1].getAttribute('aria-checked')).toBe('true');
-	expect(radios[0].getAttribute('aria-checked')).toBe('false');
+	expect(text).toContain('The agent never sees it.');
+	expect(optionTexts(host)).toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(selected(host)).toBe('5 minutes');
+	choose(host, '900');
+	expect(selected(host)).toBe('15 minutes');
 	const buttons = [...host.querySelectorAll('button')];
 	buttons.find((button) => button.textContent?.trim() === 'Approve')?.click();
 	expect(onApprove).toHaveBeenCalledOnce();
@@ -90,12 +108,14 @@ it('puts the status and Done on the title row, with Done closing the sheet', asy
 	await unmount(component);
 });
 
-it('moves the duration choice with the arrow keys', async () => {
+it('draws the duration as one select named Duration, in the sheet\'s nested field', async () => {
 	const { host, component, onApprove } = pending(fill());
-	const first = host.querySelector<HTMLButtonElement>('[role="radio"]')!;
-	first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-	flushSync();
-	expect(host.querySelector('[data-seconds="1800"]')?.getAttribute('aria-checked')).toBe('true');
+	const select = durationSelect(host)!;
+	expect(select.closest('.field')?.classList.contains('nested')).toBe(true);
+	// The select's name is its own label; the drawn label is the sheet's section label, like Site and Username.
+	expect(host.querySelector(`label[for="${select.id}"]`)?.textContent?.trim()).toBe('Duration');
+	expect(select.closest('section')?.querySelector('.section-label')?.textContent).toBe('Duration');
+	choose(host, '1800');
 	[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve')?.click();
 	expect(onApprove.mock.calls[0][1]).toBe(1800);
 	await unmount(component);
@@ -244,12 +264,8 @@ it('posts a fill decision to the fill route with the picked duration only on app
 
 // --- The duration the agent asks for, and "Until I turn it off" --------------------------------
 
-function radios(host: HTMLElement): HTMLButtonElement[] {
-	return [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-}
-
 function checked(host: HTMLElement): string | undefined {
-	return radios(host).find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent?.trim();
+	return selected(host);
 }
 
 function approve(host: HTMLElement): void {
@@ -258,14 +274,10 @@ function approve(host: HTMLElement): void {
 
 it('starts on the duration the agent asked for, and never on Until I turn it off', async () => {
 	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
-	expect(radios(host).map((radio) => radio.textContent?.trim()))
-		.toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
+	expect(optionTexts(host)).toEqual(['5 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
 	expect(checked(host)).toBe('15 minutes');
-	// The one focusable choice (roving tabindex) is the agent's asked-for time, so Enter there keeps it.
-	expect(radios(host).filter((radio) => radio.tabIndex === 0).map((radio) => radio.textContent?.trim())).toEqual(['15 minutes']);
-	const standing = host.querySelector<HTMLButtonElement>('[data-seconds="until_revoked"]')!;
-	expect(standing.getAttribute('aria-checked')).toBe('false');
-	expect(standing.tabIndex).toBe(-1);
+	const standing = [...durationSelect(host)!.options].find((option) => option.value === 'until_revoked')!;
+	expect(standing.selected).toBe(false);
 	approve(host);
 	expect(onApprove.mock.calls[0][1]).toBe(900);
 	await unmount(component);
@@ -273,7 +285,7 @@ it('starts on the duration the agent asked for, and never on Until I turn it off
 
 it('adds the asked-for time when it is not one of the usual choices, within the cap only', async () => {
 	const asked = pending(fill({ requested_duration_seconds: 600 }));
-	expect(radios(asked.host).map((radio) => radio.textContent?.trim()))
+	expect(optionTexts(asked.host))
 		.toEqual(['5 minutes', '10 minutes', '15 minutes', '30 minutes', 'Until I turn it off']);
 	expect(checked(asked.host)).toBe('10 minutes');
 	await unmount(asked.component);
@@ -283,7 +295,7 @@ it('adds the asked-for time when it is not one of the usual choices, within the 
 	expect(fillDurations(1800, 90.5)).toEqual([300, 900, 1800]);
 	// Below the shortest time there is no choice at all, Until I turn it off included.
 	const none = pending(fill({ max_duration_seconds: 120 }));
-	expect(radios(none.host)).toEqual([]);
+	expect(durationSelect(none.host)).toBeNull();
 	expect(none.host.textContent).not.toContain('Until I turn it off');
 	await unmount(none.component);
 	// Over the cap or not a whole number of seconds: today's default, the shortest.
@@ -296,29 +308,22 @@ it('adds the asked-for time when it is not one of the usual choices, within the 
 
 it('approves until revoked only when the person picks it', async () => {
 	const { host, component, onApprove } = pending(fill({ requested_duration_seconds: 900 }));
-	host.querySelector<HTMLButtonElement>('[data-seconds="until_revoked"]')!.click();
-	flushSync();
+	choose(host, 'until_revoked');
 	expect(checked(host)).toBe('Until I turn it off');
 	approve(host);
 	expect(onApprove.mock.calls[0][1]).toBe('until_revoked');
 	await unmount(component);
 });
 
-it('reaches Until I turn it off by the arrow keys only stepping forward from the longest time, never by wrapping', async () => {
-	const { host, component } = pending(fill());
-	const key = (key: string) => {
-		host.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')!
-			.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-		flushSync();
-		return checked(host);
-	};
-	expect(key('ArrowLeft')).toBe('30 minutes'); // wraps back to the longest time, not to Until I turn it off
-	expect(key('ArrowRight')).toBe('Until I turn it off');
-	expect(key('ArrowRight')).toBe('5 minutes');
-	expect(key('ArrowUp')).toBe('30 minutes');
-	expect(key('ArrowDown')).toBe('Until I turn it off');
-	expect(key('ArrowLeft')).toBe('30 minutes');
-	expect(key('Enter')).toBe('30 minutes');
+it('says nothing about revoking under any choice, so nothing moves when the choice changes', async () => {
+	const { host, component } = pending(fill({ requested_duration_seconds: 900 }));
+	const explainer = 'CORSIA types the password into this site for the agent. The agent never sees it.';
+	for (const choice of ['900', 'until_revoked', '1800']) {
+		choose(host, choice);
+		expect(host.querySelector('.explainer')?.textContent).toBe(explainer);
+		expect(host.querySelector('.field .hint')).toBeNull();
+		expect(host.textContent).not.toContain('revoke');
+	}
 	await unmount(component);
 });
 

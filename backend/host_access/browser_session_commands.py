@@ -360,7 +360,7 @@ async def guard_close(owner: Any, runtime: Any) -> None:
     except BrowserSessionCleanupError:
         return
     except BrowserSessionError as exc:
-        if str(exc) not in {browser_control.PAGE_CHECK_FAILED, browser_cli.BROWSER_BUSY}:
+        if str(exc) not in {browser_control.PAGE_CHECK_FAILED, browser_control.PAGE_CHECK_REFUSED, browser_cli.BROWSER_BUSY}:
             raise
 
 

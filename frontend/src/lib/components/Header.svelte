@@ -335,9 +335,7 @@
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
 			height: var(--header-bottom);
-			/* Moves the row down by exactly the clearance --header-bottom adds (app.css), so it
-			   keeps its place relative to the bottom edge, below the iOS 27 top-edge blur. */
-			padding-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));
+			padding-top: max(8px, calc(var(--safe-top) - 28px));
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;

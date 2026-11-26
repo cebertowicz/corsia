@@ -42,12 +42,25 @@ def test_parse_drops_a_malformed_header_whole(raw):
 
 
 # Every key the browser sends at once, each at its longest value: the header the size cap is derived from.
-LONGEST = ("n=999999999,a=999999999,cap=999999999,ens=999999999,pn=999999999,rec=1,out=delivered,"
+LONGEST = ("n=999999999,a=999999999,cap=999999999,ens=999999999,pn=999999999,rec=1,out=failed:999:" + "a" * 32 + ","
            "total=999999999,post=999999999,app=999999999,recms=999999999")
 
 
+@pytest.mark.parametrize("outcome", ["failed", "failed:400", "failed:400:region_target", "failed:409:selection_changed"])
+def test_a_refused_post_names_its_status_and_code(outcome):
+    assert parse_comment_timing(f"n=2,out={outcome}") == {"n": 2, "out": outcome}
+
+
+@pytest.mark.parametrize("outcome", [
+    "failed:", "failed:4", "failed:4000", "failed:400:", "failed:400:Region", "failed:400:a b",
+    "failed:400:/Users/me/a.png", "failed:400:" + "a" * 33, "failed:x:region_target", "failed:400:region_target:x",
+])
+def test_a_failure_with_anything_but_a_status_and_a_short_code_drops_the_header(outcome):
+    assert parse_comment_timing(f"n=2,out={outcome}") is None
+
+
 def test_the_size_cap_is_the_longest_header_the_browser_builds():
-    assert len(LONGEST) == MAX_HEADER_BYTES == 145
+    assert len(LONGEST) == MAX_HEADER_BYTES == 179
     assert parse_comment_timing(LONGEST) is not None
     assert parse_comment_timing(LONGEST + " ") is None
 
