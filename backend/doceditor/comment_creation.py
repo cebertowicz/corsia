@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
-from doceditor.comment_action_errors import CommentSelectionChanged, passage_gone
+from doceditor.comment_action_errors import CommentSelectionChanged, identity_settling, passage_gone
 from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
@@ -150,7 +150,7 @@ async def _reserve_and_create(manager, path, artifact_id, identifier, author, us
             raise comments.CrossArtifactIdError("client_id belongs to another artifact or author") from exc
         anchor = prepare(live)
         if identifier in live.ranges:
-            raise CommentSelectionChanged("Comment identity is still settling; try again.")
+            raise identity_settling()
         # The capture's reserved span becomes the comment's own range.
         live.adopt(identifier, anchor.start, anchor.end)
         receipt = CreateReceipt()

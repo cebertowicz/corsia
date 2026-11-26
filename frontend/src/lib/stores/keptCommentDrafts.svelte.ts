@@ -187,6 +187,8 @@ export { CHAT_REPLY_SCOPE, chatDraftKey, documentDraftKey, imageDraftKey, replyD
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
+	/** The keys of the drafts pressed and not yet posted, refused or edited since (`send`), whose post may go on its own. */
+	pressed(): string[] { return [...cells].filter(([, found]) => found.draft?.send).map(([key]) => key); },
 	/** What the line under the draft's box says while this device does not keep it (`NOT_KEPT_MESSAGE`), else ''. */
 	notKept(key: string): string {
 		const why = key ? cell(key).notKept : null;

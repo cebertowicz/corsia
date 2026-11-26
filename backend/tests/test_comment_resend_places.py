@@ -176,6 +176,11 @@ async def test_an_open_document_with_no_capture_held_places_a_kept_draft_by_its_
         assert refused.status_code == 409, refused.text
         assert refused.json()['kind'] == 'passage_gone'
         assert 'live-refused' not in entry.live.ranges
+        # An id the live document tracks but has not stored yet: a later try goes through, so its kind says so.
+        entry.live.track_range('live-settling', *span(text, 'second'))
+        settling = await post_live(entry, kept(text, 'second'), 'live-settling')
+        assert settling.status_code == 409, settling.text
+        assert settling.json()['kind'] == 'identity_settling'
     finally:
         await manager.close()
         app_loop.clear()
