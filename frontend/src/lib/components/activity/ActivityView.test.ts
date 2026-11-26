@@ -1446,6 +1446,22 @@ describe('Activity on a phone', () => {
 		expect(rows()).toHaveLength(0);
 	});
 
+	it('closing the chat tab leaves the pane empty without claiming the list is empty', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 1, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat];
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [] }));
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		rows()[0].click(); await settle();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Close Planning"]')!.click(); await settle();
+		listeners.get('chat_comments_changed')?.(); await settle();
+		expect(rows()).toHaveLength(1);
+		expect(openRow()).toBeFalsy();
+		expect(pane().textContent).not.toContain('No unread replies.');
+	});
+
 	it('keeps an opened document’s Done at least 44 px high on a phone, on the bar’s own line', () => {
 		expect(paneSource).toContain(':global(.activity.phone) .doc-done :global(.btn) { min-height: var(--touch-target); }');
 		expect(paneSource).toMatch(/<div class="doc-line">\s*<span class="doc-at"[^>]*>\{barLabel\}<\/span>\s*<span class="doc-done">/);

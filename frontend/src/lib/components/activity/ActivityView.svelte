@@ -347,7 +347,7 @@
 				{@const mountedKey = openItem.key}
 				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && allReadKey === null} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} onCloseChat={() => { paneClosed = true; openKey = null; kept = null; phoneOpen = false; paneInstance += 1; }} />
 			{/key}
-		{:else if !loading && store.status === 'ready'}
+		{:else if !loading && store.status === 'ready' && !(tab === 'tasks' ? tasks : notifications).length}
 			<div class="nothing">{EMPTY_LINE[tab]}</div>
 		{/if}
 	</section>
