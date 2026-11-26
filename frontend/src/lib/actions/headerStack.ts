@@ -90,6 +90,7 @@ export function headerStack(node: HTMLElement, _key?: unknown) {
 	let frame = 0;
 	const apply = () => {
 		frame = 0;
+		watchTools();
 		const room = measureHeader(node);
 		node.classList.toggle('rb-stack', !!room && shouldStack(room, short.matches));
 	};
@@ -100,8 +101,15 @@ export function headerStack(node: HTMLElement, _key?: unknown) {
 	const observer = new ResizeObserver(schedule);
 	observer.observe(node);
 	// The tools change width without the header changing (a count, a label); the decision does not depend on the layout it picks, so watching them cannot loop.
-	const tools = node.querySelector('.document-tools');
-	if (tools) observer.observe(tools);
+	// The cluster is drawn only above the phone width, so it is found again on each measure: a document opened on a phone has none yet, and a resize across the breakpoint replaces it.
+	let tools: Element | null = null;
+	const watchTools = () => {
+		const found = node.querySelector('.document-tools');
+		if (found === tools) return;
+		if (tools) observer.unobserve(tools);
+		tools = found;
+		if (tools) observer.observe(tools);
+	};
 	// First paint is already decided.
 	apply();
 	return {

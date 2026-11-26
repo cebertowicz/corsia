@@ -14,10 +14,12 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
+	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, desktopForm = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
 		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean;
 		/** Answered from the card docked to the document canvas's bottom edge. The caller docks only on a phone or a short touch screen; without it the ask keeps its row in the header (also an image's). */
 		docked?: boolean;
+		/** A document opts in to the three-answer ask above the phone width, as shipped before the one-row header; without it (an image's ask) the two answers show at every width. */
+		desktopForm?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
 		pendingSuggestions?: number;
 		/** Accepts them all and puts the accepted text on screen, resolving to how many it accepted; throws when it could not, so no verdict is sent. */
@@ -37,8 +39,8 @@
 	let changesButton = $state<HTMLButtonElement>();
 	/** Send back asks for another review; approval with changes does not. Named for what it does with the document, so it is never read as the suggestion Reject. */
 	const LABELS = { changes_requested: 'Send back', approved_with_changes: 'Approve with changes' } as const;
-	/** A phone or short touch screen keeps the two answers, Approve and Send back; above the phone width the ask is as shipped before the one-row header (f51bbda8e): three answers, and Approve all with what it accepts. */
-	const compact = $derived(docked || $isMobile || $isShortTouch);
+	/** A phone or short touch screen, or any ask that does not opt in (an image's), keeps the two answers, Approve and Send back; above the phone width a document's ask is as shipped before the one-row header (f51bbda8e): three answers, and Approve all with what it accepts. */
+	const compact = $derived(!desktopForm || docked || $isMobile || $isShortTouch);
 	let approveButton = $state<HTMLButtonElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 	/** How many suggestions the last Approve accepted along with it, for the receipt. */

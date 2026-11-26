@@ -43,7 +43,7 @@ afterEach(() => {
 
 describe('ReviewBar accepted count across rounds', () => {
 	it('keeps round 1’s accepted count out of round 2’s receipt', async () => {
-		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 2, onAcceptAll: vi.fn(async () => 2) });
+		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 2, onAcceptAll: vi.fn(async () => 2), desktopForm: true });
 		component = mount(ReviewBar, { target: host, props });
 		await vi.waitFor(() => expect(button('Approve all')).toBeTruthy());
 
@@ -66,7 +66,7 @@ describe('ReviewBar accepted count across rounds', () => {
 
 	it('shows only the run that succeeded when a failed Approve all is redone', async () => {
 		const onAcceptAll = vi.fn().mockRejectedValueOnce(new Error('stale')).mockResolvedValueOnce(3);
-		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 3, onAcceptAll });
+		const props = $state({ artifactId: 'doc-1', pendingSuggestions: 3, onAcceptAll, desktopForm: true });
 		component = mount(ReviewBar, { target: host, props });
 		await vi.waitFor(() => expect(button('Approve all')).toBeTruthy());
 

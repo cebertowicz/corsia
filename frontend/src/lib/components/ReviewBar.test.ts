@@ -39,7 +39,7 @@ function read(comments = 0): ReviewBarRead {
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 async function render(draftOpen = false, onAnswered?: () => void) {
-	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered } });
+	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered, desktopForm: true } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
 	flushSync();
 }
@@ -468,16 +468,26 @@ describe('ReviewBar', () => {
 		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('comments');
 	});
 
-	it('R3: an open comment draft blocks Approve with changes and Request changes', async () => {
+	it.each(['Approve', 'Approve with changes'])('R3: an open comment draft blocks %s, which would send the round\'s comments, and Send back opens no note', async (label) => {
 		api.fetchReviewBar.mockResolvedValue(read(2));
 		await render(true);
-		button('Approve with changes')!.click();
+		button(label)!.click();
 		flushSync();
 		expect(host.textContent).toContain(DRAFT_OPEN);
 		expect(api.answerReview).not.toHaveBeenCalled();
 		button('Send back')!.click();
 		flushSync();
 		expect(host.querySelector('textarea')).toBeNull();
+	});
+
+	it('an ask that does not opt in to the desktop form, an image\'s, keeps the two answers above the phone width', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(2));
+		component = mount(ReviewBar, { target: host, props: { artifactId: 'img-1' } });
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
+		expect(button('Send back')).toBeTruthy();
+		expect(button('Approve with changes')).toBeUndefined();
+		expect(button('Approve all')).toBeUndefined();
+		expect(host.textContent).not.toContain('Approve all accepts');
 	});
 
 	it('a plain Approve is not blocked by a draft, and answers the request it shows', async () => {

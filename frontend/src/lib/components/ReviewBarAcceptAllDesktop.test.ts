@@ -24,7 +24,7 @@ function read(comments = 0): ReviewBarRead {
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 async function render(pendingSuggestions: number, onAcceptAll?: () => Promise<number | void>) {
-	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', pendingSuggestions, onAcceptAll } });
+	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', pendingSuggestions, onAcceptAll, desktopForm: true } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
 	flushSync();
 }

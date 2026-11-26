@@ -118,3 +118,55 @@ describe('one short-touch screen', () => {
 		expect(stacked()).toBe(true);
 	});
 });
+
+describe('the tools cluster is found again on each measure', () => {
+	// A ResizeObserver that records what it watches; `fire` runs the action's callback as a size change would.
+	let watching: Element[] = [];
+	let fire = () => {};
+	const stubObserver = () => {
+		watching = [];
+		vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+		vi.stubGlobal('requestAnimationFrame', (run: () => void) => { run(); return 1; });
+		vi.stubGlobal('ResizeObserver', class {
+			constructor(callback: () => void) { fire = callback; }
+			observe(el: Element) { watching.push(el); }
+			unobserve(el: Element) { watching = watching.filter((item) => item !== el); }
+			disconnect() { watching = []; }
+		});
+	};
+	const header = (html: string): HTMLElement => {
+		document.body.innerHTML = `<div id="h">${html}</div>`;
+		return document.getElementById('h') as HTMLElement;
+	};
+	afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+	it('watches a cluster drawn after the action mounted, as when a document opened on a phone is widened', () => {
+		stubObserver();
+		const node = header('<div class="rb-slot"></div>');
+		headerStack(node);
+		expect(watching).toEqual([node]);
+		node.insertAdjacentHTML('beforeend', '<div class="document-tools"></div>');
+		fire();
+		expect(watching).toEqual([node, node.querySelector('.document-tools')]);
+	});
+
+	it('moves to the new cluster when a resize across the phone breakpoint replaces it', () => {
+		stubObserver();
+		const node = header('<div class="rb-slot"></div><div class="document-tools" id="old"></div>');
+		headerStack(node);
+		expect(watching).toEqual([node, node.querySelector('#old')]);
+		node.querySelector('#old')!.remove();
+		node.insertAdjacentHTML('beforeend', '<div class="document-tools" id="new"></div>');
+		fire();
+		expect(watching).toEqual([node, node.querySelector('#new')]);
+	});
+
+	it('stops watching a cluster that is gone', () => {
+		stubObserver();
+		const node = header('<div class="rb-slot"></div><div class="document-tools"></div>');
+		headerStack(node);
+		node.querySelector('.document-tools')!.remove();
+		fire();
+		expect(watching).toEqual([node]);
+	});
+});
