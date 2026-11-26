@@ -157,7 +157,7 @@ def blank(text: str, values: Iterable[str]) -> str:
     groups = []
     for bounded, entries in patterns.items():
         if entries:
-            prefix = r"(?<![^\W_])" if bounded else ""
+            prefix = r"(?:(?<![^\W_])|(?<=\\[nrtbf])|(?<=\\u[0-9A-Fa-f]{4})|(?<=%[0-9A-Fa-f]{2}))" if bounded else ""
             groups.append(prefix + "(?:" + "|".join(p for _, p in sorted(entries, reverse=True)) + ")")
     return re.sub("|".join(groups), lambda _: BLANK, text) if groups else text
 
