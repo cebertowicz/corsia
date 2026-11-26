@@ -36,12 +36,16 @@ export function fitMiddleEllipsis(node: HTMLElement, name: { head: string; tail:
 		const extension = extensionAt < 0 ? '' : tail.slice(extensionAt);
 		if (endText) endText.data = tail;
 		text.data = head;
-		if (node.getBoundingClientRect().width <= 0) return;
+		if ((node.closest('ul') ?? document.documentElement).getBoundingClientRect().width <= 0) return;
 		for (let removed = 0; ; removed++) {
 			text.data = head;
 			const available = node.getBoundingClientRect().width;
-			text.data = fitPrefix(head, widthOf, available);
-			if (node.scrollWidth <= node.clientWidth || !endText || removed >= removable.length) break;
+			const fitted = fitPrefix(removed ? `${head}…` : head, widthOf, available);
+			text.data = fitted;
+			const startCount = Array.from(fitted.endsWith('…') ? fitted.slice(0, -1) : fitted).length;
+			const cut = removed > 0 || fitted !== head;
+			const balanced = !cut || (startCount > 0 && startCount >= removable.length - removed);
+			if (!endText || removed >= removable.length || (balanced && node.scrollWidth <= node.clientWidth)) break;
 			endText.data = removable.slice(removed + 1).join('') + extension;
 		}
 	};
