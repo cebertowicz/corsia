@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import ssl
 import time
@@ -270,6 +271,42 @@ async def test_an_explicit_stop_ends_open_streams_and_websockets_promptly_and_a_
     finally:
         await listener.stop()
     assert again.status_code == 200
+
+
+async def test_requests_are_access_logged_like_the_main_servers_with_protocol_and_no_query(listener, caplog):
+    from infra.access_log import install_access_log_redaction
+
+    install_access_log_redaction()
+    base = await _started(listener)
+    try:
+        with caplog.at_level(logging.INFO, logger="uvicorn.access"):
+            async with httpx.AsyncClient(http2=True, verify=_tls(), trust_env=False) as client:
+                await client.get(f"{base}/ping", params={"token": "secret-session"})
+            async with httpx.AsyncClient(http2=False, verify=_tls(), trust_env=False) as client:
+                await client.get(f"{base}/ping")
+    finally:
+        await listener.stop()
+
+    lines = [record.getMessage() for record in caplog.records if record.name == "uvicorn.access"]
+    assert len(lines) == 2 and all(line.startswith("127.0.0.1:") for line in lines), lines
+    assert lines[0].endswith('"GET /ping HTTP/2" 200')
+    assert lines[1].endswith('"GET /ping HTTP/1.1" 200')
+    assert "secret-session" not in caplog.text
+
+
+async def test_a_long_lived_http2_connection_is_not_closed_for_its_request_count(listener, caplog):
+    base = await _started(listener)
+    try:
+        with caplog.at_level(logging.INFO, logger="uvicorn.access"):
+            async with httpx.AsyncClient(http2=True, verify=_tls(), trust_env=False) as client:
+                for _ in range(1100):
+                    assert (await client.get(f"{base}/ping")).status_code == 200
+    finally:
+        await listener.stop()
+
+    # Each access line names the peer's address and port: one port means one connection carried every request.
+    peers = {record.getMessage().split(" - ", 1)[0] for record in caplog.records if record.name == "uvicorn.access"}
+    assert len(peers) == 1, peers
 
 
 async def test_a_requested_stop_is_not_a_serve_failure_but_a_bad_key_is(listener, monkeypatch, tmp_path, caplog):

@@ -19,10 +19,12 @@ import asyncio
 import logging
 import socket
 import ssl
+import sys
 from collections.abc import Awaitable, Callable
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from hypercorn.asyncio.tcp_server import TCPServer
 from hypercorn.asyncio.worker_context import WorkerContext
@@ -48,6 +50,22 @@ _WEBSOCKET_CLOSE_SECONDS = 0.5
 _CONNECTION_END_SECONDS = 0.5
 
 
+_access_log = logging.getLogger("uvicorn.access")
+
+
+def _log_access(scope, status: int) -> None:
+    """One access line in Uvicorn's record shape, so the backend log's access formatter and its
+    query-string redaction (infra/access_log.py) treat a Devices request like any other."""
+    client = scope.get("client")
+    path = quote(scope["path"])
+    if scope.get("query_string"):
+        path = f"{path}?{scope['query_string'].decode('ascii', 'replace')}"
+    _access_log.info(
+        '%s - "%s %s HTTP/%s" %d',
+        "%s:%d" % tuple(client[:2]) if client else "", scope["method"], path, scope["http_version"], status,
+    )
+
+
 class _Requests:
     """Wraps the ASGI app to know each running request and each accepted, still-open WebSocket."""
 
@@ -62,19 +80,27 @@ class _Requests:
         self.tasks.add(task)
 
         async def tracked_send(message: dict) -> None:
+            """Send, and note whether this WebSocket is now open or closed."""
             await send(message)
             if message["type"] == "websocket.accept":
                 self.websockets[task] = send
             elif message["type"] == "websocket.close":
                 self.websockets.pop(task, None)
 
+        async def logged_send(message: dict) -> None:
+            """Send, and write the response's access line the way the main server writes its own."""
+            await send(message)
+            if message["type"] == "http.response.start":
+                _log_access(scope, message["status"])
+
         try:
-            await self.app(scope, receive, tracked_send if scope.get("type") == "websocket" else send)
+            await self.app(scope, receive, tracked_send if scope.get("type") == "websocket" else logged_send)
         finally:
             self.tasks.discard(task)
             self.websockets.pop(task, None)
 
     async def close_websockets(self, code: int) -> None:
+        """Send every open WebSocket a close frame with this code, waiting a bounded time for the writes."""
         sends = list(self.websockets.values())
         self.websockets.clear()
         if not sends:
@@ -104,7 +130,11 @@ class DevicesServer:
         self.config = Config()
         self.config.keyfile = str(keyfile)
         self.config.certfile = str(certfile)
+        # Access lines are written by _log_access, in the main server's format.
         self.config.accesslog = None
+        # Uvicorn, which this replaces, never closed a connection for its request count; HTTP/2 would
+        # otherwise send GOAWAY after 1000 requests and move a long-lived page to a new connection.
+        self.config.keep_alive_max_requests = sys.maxsize
         # An existing logger is used as is, so Hypercorn installs no handler of its own.
         self.config.errorlog = logging.getLogger("hypercorn.error")
         self.started = False
@@ -114,9 +144,11 @@ class DevicesServer:
 
     @property
     def should_exit(self) -> bool:
+        """Whether a stop was requested, so the end of serve() is not reported as a failure."""
         return self._exit.is_set()
 
     def request_exit(self) -> None:
+        """Ask serve() to stop: it ends every connection and returns once they are joined."""
         self._exit.set()
 
     def _tls_context(self) -> ssl.SSLContext:
@@ -127,6 +159,7 @@ class DevicesServer:
         return context
 
     async def serve(self) -> None:
+        """Accept TLS connections on the pre-bound socket until request_exit(); raises if the key won't load."""
         tls = self._tls_context()
         context = WorkerContext(None)
         app = wrap_app(self._requests, self.config.wsgi_max_body_size, "asgi")
@@ -134,6 +167,7 @@ class DevicesServer:
         lifespan_state: dict[str, Any] = {}
 
         async def connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            """Serve one connection with Hypercorn's handler (h2 or http/1.1, as ALPN chose)."""
             if self._exit.is_set():
                 # A TLS handshake that finished after the stop began.
                 writer.transport.abort()
