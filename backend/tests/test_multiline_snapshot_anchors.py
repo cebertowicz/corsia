@@ -91,6 +91,22 @@ def test_adjacent_duplicate_count_change_is_ambiguous(old_copies, new_copies, wh
     assert comment['orphaned']
 
 
+@pytest.mark.parametrize('middle', ['middle\n', 'middle one\nmiddle two\n'])
+@pytest.mark.parametrize('tail', ['tail\n', 'tail changed\n'])
+@pytest.mark.parametrize('direction', ['removed', 'added'])
+@pytest.mark.parametrize('quote', ['First line here.\nSecond line here.',
+                                   'First line here.\nSecond line here.\n'])
+def test_copy_removed_or_added_with_text_between_is_ambiguous(middle, tail, direction, quote):
+    # Removing (or adding) one copy together with the text up to its twin gives the same
+    # current text whichever copy it was, so the comment must not stay on the survivor.
+    block = 'First line here.\nSecond line here.\n'
+    two = 'head\n' + block + middle + block + 'tail\n'
+    one = 'head\n' + block + tail
+    source, current = (two, one) if direction == 'removed' else ('head\n' + block + 'tail\n', two.replace('tail\n', tail))
+    comment = resolve(source, current, quote, start=source.index(quote))
+    assert comment['orphaned']
+
+
 @pytest.mark.parametrize('source,current,quote', [
     ('A\nX\nY\nB\n', 'A\nX\nY\nB\nX\nY\n', 'X\nY'),
     (SOURCE, SOURCE + '\nLater section.\n\nFirst line here.\nSecond line here.\n',
