@@ -283,6 +283,55 @@ def test_an_orphan_the_migration_did_not_create_does_not_block_it(
         conn.close()
 
 
+def _add_209_schema(path):
+    with closing(sqlite3.connect(path)) as conn:
+        conn.executescript("""
+            CREATE TABLE plans (id TEXT);
+            CREATE TABLE plan_nodes (plan_id TEXT, assignee TEXT, kind TEXT, state TEXT, archived_at TEXT);
+            CREATE TABLE artifact_identities (metadata TEXT, state TEXT);
+        """)
+        conn.commit()
+
+
+def _register_209_and_210(ladder):
+    from infra.migration_209_to_210_later_reviewed_at import migrate_209_to_210
+    from infra.migration_210_to_211_queue_read_indexes import migrate_210_to_211
+    ladder.update({209: migrate_209_to_210, 210: migrate_210_to_211})
+
+
+def test_209_to_211_preserves_old_orphan_without_whole_scan(tmp_path, ladder):
+    _register_209_and_210(ladder)
+    path = _database(tmp_path, 209)
+    _add_209_schema(path)
+    _add_untouched_orphan(path)
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        assert migrate_to_current(conn, 211).migrated
+        assert conn.whole_fk_checks == 0
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == [
+            ("other_child", 5, "other_parent", 0)
+        ]
+        assert "later_reviewed_at" in {r[1] for r in conn.execute("PRAGMA table_info(plans)")}
+
+
+@pytest.mark.parametrize("breaks_fk", [False, True])
+def test_mixed_additive_and_nonadditive_steps_take_full_path(tmp_path, ladder, breaks_fk):
+    _register_209_and_210(ladder)
+    ladder[211] = lambda conn: conn.execute(
+        "DELETE FROM parent WHERE id=1" if breaks_fk else "INSERT INTO parent VALUES (2, 'new')"
+    )
+    path = _database(tmp_path, 209)
+    _add_209_schema(path)
+    _add_untouched_orphan(path)
+    with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
+        if breaks_fk:
+            with pytest.raises(MigrationError, match="foreign_key_check failed"):
+                migrate_to_current(conn, 212)
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 209
+        else:
+            assert migrate_to_current(conn, 212).migrated
+        assert conn.whole_fk_checks == 1
+
+
 def test_old_orphan_is_logged_during_data_migration(tmp_path, ladder, caplog):
     path = _database(tmp_path, 1)
     _add_untouched_orphan(path)

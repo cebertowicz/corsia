@@ -63,7 +63,7 @@ def _allowed(action, first, second, _database, _source):
 
 def test_every_additive_step_has_a_registered_migration_and_fixture():
     assert ADDITIVE_STEPS <= MIGRATIONS.keys()
-    assert ADDITIVE_STEPS == _FIXTURES.keys()
+    assert ADDITIVE_STEPS == _FIXTURES.keys() | {209, 210}
 
 
 def _assert_literal_execute_only(function):
@@ -86,7 +86,7 @@ def _assert_literal_execute_only(function):
 
 
 def test_declared_additive_steps_are_literal_execute_statements():
-    for version in sorted(ADDITIVE_STEPS):
+    for version in sorted(_FIXTURES):
         _assert_literal_execute_only(MIGRATIONS[version])
 
 
@@ -111,7 +111,7 @@ def test_proof_rejects_executescript_implicit_commit():
 
 
 def test_declared_additive_steps_only_issue_safe_actions():
-    for version in sorted(ADDITIVE_STEPS):
+    for version in sorted(_FIXTURES):
         with closing(_FIXTURES[version]()) as db:
             assert db.execute("PRAGMA user_version").fetchone()[0] == version
             events = []
@@ -126,3 +126,67 @@ def test_declared_additive_steps_only_issue_safe_actions():
             assert all(_allowed(*event) for event in events), [
                 event for event in events if not _allowed(*event)
             ]
+
+
+def _body_ast(source):
+    definition = ast.parse(textwrap.dedent(source)).body[0]
+    body = definition.body
+    if ast.get_docstring(definition) is not None:
+        body = body[1:]
+    return ast.dump(ast.Module(body=body, type_ignores=[]), include_attributes=False)
+
+
+def test_metadata_guarded_steps_have_only_the_reviewed_operations():
+    # An authorizer sees only the executed branch and cannot inspect ADD COLUMN's
+    # definition. Pin the whole executable body and both referenced SQL constants.
+    expected_209 = '''
+    def step(conn):
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "plans" not in tables:
+            return
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(plans)")}
+        if "later_reviewed_at" not in columns:
+            conn.execute("ALTER TABLE plans ADD COLUMN later_reviewed_at TEXT")
+    '''
+    expected_210 = '''
+    def step(conn):
+        tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table, sql in (("plan_nodes", USER_OPEN_TASK_INDEX_SQL), ("artifact_identities", ATTENTION_STATE_INDEX_SQL)):
+            if table in tables:
+                conn.execute(sql.strip().rstrip(";"))
+    '''
+    assert _body_ast(inspect.getsource(MIGRATIONS[209])) == _body_ast(expected_209)
+    assert _body_ast(inspect.getsource(MIGRATIONS[210])) == _body_ast(expected_210)
+    from infra.migration_210_to_211_queue_read_indexes import (
+        ATTENTION_STATE_INDEX_SQL, USER_OPEN_TASK_INDEX_SQL,
+    )
+    assert ' '.join(USER_OPEN_TASK_INDEX_SQL.split()) == (
+        "CREATE INDEX IF NOT EXISTS idx_plan_nodes_user_open ON plan_nodes(plan_id) "
+        "WHERE assignee='user' AND kind='task' AND state IN ('pending','active') "
+        "AND archived_at IS NULL;"
+    )
+    assert ' '.join(ATTENTION_STATE_INDEX_SQL.split()) == (
+        "CREATE INDEX IF NOT EXISTS idx_artifact_identities_attention_state "
+        "ON artifact_identities(json_extract(metadata, '$.attention_state')) "
+        "WHERE state='active' AND json_valid(metadata);"
+    )
+
+
+def test_metadata_guarded_steps_only_issue_safe_actions():
+    with closing(_original_connect(":memory:")) as db:
+        db.executescript("""
+            CREATE TABLE plans (id TEXT);
+            CREATE TABLE plan_nodes (plan_id TEXT, assignee TEXT, kind TEXT, state TEXT, archived_at TEXT);
+            CREATE TABLE artifact_identities (metadata TEXT, state TEXT);
+        """)
+        for version in (209, 210):
+            events = []
+            db.set_authorizer(lambda *event: (events.append(event), sqlite3.SQLITE_OK)[1])
+            try:
+                MIGRATIONS[version](db)
+            finally:
+                db.set_authorizer(None)
+            assert events
+            assert all(_allowed(*event) or (
+                version == 209 and event[:3] == (sqlite3.SQLITE_ALTER_TABLE, 'main', 'plans')
+            ) for event in events), events

@@ -369,8 +369,9 @@ class MigrationResult:
 #: build never inherits the ladder.
 MIGRATIONS: dict[int, MigrationStep] = {}
 
-ADDITIVE_STEPS: frozenset[int] = frozenset({208})
-"""From-versions whose steps only create tables or indexes and never branch on data.
+ADDITIVE_STEPS: frozenset[int] = frozenset({208, 209, 210})
+"""From-versions proven to only create tables or indexes, or add nullable columns
+without references, and never branch on data.
 
 The additive-step authorizer proof checks each marked step. An unmarked step
 always takes the full foreign-key validation path.
