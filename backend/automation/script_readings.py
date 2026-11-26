@@ -68,6 +68,13 @@ class RunReport:
     workflow_stamp: tuple[str, str | None] | None = None
     # Why the run had no GitHub login (``ScriptRun.github_locked``); a rule run's explain shows it.
     github_locked: str | None = None
+    # Why the run got none of the saved items its approval names; a rule run's explain shows it.
+    withheld: str | None = None
+
+
+#: A rule run whose rule the approval doesn't name, or whose rule changed since, runs without saved items.
+ITEMS_WITHHELD = ("Saved items were withheld from this run: the rule that started it isn't one the person "
+                  "approved, or it changed since.")
 
 
 def classify(series: store.Series, value: float) -> str:
@@ -288,6 +295,15 @@ def hash_mismatch_report(schedule: Schedule, *, folder: str | None = None) -> Ru
     return _failure(
         schedule, "hash_mismatch",
         "changed on disk since it was registered, so its runs are stopped",
+    )
+
+
+def items_unavailable_report(schedule: Schedule) -> RunReport:
+    """The report for an approved script whose saved item is gone; it stops runs as a changed script does."""
+    return _failure(
+        schedule, "hash_mismatch",
+        "a saved item it uses was removed, its value was cleared, or it is no longer one this agent may use; "
+        "register the script again to ask the person",
     )
 
 

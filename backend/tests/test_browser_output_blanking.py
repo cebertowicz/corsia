@@ -125,8 +125,8 @@ async def test_error_text_raised_by_the_browser_owner_is_blanked(state, monkeypa
 async def test_the_saved_values_are_read_once_per_command(state, monkeypatch):
     _saved(state)
     reads = []
-    real = blanking._saved_values
-    monkeypatch.setattr(blanking, "_saved_values", lambda: reads.append(1) or real())
+    real = blanking.saved_values
+    monkeypatch.setattr(blanking, "saved_values", lambda: reads.append(1) or real())
     _fake_owner(monkeypatch, KINDS["snapshot"]("\n".join(["line"] * 50)))
     await browser_runtime._run(["snapshot"], thread_id="thread-1")
     assert reads == [1]
@@ -139,7 +139,7 @@ async def test_a_result_that_cant_be_checked_is_withheld(state, monkeypatch):
     def unreadable():
         raise OSError("values file unreadable")
 
-    monkeypatch.setattr(blanking, "_saved_values", unreadable)
+    monkeypatch.setattr(blanking, "saved_values", unreadable)
     _fake_owner(monkeypatch, KINDS["snapshot"](secret_text))
     assert await browser_runtime._run(["snapshot"], thread_id="thread-1") == blanking.UNCHECKED
 

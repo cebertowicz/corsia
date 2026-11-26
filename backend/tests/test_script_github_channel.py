@@ -236,9 +236,11 @@ async def test_the_client_reports_why_the_channel_failed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_stages_the_documented_command_and_removes_it(monkeypatch, tmp_path):
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
 
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _: tmp_path)
+
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda _: tmp_path)
     _broker(monkeypatch, lambda args: subprocess.CompletedProcess(args, 0, "body", ""))
     script = tmp_path / "run.sh"
     script.write_text('corsia github read "repos/o/r/pulls/7?page=2"\n')
@@ -277,7 +279,7 @@ async def test_run_stages_the_documented_command_and_removes_it(monkeypatch, tmp
 @pytest.fixture
 def spawned(monkeypatch, tmp_path):
     """``run_script`` up to the spawn, recording each channel opened and each command and env spawned."""
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from host_access.processes import ForegroundProcessResult
 
     record = {"channels": [], "commands": [], "envs": [], "spawn": None}
@@ -310,7 +312,8 @@ def spawned(monkeypatch, tmp_path):
     monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
     monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
-    monkeypatch.setattr(script_sandbox, "github_channel", github_channel)
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
+    monkeypatch.setattr(script_clients, "github_channel", github_channel)
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     record["script"] = tmp_path / "s.sh"
     return record
@@ -339,14 +342,14 @@ def test_a_failure_after_the_channel_is_up_keeps_its_own_cause(spawned):
 
 
 def test_a_channel_that_cannot_open_says_why(spawned, monkeypatch):
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
 
     @asynccontextmanager
     async def broken(*_args, **_kwargs):
         raise OSError("socket path too long")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(script_sandbox, "github_channel", broken)
+    monkeypatch.setattr(script_clients, "github_channel", broken)
     with pytest.raises(script_sandbox.ScriptSandboxError,
                        match="script GitHub channel unavailable: OSError: socket path too long"):
         asyncio.run(script_sandbox.run_script(THREAD, None, spawned["script"], run_id="r",

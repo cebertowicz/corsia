@@ -93,6 +93,12 @@ def entry_name(login_id: str) -> str:
     return name
 
 
+def dns_name(host: str) -> bool:
+    """Whether ``host`` is a DNS name: lowercase labels of letters, digits and inner hyphens, within the
+    length limit. The one host-shape check for saved logins and the places saved items are sent to."""
+    return len(host) <= _HOST_MAX and all(_HOST_LABEL.fullmatch(label) for label in host.split("."))
+
+
 def _host(raw: str) -> str:
     if raw.startswith("["):
         try:
@@ -100,10 +106,9 @@ def _host(raw: str) -> str:
         except ValueError:
             raise KeyStoreError(_SITE_REFUSAL) from None
     host = raw.lower()
-    labels = host.split(".")
-    if len(host) > _HOST_MAX or not all(_HOST_LABEL.fullmatch(label) for label in labels):
+    if not dns_name(host):
         raise KeyStoreError(_SITE_REFUSAL)
-    if all(label.isdigit() for label in labels):
+    if all(label.isdigit() for label in host.split(".")):
         try:
             return str(ipaddress.IPv4Address(host))
         except ValueError:

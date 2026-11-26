@@ -356,7 +356,7 @@ def _approved(db, tmp_path, *, tree_sha256: str | None = None):
 def _use_authenticated_run(monkeypatch) -> list[Path]:
     calls: list[Path] = []
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, authenticated=False):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, authenticated=False, saved_items=None):
         assert authenticated
         calls.append(path)
         return _run('{"series":"cost","value":1}\n')

@@ -1,7 +1,14 @@
-"""Per-run GitHub HTTP transport for authenticated sandboxed scripts."""
+"""Per-run GitHub HTTP transport for authenticated sandboxed scripts.
+
+For a run whose approval names saved items, each answer is read whole, up to ``REQUEST_LIMIT``,
+uncompressed, and every saved value is hidden from its headers and body before the script gets it
+(``script_blanking``). Any other run gets the answer streamed as it comes: it can hold no saved value,
+and what it reads the agent can already read with its own ``gh``.
+"""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -11,12 +18,20 @@ from urllib.parse import urlsplit
 import h11
 import httpx
 
+from automation import script_blanking
+from automation.script_tool_channel import REQUEST_LIMIT
 from events.connectors.github_read_budget import ReadBudget, budget
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_HOSTS = frozenset({b"api.github.com", b"uploads.github.com"})
 _HOP_HEADERS = frozenset({b"connection", b"transfer-encoding", b"content-length", b"host", b"authorization"})
+#: The answer is read uncompressed, so neither side's encoding header passes through.
+_ENCODING = frozenset({b"accept-encoding", b"content-encoding"})
+_MIB = REQUEST_LIMIT // (1024 * 1024)
+OVER_RESPONSE = (f"The response is larger than {_MIB} MiB, so CORSIA withheld it. Ask for less, for example "
+                 "one page of results at a time.\n").encode()
+UNCHECKED = b"The response was withheld: CORSIA couldn't check it for saved values.\n"
 
 
 async def _read_request(reader: asyncio.StreamReader, conn: h11.Connection):
@@ -80,13 +95,71 @@ async def _reply(conn: h11.Connection, writer: asyncio.StreamWriter, status: int
     await writer.drain()
 
 
+async def _stream_back(conn: h11.Connection, writer: asyncio.StreamWriter, response: httpx.Response,
+                       read_budget: ReadBudget) -> None:
+    """Send the answer on as it comes, raw, as before saved items existed."""
+    response_headers = [(name, value) for name, value in response.headers.raw
+                        if name.lower() not in _HOP_HEADERS]
+    response_headers.append((b"connection", b"close"))
+    writer.write(conn.send(h11.Response(status_code=response.status_code, headers=response_headers)))
+    forbidden_body = bytearray()
+    async for chunk in response.aiter_raw():
+        if response.status_code == 403:
+            forbidden_body.extend(chunk)
+        writer.write(conn.send(h11.Data(data=chunk)))
+        await writer.drain()
+    try:
+        # The kept bytes are raw, so a gzip body is decoded by its own Content-Encoding first.
+        parsed_body = httpx.Response(response.status_code, headers=response.headers,
+                                     content=bytes(forbidden_body)).json() if forbidden_body else None
+    except (ValueError, httpx.DecodingError):
+        parsed_body = None
+    read_budget.record(response.status_code, dict(response.headers), parsed_body)
+    writer.write(conn.send(h11.EndOfMessage()))
+    await writer.drain()
+
+
+async def _hidden_back(conn: h11.Connection, writer: asyncio.StreamWriter, response: httpx.Response,
+                       read_budget: ReadBudget) -> None:
+    """Read the answer whole, up to the limit, and send it on with every saved value hidden."""
+    content = bytearray()
+    async for chunk in response.aiter_bytes():
+        content.extend(chunk)
+        if len(content) > REQUEST_LIMIT:
+            break
+    try:
+        parsed_body = json.loads(content) if response.status_code == 403 and content else None
+    except ValueError:
+        parsed_body = None
+    read_budget.record(response.status_code, dict(response.headers), parsed_body)
+    if len(content) > REQUEST_LIMIT:
+        await _reply(conn, writer, 502, OVER_RESPONSE)
+        return
+    try:
+        hidden = await asyncio.to_thread(script_blanking.saved_values)
+    except script_blanking.Unchecked:
+        await _reply(conn, writer, 502, UNCHECKED)
+        return
+    raw = [(name, value) for name, value in response.headers.raw
+           if name.lower() not in _HOP_HEADERS and name.lower() not in _ENCODING]
+    # Hiding is CPU work over up to the limit; it runs off the event loop.
+    body, response_headers = await asyncio.to_thread(
+        lambda: (script_blanking.data(bytes(content), hidden),
+                 [(name, script_blanking.data(value, hidden)) for name, value in raw]))
+    response_headers += [(b"content-length", str(len(body)).encode()), (b"connection", b"close")]
+    writer.write(conn.send(h11.Response(status_code=response.status_code, headers=response_headers)))
+    if body:
+        writer.write(conn.send(h11.Data(data=body)))
+    writer.write(conn.send(h11.EndOfMessage()))
+    await writer.drain()
+
+
 async def _serve(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
     credential: Callable[[], str], transport: httpx.AsyncBaseTransport | None,
-    read_budget: ReadBudget = budget,
+    read_budget: ReadBudget = budget, hide: bool = False,
 ) -> None:
     conn = h11.Connection(h11.SERVER)
-    started = False
     try:
         request = await _read_request(reader, conn)
         if request is None:
@@ -101,7 +174,10 @@ async def _serve(
             await _reply(conn, writer, 429, b"GitHub reads are paused by the shared rate-limit budget\n")
             return
         headers = [(name, value) for name, value in request.headers
-                   if name.lower() not in _HOP_HEADERS or name.lower() == b"content-length"]
+                   if (not hide or name.lower() not in _ENCODING)
+                   and (name.lower() not in _HOP_HEADERS or name.lower() == b"content-length")]
+        if hide:
+            headers.append((b"accept-encoding", b"identity"))
         headers.append((b"authorization", b"token " + (await asyncio.to_thread(credential)).encode("utf-8")))
         url = "https://" + host.decode("ascii") + target
         # No per-request timeout, like `gh` itself: the run's own timeout cancels this task.
@@ -109,30 +185,11 @@ async def _serve(
                                      timeout=None) as client:
             async with client.stream(request.method.decode("ascii"), url, headers=headers,
                                      content=_request_body(reader, conn) if _has_body(request) else None) as response:
-                response_headers = [(name, value) for name, value in response.headers.raw
-                                    if name.lower() not in _HOP_HEADERS]
-                response_headers.append((b"connection", b"close"))
-                writer.write(conn.send(h11.Response(status_code=response.status_code, headers=response_headers)))
-                started = True
-                forbidden_body = bytearray()
-                async for chunk in response.aiter_raw():
-                    if response.status_code == 403:
-                        forbidden_body.extend(chunk)
-                    writer.write(conn.send(h11.Data(data=chunk)))
-                    await writer.drain()
-                try:
-                    # The kept bytes are raw, so a gzip body is decoded by its own Content-Encoding first.
-                    parsed_body = httpx.Response(response.status_code, headers=response.headers,
-                                                 content=bytes(forbidden_body)).json() if forbidden_body else None
-                except (ValueError, httpx.DecodingError):
-                    parsed_body = None
-                read_budget.record(response.status_code, dict(response.headers), parsed_body)
-                writer.write(conn.send(h11.EndOfMessage()))
-                await writer.drain()
+                await (_hidden_back if hide else _stream_back)(conn, writer, response, read_budget)
     except Exception as exc:  # The client gets fixed text, never request or credential details.
         # Only the exception type is logged: its message could carry the request or the credential.
         logger.warning("script GitHub forwarder request failed: %s", type(exc).__name__)
-        if not started:
+        if conn.our_state in (h11.IDLE, h11.SEND_RESPONSE):  # no answer started yet
             try:
                 await _reply(conn, writer, 502, b"GitHub request failed\n")
             except (OSError, h11.LocalProtocolError):
@@ -148,14 +205,15 @@ async def _serve(
 @asynccontextmanager
 async def github_proxy(path: Path, credential: Callable[[], str], *,
                        transport: httpx.AsyncBaseTransport | None = None,
-                       read_budget: ReadBudget = budget):
+                       read_budget: ReadBudget = budget, hide: bool = False):
     """Serve GitHub requests until the associated script run exits; reads ask and feed
-    ``read_budget``, the budget of the login ``credential`` belongs to."""
+    ``read_budget``, the budget of the login ``credential`` belongs to. ``hide``: the run's approval
+    names saved items, so each answer is read whole and its saved values hidden."""
     active: set[asyncio.Task] = set()
 
     def connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.create_task(_serve(reader, writer, credential=credential, transport=transport,
-                                         read_budget=read_budget))
+                                         read_budget=read_budget, hide=hide))
         active.add(task)
         task.add_done_callback(active.discard)
 

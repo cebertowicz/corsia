@@ -9,7 +9,7 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	const lease: HostAccessScript = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -46,7 +46,7 @@ it('names a stale script request as the lease names it', async () => {
 	const lease: HostAccessScript = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -70,7 +70,7 @@ it('says an incomplete script request cannot be approved, and names Deny', async
 	const base = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'decision',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -101,7 +101,7 @@ it('hides the Purpose label when the purpose is empty, in every state of the scr
 	const base = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'decision',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -134,11 +134,48 @@ it('hides the Purpose label when the purpose is empty, in every state of the scr
 	}
 });
 
+it('lists the saved items a script uses after When it runs, each with where it is sent, and no section when there are none', async () => {
+	const base = {
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
+		application_hash: 'a'.repeat(64), decision_capability: 'decision',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
+		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
+		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+	} satisfies HostAccessScript;
+	const withItems = { ...base, saved_items: [
+		{ label: 'Weather key', place: 'api.weather.example' },
+		{ label: 'Bank login', place: null },
+	] };
+	for (const [lease, lines] of [[base, null], [withItems, [
+		'Weather key, sent only to api.weather.example', 'Bank login, given to the script',
+	]]] as const) {
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		const component = mount(HostAccessPendingRequestDrawer, { target, props: {
+			lease, stale: false, deciding: false, rejectDisabled: false, approveDisabled: false,
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
+		} });
+		flushSync();
+		const sections = [...target.querySelectorAll('.decision-body section')];
+		const labels = sections.map((section) => section.querySelector('.section-label')?.textContent?.trim());
+		const index = labels.indexOf('Saved items it uses');
+		if (lines === null) {
+			expect(index).toBe(-1);
+		} else {
+			expect(labels[index - 1]).toBe('When it runs');
+			expect([...sections[index].querySelectorAll('p')].map((p) => p.textContent?.trim())).toEqual(lines);
+		}
+		await unmount(component);
+		target.remove();
+	}
+});
+
 it('puts Deny beside Approve as Reject sits in the other drawers: a secondary button, no red, no spacer between', async () => {
 	const lease: HostAccessScript = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -172,7 +209,7 @@ it('shows a script chip status as text, not a pill', async () => {
 	const request: HostAccessScript = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -198,7 +235,7 @@ it('keeps a submitted script decision visible on the closed chip', async () => {
 	const request: HostAccessScript = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
-		script_name: 'task.py', script_path: '/workspace/task.py',
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [],
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
 		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',

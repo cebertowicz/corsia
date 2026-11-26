@@ -1431,7 +1431,7 @@ describe('HostAccessLeaseControl', () => {
 	const waitingScript: HostAccessScript = {
 		id: 'script-1', kind: 'script', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
 		application_hash: 'script-hash', decision_capability: 'script-decision',
-		script_name: 'task.py', script_path: '/workspace/task.py', trigger: { cadence_seconds: 600 },
+		script_name: 'task.py', script_path: '/workspace/task.py', rules_hash: 'rules-1', saved_items: [], trigger: { cadence_seconds: 600 },
 		purpose: 'Check the result', user_request: 'Please check the result', reviewer_reason: 'Matches the request',
 		created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
 	};

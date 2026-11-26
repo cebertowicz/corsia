@@ -26,17 +26,21 @@ from pathlib import Path
 
 from loguru import logger
 
-from automation import script_event_lines, script_rule_runs, script_tree
+from automation import script_blanking, script_event_lines, script_items, script_rule_runs, script_tree
 from automation import script_schedules as store
 from automation.schedules import Schedule, get
 from automation.script_readings import (
+    ITEMS_WITHHELD,
     RunReport,
     Signal,
     build_report,
     emit_report,
     hash_mismatch_report,
+    items_unavailable_report,
 )
-from automation.script_sandbox import ScriptSandboxError, run_script
+from automation.script_sandbox import (
+    STDERR_CAP_BYTES, STDOUT_CAP_BYTES, ScriptRun, ScriptSandboxError, run_script,
+)
 from host_access.processes import ProcessOwnerError
 from infra import sweep_wake
 from infra.database import get_db, write_transaction
@@ -196,8 +200,10 @@ async def run_claimed(
         logger.warning("script schedule {} was stopped by shutdown; its run is left for recovery", schedule.id)
         return
     except Exception as exc:  # noqa: BLE001 - a run's failure is its report
-        logger.exception("script schedule {} failed unexpectedly", schedule.id)
-        report = _error_report(schedule, f"the runner failed: {exc}")
+        # The log gets the type only; the report keeps the text with every saved value hidden.
+        logger.error("script schedule {} failed unexpectedly: {}", schedule.id, type(exc).__name__)
+        approved = ((schedule.payload or {}).get("authentication") or {}).get("state") == "approved"
+        report = await _blanked_error(schedule, f"the runner failed: {exc}", approved)
     report = await _stamped(schedule, report)
     report = await script_event_lines.admit_events(
         schedule, report, rule_run.trace if rule_run else (), rule_run.decision_id if rule_run else None,
@@ -281,6 +287,7 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         return hash_mismatch_report(schedule)
     authentication = (schedule.payload or {}).get("authentication") or {}
     approved = authentication.get("state") == "approved"
+    items: script_items.RunItems | None = None
     if approved:
         if not authentication.get("tree_sha256"):
             return hash_mismatch_report(schedule, folder=(
@@ -293,6 +300,11 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
             return hash_mismatch_report(schedule, folder=(
                 "a file in it changed, appeared or went away; a script that writes into its own "
                 "folder does this too, so keep what it writes elsewhere"))
+        try:
+            items = await run_off_db(script_items.for_run, schedule.thread_id, schedule.id, authentication,
+                                     rule_run.rule_id if rule_run else None)
+        except script_items.ItemsUnavailable:
+            return items_unavailable_report(schedule)
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
     run_id = uuid.uuid4().hex
     try:
@@ -301,15 +313,42 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
-            **({"authenticated": True} if approved else {}),
+            **({"authenticated": True, "saved_items": items} if approved else {}),
             **({"stdin": stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id,
                 "github_repo": repository} if rule_run is not None else {}),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
-        return _error_report(schedule, f"could not start: {exc}")
+        return await _blanked_error(schedule, f"could not start: {exc}", approved)
     if run.stopped_by_shutdown:
         raise _StoppedByShutdown
-    return dataclasses.replace(build_report(schedule, run, run_id=run_id), github_locked=run.github_locked)
+    if approved:
+        try:
+            values = await run_off_db(script_blanking.saved_values)
+        except script_blanking.Unchecked:
+            return _error_report(schedule, "its output was withheld: CORSIA couldn't check it for saved values")
+        run = await asyncio.to_thread(_hidden, run, values)
+    return dataclasses.replace(build_report(schedule, run, run_id=run_id), github_locked=run.github_locked,
+                               withheld=ITEMS_WITHHELD if items is not None and items.withheld else None)
+
+
+def _hidden(run: ScriptRun, values: frozenset[str]) -> ScriptRun:
+    """An approved run's output with every saved value hidden; a stream its cap cut short first loses any
+    part of a value at its end. Whether stdout ran past its cap is read before hiding shrinks it."""
+    over = len(run.stdout) > STDOUT_CAP_BYTES
+    stdout = script_blanking.cut(run.stdout, values) if over else run.stdout
+    stderr = script_blanking.cut(run.stderr, values) if len(run.stderr) >= STDERR_CAP_BYTES else run.stderr
+    return dataclasses.replace(run, over_cap_raw=over, stdout=script_blanking.data(stdout, values),
+                               stderr=script_blanking.data(stderr, values))
+
+
+async def _blanked_error(schedule: Schedule, message: str, approved: bool) -> RunReport:
+    """An approved run's failure, with every saved value hidden from its text."""
+    if approved:
+        try:
+            message = script_blanking.text(message, await run_off_db(script_blanking.saved_values))
+        except script_blanking.Unchecked:
+            message = message.split(":", 1)[0] + ", and CORSIA couldn't check why for saved values"
+    return _error_report(schedule, message)
 
 
 def settle(
@@ -325,8 +364,9 @@ def settle(
             # A breach is a reading the script ran and reported, not a failed run.
             failed = None if report.status in ("ok", "breach") else (report.error or report.status)
             # The missing login can explain a failure; on a run that worked it is noise.
+            note = "; ".join(part for part in (report.github_locked, report.withheld) if part)
             rule_runs.finish(connection, rule_run.decision_id, failed=failed,
-                             note=report.github_locked if failed else None)
+                             note=note if failed and note else None)
         try:
             current = get(schedule.id, db=connection)
         except KeyError:

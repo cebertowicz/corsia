@@ -7,6 +7,10 @@ Host-access leases (``api.host_access``) are a different concept: a time-boxed
 grant of host resources, owned there. The two share only the person's approval
 surface, so a script application is served in the lease list as ``kind: 'script'``,
 and any code that reads that list must branch on that field.
+
+The approval also names the event rules that may start the script (``script_rule_binding``):
+the panel loads their ``rules_hash`` and sends it back, and ``decide`` stores the rules it
+matched only when that hash still holds.
 """
 from __future__ import annotations
 
@@ -14,10 +18,16 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from automation.script_items import shown
+from automation.script_rule_binding import bindings_for, rules_hash
 from infra.database import get_db, write_transaction
 
+#: The request, or the rules that start the script, changed after the panel loaded (409; the drawer says the
+#: request has new details).
+NOT_CURRENT = "Script request is no longer current"
 
-def _public(row) -> dict:
+
+def _public(row, bindings: list[tuple[str, str]]) -> dict:
     payload = json.loads(row["payload_json"])
     auth = payload["authentication"]
     return {
@@ -27,6 +37,7 @@ def _public(row) -> dict:
         "trigger": auth["trigger"], "purpose": auth["purpose"],
         "user_request": auth["user_request"], "reviewer_reason": auth["review"]["reason"],
         "created_at": row["created_at"], "updated_at": row["updated_at"],
+        "rules_hash": rules_hash(bindings), "saved_items": shown(auth),
     }
 
 
@@ -44,7 +55,8 @@ def pending(user_id: str, thread_id: str | None) -> list[dict]:
             from core.thread_identity import root_visible_thread_ids
             visible = root_visible_thread_ids([row["thread_id"] for row in rows], db=db)
             rows = [row for row in rows if row["thread_id"] == thread_id or visible.get(row["thread_id"]) == thread_id]
-        result = [_public(row) for row in rows]
+        bindings = bindings_for([row["id"] for row in rows], db)
+        result = [_public(row, bindings[row["id"]]) for row in rows]
         if thread_id is not None:
             for item in result:
                 item["root_thread_id"] = thread_id
@@ -53,8 +65,14 @@ def pending(user_id: str, thread_id: str | None) -> list[dict]:
         db.close()
 
 
-def decide(schedule_id: str, user_id: str, application_hash: str, approve: bool) -> tuple[str, str]:
-    """Apply a decision once, bound to the owner and reviewed application hash."""
+def decide(
+    schedule_id: str, user_id: str, application_hash: str, approve: bool, loaded_rules_hash: str,
+) -> tuple[str, str]:
+    """Apply a decision once, bound to the owner and reviewed application hash.
+
+    An approval also needs ``loaded_rules_hash``, the ``rules_hash`` the panel loaded, to match the
+    script's rules now; it then stores those rules beside the approval.
+    """
     with write_transaction(None, scope="script_access_decide") as db:
         row = db.execute(
             "SELECT s.* FROM automation_schedules s JOIN threads t ON t.id=s.thread_id "
@@ -65,7 +83,12 @@ def decide(schedule_id: str, user_id: str, application_hash: str, approve: bool)
         payload = json.loads(row["payload_json"] or "{}")
         auth = payload.get("authentication") or {}
         if row["state"] != "paused" or auth.get("state") != "pending" or auth.get("application_hash") != application_hash:
-            raise ValueError("Script request is no longer current")
+            raise ValueError(NOT_CURRENT)
+        if approve:
+            bindings = bindings_for([schedule_id], db)[schedule_id]
+            if loaded_rules_hash != rules_hash(bindings):
+                raise ValueError(NOT_CURRENT)
+            auth["rules"] = [{"id": rule_id, "fingerprint": fingerprint} for rule_id, fingerprint in bindings]
         auth["state"] = "approved" if approve else "denied"
         now = datetime.now(timezone.utc).isoformat()
         db.execute(

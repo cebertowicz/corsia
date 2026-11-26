@@ -98,6 +98,10 @@ export interface HostAccessScript {
 	created_at: string;
 	updated_at: string;
 	decision_capability?: string;
+	/** The rules that may start the script, as loaded; an approval holds only while they still match. */
+	rules_hash: string;
+	/** The saved items the script uses: each one's label, and the only place it is sent, or null when given to the script. */
+	saved_items: { label: string; place: string | null }[];
 }
 
 /**
@@ -216,7 +220,7 @@ export async function decideHostAccessLease(
 				'X-CORSIA-User-Decision': lease.decision_capability ?? '',
 			},
 			body: JSON.stringify({
-				...(lease.kind === 'script' ? {} : { revision: lease.revision }),
+				...(lease.kind === 'script' ? { rules_hash: lease.rules_hash } : { revision: lease.revision }),
 				application_hash: lease.application_hash,
 				...(lease.kind === 'fill' && decision === 'approve'
 					? (durationSeconds === 'until_revoked' ? { until_revoked: true } : { duration_seconds: durationSeconds })

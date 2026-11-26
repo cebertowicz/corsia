@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from automation import script_sandbox
+from automation import script_clients, script_sandbox
 from connections.github_agent import AgentAccountView
 
 
@@ -14,12 +14,13 @@ async def test_authenticated_client_has_only_placeholder_configuration(tmp_path,
     async def fake_channel(*args, **kwargs):
         yield
 
-    monkeypatch.setattr(script_sandbox, "tool_channel", fake_channel)
-    monkeypatch.setattr(script_sandbox, "github_proxy", fake_channel)
-    monkeypatch.setattr(script_sandbox, "corsia_temp_root", lambda: tmp_path)
+    monkeypatch.setattr(script_clients, "tool_channel", fake_channel)
+    monkeypatch.setattr(script_clients, "github_proxy", fake_channel)
+    monkeypatch.setattr(script_clients, "corsia_temp_root", lambda: tmp_path)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
     view = AgentAccountView("ready", home=str(tmp_path / "agent-home"), login="example")
-    async with script_sandbox._authenticated_client("owner", view) as (sockets, tool, config, client):
+    async with script_clients._authenticated_client("owner", view) as (sockets, tool, config, client, _):
         assert tool.parent == sockets
         assert config is not None
         content = (config / "hosts.yml").read_text() + (config / "config.yml").read_text()
@@ -49,12 +50,13 @@ async def test_unavailable_account_has_no_github_config(tmp_path, monkeypatch, v
         raise AssertionError("no forwarder may start without a login")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(script_sandbox, "tool_channel", fake_channel)
-    monkeypatch.setattr(script_sandbox, "github_proxy", no_proxy)
-    monkeypatch.setattr(script_sandbox, "person_forwarder_credential", _no_host_login)
-    monkeypatch.setattr(script_sandbox, "corsia_temp_root", lambda: tmp_path)
+    monkeypatch.setattr(script_clients, "tool_channel", fake_channel)
+    monkeypatch.setattr(script_clients, "github_proxy", no_proxy)
+    monkeypatch.setattr(script_clients, "person_forwarder_credential", _no_host_login)
+    monkeypatch.setattr(script_clients, "corsia_temp_root", lambda: tmp_path)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
-    async with script_sandbox._authenticated_client("owner", view) as (_, _, config, _):
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
+    async with script_clients._authenticated_client("owner", view) as (_, _, config, _, _):
         assert config is None
     assert script_sandbox.github_lock_reason(view, host_login=False).startswith("scripts get no GitHub login: ")
 
@@ -88,21 +90,24 @@ async def test_forwarder_reads_as_the_agents_account_else_the_host_login(tmp_pat
         yield
 
     @asynccontextmanager
-    async def fake_proxy(path, credential, *, read_budget):
+    async def fake_proxy(path, credential, *, read_budget, hide):
+        seen["hide"] = hide
         seen.update(credential=credential(), budget=read_budget)
         yield
 
-    monkeypatch.setattr(script_sandbox, "tool_channel", fake_channel)
-    monkeypatch.setattr(script_sandbox, "github_proxy", fake_proxy)
-    monkeypatch.setattr(script_sandbox, "corsia_temp_root", lambda: tmp_path)
+    monkeypatch.setattr(script_clients, "tool_channel", fake_channel)
+    monkeypatch.setattr(script_clients, "github_proxy", fake_proxy)
+    monkeypatch.setattr(script_clients, "corsia_temp_root", lambda: tmp_path)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda thread_id: tmp_path)
     monkeypatch.setattr(github_agent, "script_forwarder_credential", lambda view: "agents-synthetic")
-    monkeypatch.setattr(script_sandbox, "person_forwarder_credential", lambda: "person-synthetic")
+    monkeypatch.setattr(script_clients, "person_forwarder_credential", lambda: "person-synthetic")
     view = (AgentAccountView("ready", home=str(tmp_path), login="example") if state == "ready"
             else AgentAccountView("not_installed", absent=True))
-    async with script_sandbox._authenticated_client("owner", view) as (_, _, config, _):
+    async with script_clients._authenticated_client("owner", view) as (_, _, config, _, _):
         assert config is not None
         assert "synthetic" not in (config / "hosts.yml").read_text()
+    assert seen.pop("hide") is False  # a run naming no saved items gets GitHub answers streamed, as before
     assert seen == ({"credential": "agents-synthetic", "budget": budget} if state == "ready"
                     else {"credential": "person-synthetic", "budget": person_budget})
 

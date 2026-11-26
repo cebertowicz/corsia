@@ -53,6 +53,8 @@ class LeaseMutation(BaseModel):
 class ScriptMutation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     application_hash: str
+    #: The rules hash the panel loaded; an approval holds only while it still matches.
+    rules_hash: str
 
 
 class FillApproval(LeaseMutation):
@@ -97,7 +99,8 @@ async def _decide_script(schedule_id: str, body: ScriptMutation, user: dict,
     ):
         raise HTTPException(403, "A current interactive user decision is required")
     try:
-        thread_id, state = await run_in_db(decide, schedule_id, user["id"], body.application_hash, approve)
+        thread_id, state = await run_in_db(decide, schedule_id, user["id"], body.application_hash, approve,
+                                           body.rules_hash)
     except LookupError as exc:
         raise HTTPException(404, "Script request not found") from exc
     except ValueError as exc:

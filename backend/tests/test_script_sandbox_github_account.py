@@ -45,7 +45,7 @@ def _views(agent_home: Path) -> dict[str, AgentAccountView]:
 @pytest.fixture
 def run(monkeypatch, tmp_path):
     """``run_script`` through the real profile and argv builders; returns what the spawn received."""
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from host_access.processes import ForegroundProcessResult
     from tests.shell_platform_helpers import use_mac_shell
     from tools import shell_guard
@@ -120,12 +120,12 @@ def run(monkeypatch, tmp_path):
             from contextlib import asynccontextmanager
 
             @asynccontextmanager
-            async def client(_thread_id, client_view):
+            async def client(_thread_id, client_view, _items=None):
                 # As the real client: a forwarder only on a ready account, or with no account and a host login.
                 forwarded = client_view.ready or (client_view.absent and host_login)
-                yield tmp_path, tmp_path / "socket", tmp_path / "placeholder" if forwarded else None, tmp_path
+                yield tmp_path, tmp_path / "socket", tmp_path / "placeholder" if forwarded else None, tmp_path, {}
 
-            monkeypatch.setattr(script_sandbox, "_authenticated_client", client)
+            monkeypatch.setattr(script_clients, "_authenticated_client", client)
         result = asyncio.run(script_sandbox.run_script(
             THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5, authenticated=authenticated))
         return {**seen, "reads": len(reads), "waits": len(waits), "result": result, "view": answer,

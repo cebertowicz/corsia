@@ -143,7 +143,8 @@ def blank(text: str, values: Iterable[str]) -> str:
     return text
 
 
-def _saved_values() -> frozenset[str]:
+def saved_values() -> frozenset[str]:
+    """The one reader of every saved value to blank; raises when they can't be read."""
     db = get_db()
     try:
         return saved_logins.blanking_values(db=db)
@@ -153,14 +154,14 @@ def _saved_values() -> frozenset[str]:
 
 def shows_saved_value(text: str) -> bool:
     """Whether any saved value shows in the text in a form :func:`blank` hides. Raises when they can't be read."""
-    values = _saved_values()
+    values = saved_values()
     return bool(values) and blank(text, values) != text
 
 
 def blank_output(text: str) -> str:
     """One command's text with every saved password blanked; withheld when the saved passwords can't be read."""
     try:
-        values = _saved_values()
+        values = saved_values()
     except Exception:  # noqa: BLE001 - any failure withholds the result; the text is fixed
         log.warning("browser output withheld: saved passwords couldn't be read for blanking")
         return UNCHECKED

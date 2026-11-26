@@ -36,6 +36,10 @@ READER_ALLOWLIST = frozenset({
     # grant for the field's site.
     "infra/saved_items.py",
     "host_access/browser_item_fill.py",
+    # Scripts: the forwarder that puts an approved item's value into a request it sends, and the socket that
+    # gives an item to a script whose approval says so; each reads one value under the run's approval.
+    "automation/script_item_proxy.py",
+    "automation/script_item_given.py",
     "tests/test_saved_items.py",
     "tests/test_browser_item_fill.py",
     "tests/test_saved_logins.py",

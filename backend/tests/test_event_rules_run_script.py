@@ -339,7 +339,7 @@ def test_a_long_chain_of_long_rule_ids_parses():
 
 
 def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(monkeypatch, tmp_path):
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from host_access.processes import ForegroundProcessResult
 
     envs: list[dict] = []
@@ -365,13 +365,14 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
     monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
     monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def channel(*_args):
         yield tmp_path / "socket"
 
-    monkeypatch.setattr(script_sandbox, "github_channel", channel)
+    monkeypatch.setattr(script_clients, "github_channel", channel)
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     script = tmp_path / "s.sh"
     for kwargs in ({}, {"stdin": b"{}", "trace": ("rule_a", "rule_b")}):
@@ -448,7 +449,7 @@ def test_a_script_cannot_open_a_channel_for_an_unregistered_repository_its_own_e
     below for an emitter event naming a registered repository.)"""
     from contextlib import asynccontextmanager
 
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from host_access.processes import ForegroundProcessResult
 
     channels, commands, envs = [], [], []
@@ -480,7 +481,8 @@ def test_a_script_cannot_open_a_channel_for_an_unregistered_repository_its_own_e
     monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
     monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: world["tmp"])
-    monkeypatch.setattr(script_sandbox, "github_channel", github_channel)
+    monkeypatch.setattr(script_clients, "corsia_temp_root_for_bind", lambda _thread: world["tmp"])
+    monkeypatch.setattr(script_clients, "github_channel", github_channel)
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     first = _rule(_script(world, "forger.sh"))
     second = _rule(_script(world, "reader.sh"), event_type="forged")

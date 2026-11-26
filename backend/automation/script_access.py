@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from automation import script_items
 from automation.script_schedules import pin_script
 from automation.script_tree import read_tree, tree_sha256
 from events.delivery import deliver_to_thread
@@ -31,6 +32,7 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
         raise ValueError("user_request is required for an authenticated script")
     if not params.get("script_path"):
         raise ValueError("script_path is required for a script schedule")
+    saved_items = await run_off_db(script_items.declared, thread_id, params.get("saved_items"), authenticated=True)
     path, sha = await run_off_db(pin_script, str(params["script_path"]), workspace=WORKSPACE)
     fence = await run_off_db(fence_for_thread, thread_id)
     tree = await run_off_db(read_tree, path, lambda candidate: _read_denial(candidate, thread_id, fence))
@@ -42,6 +44,8 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
     application = {"purpose": purpose, "user_request": user_request, "trigger": trigger,
                    "script": text, "script_path": str(path), "script_sha256": sha,
                    "files": [_reviewed_file(name, data) for name, data in tree.items()]}
+    if saved_items:
+        application["saved_items"] = saved_items
     tree_hash = tree_sha256({**tree, path.name: raw})
     application_hash = hashlib.sha256(json.dumps(
         application, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
@@ -56,10 +60,14 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
         await deliver_to_thread(thread_id, "script_access.rejected", "Authenticated script rejected.",
                                 {"reason": review.reason})
         raise ValueError(f"authenticated script rejected: {review.reason}")
-    approved = review.verdict == "allow" and auto and await run_in_db(get_host_access_auto_approve)
+    # A script that names saved items always goes to the person, whatever Auto-approve says.
+    approved = (review.verdict == "allow" and auto and not saved_items
+                and await run_in_db(get_host_access_auto_approve))
     record = {"state": "approved" if approved else "pending", "purpose": purpose,
               "user_request": user_request, "trigger": trigger, "application_hash": application_hash,
               "tree_sha256": tree_hash, "review": asdict(review)}
+    if saved_items:
+        record["saved_items"] = saved_items
     return path, sha, record
 
 

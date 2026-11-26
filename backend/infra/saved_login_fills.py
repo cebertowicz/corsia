@@ -57,6 +57,7 @@ from infra.saved_fill_identity import (
     FillApprovalError as FillApprovalError, FillApprovalNotFound as FillApprovalNotFound,
     FillApprovalNotTheirs as FillApprovalNotTheirs, FillDurationError as FillDurationError,
     context_thread as _context_thread, own_thread as _own_thread, thread_record as thread_record,
+    usable_login as usable_login,
 )
 from infra.time import utc_now, utc_now_iso
 
@@ -76,8 +77,6 @@ _NO_REQUEST = "This sign-in request is closed. Ask the agent to try again if it 
 _NO_GRANT = "This approval has ended."
 _NOT_CURRENT = "This request has new details. Review them, then approve or reject it."
 _DURATION = f"Pick a duration from {MIN_GRANT_SECONDS} to {MAX_GRANT_SECONDS} seconds."
-_OUT_OF_DATE = "The saved login for {site} ({username}) is out of date. The person has a step to sign in to {site} themselves."
-_NOT_THEIRS = "No saved login you may use has that id."
 
 
 @dataclass(frozen=True)
@@ -229,17 +228,9 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
     """
     requested = None if requested_seconds is None else _duration(requested_seconds)
     clean_thread = _own_thread(thread_id)
-    try:
-        login = saved_logins.get_login(login_id)
-    except KeyStoreError as exc:
-        raise FillApprovalError(str(exc)) from None
-    user_id, root, agent = thread_record(clean_thread)
-    if login.saved_by != user_id:
-        raise FillApprovalNotTheirs(_NOT_THEIRS)
-    if login.status != saved_logins.STATUS_OK:
-        raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
+    login, record = usable_login(clean_thread, login_id)
     return open_request(
-        clean_thread, (user_id, root, agent), requested,
+        clean_thread, record, requested,
         lambda item: item.kind == LOGIN and item.login_id == login.id,
         login_id=login.id, site=login.site, username=login.username,
     )
