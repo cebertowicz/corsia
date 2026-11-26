@@ -28,6 +28,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass
 
+import infra.saved_items as saved_items  # mypy resolves a new submodule only this way
 from infra import key_store_values
 from infra.database import get_db, write_transaction
 from infra.key_store import LOGIN_PREFIX, VALUE_MAX, is_login_entry_name
@@ -264,7 +265,9 @@ def password_matches(login_id: object, password: object, *, db: sqlite3.Connecti
 
 
 def blanking_values(*, db: sqlite3.Connection | None = None) -> frozenset[str]:
-    """Every saved password of ``BLANKING_MIN`` or more characters, to blank wherever the browser returns one."""
+    """Every saved password, and every saved item's value (``infra.saved_items``), of ``BLANKING_MIN`` or more
+    characters, to blank wherever the browser returns one."""
     conn = _db(db)
     names = [entry_name(row[0]) for row in conn.execute("SELECT id FROM saved_logins").fetchall()]
-    return frozenset(value for value in key_store_values.resolve(conn, names).values() if len(value) >= BLANKING_MIN)
+    values = set(key_store_values.resolve(conn, names).values()) | saved_items.item_blanking_values(db=conn)
+    return frozenset(value for value in values if len(value) >= BLANKING_MIN)

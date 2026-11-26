@@ -1,7 +1,11 @@
 """Hide what was typed into a snapshot's text fields; browser_control decides when a snapshot needs it."""
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import replace
+
+from host_access import browser_cli
 
 # Snapshot roles that hold typed text; the value follows the line's ref and attributes after ": ".
 _FIELD_LINE = re.compile(r"^(?P<indent>\s*)- (?:textbox|searchbox|combobox|spinbutton)\b")
@@ -34,3 +38,18 @@ def hide_field_values(snapshot: str) -> str:
         kept = attributes.end() if attributes is not None else ref.end()
         lines.append(line if not line[kept:].strip() else f"{line[:kept]}: {VALUE_HIDDEN}")
     return "\n".join(lines)
+
+
+def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandResult | None:
+    """A snapshot taken while a filled field shows: only `data.snapshot`, its values hidden; None for other output.
+
+    Any other shape (a warning line before the JSON, an error, plain text) could carry a value, so it fails closed.
+    """
+    if result.timed_out or result.completion == "interrupted" or result.returncode != 0:
+        return None
+    data = browser_cli.json_object(result.stdout).get("data")
+    snapshot = data.get("snapshot") if isinstance(data, dict) else None
+    if not isinstance(snapshot, str):
+        return None
+    stdout = json.dumps({"success": True, "data": {"snapshot": hide_field_values(snapshot)}})
+    return replace(result, stdout=stdout, stderr="")

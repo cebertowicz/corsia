@@ -1,5 +1,6 @@
 """Record the result of a saved-login fill without reading its password."""
 
+from sqlite3 import Connection
 from typing import Literal
 
 from infra import saved_login_fills, saved_logins
@@ -20,12 +21,21 @@ def _record(thread_id: str, login_id: str, result: Literal["filled", "rejected",
             saved_logins.record_use(login_id, thread_id, db=conn)
         elif result == "rejected":
             saved_logins.mark_out_of_date(login_id, db=conn)
-        conn.execute(
-            "INSERT INTO saved_login_fill_audit (created_at, login_id, site, thread_id, result) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (utc_now_iso(), login.id, login.site, thread_id, result),
-        )
+        audit(conn, login_id=login.id, site=login.site, thread_id=thread_id, result=result)
     return login
+
+
+def audit(conn: Connection, *, site: str, thread_id: str, result: str, login_id: str = "",
+          item: str | None = None) -> None:
+    """One fill's history row, naming exactly one login (its id, item NULL) or one saved item (its entry name,
+    login_id empty). The table predates items and SQLite can't add that rule to it without a rebuild, so it's here."""
+    if bool(login_id) == bool(item):
+        raise KeyStoreError("A fill's history row names exactly one saved login or one saved item.")
+    conn.execute(
+        "INSERT INTO saved_login_fill_audit (created_at, login_id, item, site, thread_id, result) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (utc_now_iso(), login_id, item, site, thread_id, result),
+    )
 
 
 def fill_succeeded(thread_id: str, login_id: str) -> str:
@@ -44,3 +54,15 @@ def fill_failed(thread_id: str, login_id: str) -> str:
 def fill_unknown(thread_id: str, login_id: str) -> None:
     """Record a fill whose outcome is unknown, leaving login state unchanged."""
     _record(thread_id, login_id, "unknown")
+
+
+def item_fill_recorded(thread_id: str, item: str, site: str, result: Literal["filled", "unknown"]) -> None:
+    """Record a saved item's fill in the same history: the item's entry name, never its value.
+
+    ``filled`` once the page kept the value; ``unknown`` when it may be in the page but that wasn't confirmed.
+    The row's ``login_id`` is empty: it names no login.
+    """
+    if not isinstance(thread_id, str) or not thread_id:
+        raise KeyStoreError("A saved item's use needs the thread that used it.")
+    with write_transaction(None, scope="saved_item_fill_result") as conn:
+        audit(conn, item=item, site=site, thread_id=thread_id, result=result)

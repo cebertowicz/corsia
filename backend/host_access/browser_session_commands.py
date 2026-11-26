@@ -221,6 +221,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
             current_session=partial(owner.session_identity, thread_id))
         note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
+        # In a saved-fill session a screenshot first reads the page's snapshot, so a page showing a saved value isn't shot.
+        await browser_saved_fills.refuse_screenshot_showing_value(thread_id, runtime.record.session, args, command, timeout)
     # A command the guard let through marks against a saved-login fill; capture marks each document typing passes through.
     async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation) as finished,
                 await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes):
@@ -256,7 +258,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
     if filled_field_visit and args[0] == "snapshot":
-        hidden = hidden_snapshot(result)
+        hidden = browser_field_values.hidden_snapshot(result)
         if hidden is None:
             return _noted(browser_control.SAVED_FILL_SNAPSHOT_WITHHELD if saved_fill else browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
         result = hidden
@@ -270,21 +272,6 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if opening_unlaunched_session and runtime.record.shared and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
     return _noted(rendered, note)
-
-
-def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandResult | None:
-    """A snapshot taken while a filled field shows: only `data.snapshot`, its values hidden; None for other output.
-
-    Any other shape (a warning line before the JSON, an error, plain text) could carry a value, so it fails closed.
-    """
-    if result.timed_out or result.completion == "interrupted" or result.returncode != 0:
-        return None
-    data = browser_cli.json_object(result.stdout).get("data")
-    snapshot = data.get("snapshot") if isinstance(data, dict) else None
-    if not isinstance(snapshot, str):
-        return None
-    stdout = json.dumps({"success": True, "data": {"snapshot": browser_field_values.hide_field_values(snapshot)}})
-    return replace(result, stdout=stdout, stderr="")
 
 
 def _noted(text: str, note: str | None) -> str:

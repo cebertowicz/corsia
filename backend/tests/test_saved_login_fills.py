@@ -61,6 +61,7 @@ def test_a_request_names_the_agent_site_username_and_time_from_server_records(wo
     assert row["kind"] == "fill" and row["state"] == "awaiting_user"
     assert row["agent"] == "Bookkeeper"
     assert row["site"] == "https://example.com" and row["username"] == "me@example.com"
+    assert row["kind"] == "fill" and row["fill_kind"] == "login" and row["item_label"] is None
     assert row["created_at"] and row["expires_at"] is None and row["duration_seconds"] is None
     assert row["max_duration_seconds"] == 1800
     assert row["root_thread_id"] == AGENT_THREAD
@@ -260,10 +261,10 @@ def test_no_agent_tool_names_the_fill_approval_module():
         and "saved_login_fills" in path.read_text(encoding="utf-8", errors="replace")
     }
     # The person's approval routes, the person's login delete route, the fill executor and the rejected-fill
-    # recorder.
+    # recorder; and the saved-item approvals, which open and read their requests through it.
     assert callers == {
         "api/host_access.py", "api/saved_logins.py",
-        "host_access/browser_login_fill.py", "infra/saved_login_results.py",
+        "host_access/browser_login_fill.py", "infra/saved_login_results.py", "infra/saved_item_fills.py",
     }
 
 

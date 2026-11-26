@@ -7,13 +7,15 @@ the agent command path (`browser_session_commands.run`) with the real page guard
 """
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 
 from host_access import (
-    browser_cdp, browser_cli, browser_control, browser_pane_state, browser_saved_fills, browser_session_commands,
-    browser_step_lifecycle as lifecycle,
+    browser_cdp, browser_cli, browser_control, browser_output_blanking, browser_pane_state, browser_saved_fills,
+    browser_session_commands, browser_step_lifecycle as lifecycle,
 )
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
@@ -33,6 +35,12 @@ def _fresh():
         each.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_saved_values(monkeypatch):
+    """No saved value by default, so a screenshot's check reads no store; a test that needs one sets it."""
+    monkeypatch.setattr(browser_output_blanking, "_saved_values", frozenset)
+
+
 def _page(visit: str):
     async def probe(*_args):
         return PasswordProbe(visit, "example.com", frozenset(), "target-1", present_nodes=frozenset())
@@ -49,9 +57,14 @@ async def _access(args: tuple[str, ...], session: str | None = "session-1",
 
 
 async def _run(monkeypatch, args: tuple[str, ...], *, visit: str = FILLED, session: str = "session-1",
-               output: str = "ok") -> str:
-    """One agent command through the real command path and page guard, on a page whose document is `visit`."""
+               output: str = "ok", page: browser_cli.CommandResult | None = None,
+               ran: list[tuple[str, ...]] | None = None) -> str:
+    """One agent command through the real command path and page guard, on a page whose document is `visit`.
+
+    `page` is what a snapshot the server takes for itself returns; `ran` collects every command run.
+    """
     runtime = BrowserRuntime(BrowserSessionRecord(THREAD, session, binding=object()))
+    ran = [] if ran is None else ran
 
     class Owner:
         _queued_actions = 0
@@ -63,7 +76,10 @@ async def _run(monkeypatch, args: tuple[str, ...], *, visit: str = FILLED, sessi
         async def _admit(self, *_args, **_kwargs):
             return runtime
 
-        async def _run_admitted(self, _runtime, _args, **_kwargs):
+        async def _run_admitted(self, _runtime, command_args, **_kwargs):
+            ran.append(tuple(command_args))
+            if page is not None and tuple(command_args) == ("snapshot",):
+                return page, False
             return browser_cli.CommandResult(0, output, ""), False
 
         def _model_result(self, result, _record):
@@ -180,12 +196,12 @@ def test_the_saved_fill_lines_say_what_holds_and_until_when():
     page, withheld, session = (browser_control.SAVED_FILL_REFUSED, browser_control.SAVED_FILL_SNAPSHOT_WITHHELD,
                                browser_saved_fills.SAVED_FILL_SESSION_REFUSED)
     for line in (page, withheld, session):
-        # The server filled the field, so no line says the person did.
-        assert "A saved login was filled" in line and "person filled" not in line
+        # The server filled the field, so no line says the person did; each holds for a login or an item.
+        assert "A saved login or saved item was filled" in line and "person filled" not in line
     assert "on this page, so until you open another page or reload this one" in page
     # Only a screenshot or a CSS-selector target passes the session limit and then meets the page's own refusal.
     assert "screenshots are refused here and each element must be named by its @ref" in page
-    assert "still runs only the commands its saved-login limit allows, on every page" in page
+    assert "still runs only the commands allowed after a saved fill, on every page" in page
     assert "still work" not in page and "network routes" not in page
     assert "on this page" in withheld
     assert "in this browser session, so until the session ends only these commands run, on every page" in session
@@ -236,3 +252,90 @@ async def test_a_mark_for_one_session_does_not_reach_another(monkeypatch):
     browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
     assert (await _access(("eval", "1"), session="session-2")).filled_field_visit is False
     assert await _run(monkeypatch, ("eval", "1"), session="session-2") == "ok"
+
+
+# --- A later page that shows a saved value --------------------------------------------------------------------
+
+VALUE = "sk-test-4417-1234-5678"  # gitleaks:allow - a fake fixture value
+SHOT = ("screenshot", "shot.png")
+
+
+def _snapshot(text: str, returncode: int = 0) -> browser_cli.CommandResult:
+    return browser_cli.CommandResult(returncode, json.dumps({"success": True, "data": {"snapshot": text}}), "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shown", [
+    f'- StaticText "Your key is {VALUE}"',
+    f'- textbox "Key" [ref=e3]: {VALUE}',
+    f'- link "Copy" [ref=e4]: /copy?k={quote(VALUE, safe="")}',
+])
+async def test_a_screenshot_of_a_later_page_that_shows_a_saved_value_is_refused(monkeypatch, shown):
+    """Text, a field's value or an encoded copy: any form blanking hides refuses the screenshot before it is taken."""
+    monkeypatch.setattr(browser_output_blanking, "_saved_values", lambda: frozenset({VALUE}))
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
+    ran: list[tuple[str, ...]] = []
+    with pytest.raises(BrowserSessionError) as refused:
+        await _run(monkeypatch, SHOT, visit=OTHER, page=_snapshot(f'- heading "Saved" [level=1]\n{shown}'), ran=ran)
+    assert str(refused.value) == browser_saved_fills.SCREENSHOT_SHOWS_SAVED_VALUE
+    assert VALUE not in str(refused.value) and ("snapshot",) in ran and SHOT not in ran
+
+
+@pytest.mark.asyncio
+async def test_a_screenshot_of_a_later_page_without_a_saved_value_runs(monkeypatch):
+    monkeypatch.setattr(browser_output_blanking, "_saved_values", lambda: frozenset({VALUE}))
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
+    ran: list[tuple[str, ...]] = []
+    page = _snapshot('- heading "Saved" [level=1]\n- StaticText "Your key was saved."')
+    assert await _run(monkeypatch, SHOT, visit=OTHER, page=page, ran=ran) == "ok"
+    assert ran[-2:] == [("snapshot",), SHOT]
+
+
+def _unreadable():
+    raise OSError("values file locked")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["values", "snapshot", "command"])
+async def test_a_screenshot_whose_page_or_saved_values_cant_be_checked_is_refused(monkeypatch, failure):
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
+    page = _snapshot('- StaticText "nothing here"')
+    if failure == "values":
+        monkeypatch.setattr(browser_output_blanking, "_saved_values", _unreadable)
+    elif failure == "snapshot":
+        page = _snapshot("", returncode=1)
+    ran: list[tuple[str, ...]] = []
+    command = browser_saved_fills.refuse_screenshot_showing_value
+    if failure == "command":
+        async def broken(_args, _timeout):
+            raise BrowserSessionError(browser_cli.BROWSER_BUSY)
+
+        with pytest.raises(BrowserSessionError) as refused:
+            await command(THREAD, "session-1", SHOT, broken, 5)
+    else:
+        with pytest.raises(BrowserSessionError) as refused:
+            await _run(monkeypatch, SHOT, visit=OTHER, page=page, ran=ran)
+        assert SHOT not in ran
+    assert str(refused.value) == browser_saved_fills.SCREENSHOT_SHOWS_SAVED_VALUE
+
+
+@pytest.mark.asyncio
+async def test_without_a_saved_fill_a_screenshot_takes_no_snapshot_first(monkeypatch):
+    monkeypatch.setattr(browser_output_blanking, "_saved_values", _unreadable)
+    ran: list[tuple[str, ...]] = []
+    assert await _run(monkeypatch, SHOT, visit=OTHER, ran=ran) == "ok"
+    assert ("snapshot",) not in ran
+
+
+@pytest.mark.asyncio
+async def test_the_check_runs_only_for_a_screenshot(monkeypatch):
+    monkeypatch.setattr(browser_output_blanking, "_saved_values", _unreadable)
+    browser_saved_fills.mark_saved_fill(THREAD, "session-1", FILLED)
+    ran: list[tuple[str, ...]] = []
+    await _run(monkeypatch, ("get", "title"), visit=OTHER, ran=ran)
+    assert ("snapshot",) not in ran
+
+
+def test_the_screenshot_line_names_both_kinds_and_the_way_on():
+    line = browser_saved_fills.SCREENSHOT_SHOWS_SAVED_VALUE
+    assert "saved login's or saved item's value" in line and line.endswith("it shows saved values hidden.")

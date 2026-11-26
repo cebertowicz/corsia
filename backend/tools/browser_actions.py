@@ -112,7 +112,9 @@ class BrowserFillTool(Tool):
         "- Fill form fields, search boxes, text areas\n"
         "- Enter test data\n"
         "- Sign in with a login the person saved: pass saved_login (and no selector or text) on the site's "
-        "sign-in page. CORSIA asks the person to approve, then types it; you never see the password.\n\n"
+        "sign-in page. CORSIA asks the person to approve, then types it; you never see the password.\n"
+        "- Fill another saved item (an API key, an account number): pass saved_item and the field's selector (no "
+        "text). CORSIA asks the person to approve it for that site, then fills it in; you never see it.\n\n"
         "Get element refs from browser_snapshot (e.g. @e5)."
     )
     parameters = {
@@ -136,9 +138,14 @@ class BrowserFillTool(Tool):
                 },
                 "required": ["site", "username"],
             },
+            "saved_item": {
+                "type": "string",
+                "description": "The name of a saved item to fill into selector, instead of text. If none "
+                               "matches, the result lists the items you may ask for.",
+            },
             "minutes": {
                 "type": "integer",
-                "description": "With saved_login: how long your task needs the login, 1-"
+                "description": "With saved_login or saved_item: how long your task needs it, 1-"
                                f"{MAX_MINUTES} minutes. The person decides.",
             },
         },
@@ -146,8 +153,14 @@ class BrowserFillTool(Tool):
     }
 
     async def execute(self, selector: str | None = None, text: str | None = None, saved_login: Any = None,
-                      minutes: Any = None, **kwargs: Any) -> str:
+                      minutes: Any = None, saved_item: Any = None, **kwargs: Any) -> str:
         thread_id, _project_id = _execution_context(kwargs)
+        if saved_item is not None:
+            import tools.browser_saved_login as browser_saved_login
+
+            if not isinstance(selector, str) or not selector or text is not None or saved_login is not None:
+                return browser_saved_login.ITEM_EXCLUSIVE
+            return await browser_saved_login.fill_item(thread_id, saved_item, selector, minutes)
         if saved_login is not None or minutes is not None:
             import tools.browser_saved_login as browser_saved_login
 
@@ -155,7 +168,7 @@ class BrowserFillTool(Tool):
                 return browser_saved_login.EXCLUSIVE
             return await browser_saved_login.fill(thread_id, saved_login, minutes)
         if selector is None or text is None:
-            return "Error: browser_fill needs selector and text, or saved_login."
+            return "Error: browser_fill needs selector and text, saved_login, or selector and saved_item."
         return await _run(
             ["fill", selector, text],
             thread_id=thread_id,

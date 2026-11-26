@@ -32,12 +32,18 @@ READER_ALLOWLIST = frozenset({
     "host_access/browser_output_blanking.py",
     # The fill executor: reads one saved password, under a live approval, to type it into the page.
     "host_access/browser_login_fill.py",
+    # Saved items: their one reader module, and the item fill executor that reads one item's value under a live
+    # grant for the field's site.
+    "infra/saved_items.py",
+    "host_access/browser_item_fill.py",
+    "tests/test_saved_items.py",
+    "tests/test_browser_item_fill.py",
     "tests/test_saved_logins.py",
     "tests/test_saved_logins_leaks.py",
     "tests/test_saved_logins_keys_routes.py",
     "tests/test_saved_login_fills_leaks.py",
 })
-READERS = ("password_for_fill", "blanking_values")
+READERS = ("password_for_fill", "blanking_values", "item_value_for_fill", "item_blanking_values")
 
 
 @pytest.fixture

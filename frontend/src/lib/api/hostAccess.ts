@@ -118,7 +118,12 @@ export interface HostAccessFill {
 	 * domain; null only when the site has no host.
 	 */
 	domain: string | null;
+	/** What is filled: a saved login, or a saved item (a Settings › Keys entry). The panel reads only this. */
+	fill_kind: 'login' | 'item';
+	/** The saved login's username; empty for a saved item. */
 	username: string;
+	/** A saved item's label (not a login), shown instead of a username; null for a saved login. */
+	item_label: string | null;
 	revision: number;
 	application_hash: string;
 	max_duration_seconds: number;

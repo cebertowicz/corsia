@@ -151,6 +151,12 @@ def _saved_values() -> frozenset[str]:
         db.close()
 
 
+def shows_saved_value(text: str) -> bool:
+    """Whether any saved value shows in the text in a form :func:`blank` hides. Raises when they can't be read."""
+    values = _saved_values()
+    return bool(values) and blank(text, values) != text
+
+
 def blank_output(text: str) -> str:
     """One command's text with every saved password blanked; withheld when the saved passwords can't be read."""
     try:

@@ -15,7 +15,7 @@ afterEach(() => { for (const target of targets.splice(0)) target.remove(); });
 function fill(overrides: Partial<HostAccessFill> = {}): HostAccessFill {
 	return {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'agent', root_thread_id: 'agent',
-		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', fill_kind: 'login', username: 'me@example.com', item_label: null,
 		revision: 1, application_hash: 'a'.repeat(64), decision_capability: 'capability',
 		max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -212,7 +212,7 @@ it('shows a live grant with its time left and revokes it', async () => {
 	} });
 	flushSync();
 	const text = host.textContent ?? '';
-	expect(text).toContain('CORSIA types the password into this site for the agent. The agent never sees it.');
+	expect(text).toContain('CORSIA fills in the password on this site for the agent. The agent never sees it.');
 	expect(text).not.toContain('can sign in to');
 	expect(text).toContain('15 minutes');
 	expect(text).toContain('10:00');
@@ -317,7 +317,7 @@ it('approves until revoked only when the person picks it', async () => {
 
 it('says nothing about revoking under any choice, so nothing moves when the choice changes', async () => {
 	const { host, component } = pending(fill({ requested_duration_seconds: 900 }));
-	const explainer = 'CORSIA types the password into this site for the agent. The agent never sees it.';
+	const explainer = 'CORSIA fills in the password on this site for the agent. The agent never sees it.';
 	for (const choice of ['900', 'until_revoked', '1800']) {
 		choose(host, choice);
 		expect(host.querySelector('.explainer')?.textContent).toBe(explainer);
@@ -336,4 +336,70 @@ it('posts until revoked, and no duration, when the person picks it', async () =>
 	expect(JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string)).toEqual({
 		revision: 1, application_hash: 'a'.repeat(64), until_revoked: true,
 	});
+});
+
+it('shows a saved item by its label, with its own head and first line, and approves it the same way', async () => {
+	const item = fill({ fill_kind: 'item', username: '', item_label: 'GitHub webhook secret' });
+	expect(approvalReady(item)).toBe(true);
+	expect(pendingLabel(item)).toBe('Review a request to use a saved item');
+	const { host, component, onApprove } = pending(item);
+	const text = host.textContent ?? '';
+	expect(text).toContain('Use a saved item');
+	expect(text).not.toContain('Sign in with a saved login');
+	expect(host.querySelector('.explainer')?.textContent)
+		.toBe('CORSIA fills it in on this site for the agent. The agent never sees it.');
+	const labels = [...host.querySelectorAll('.section-label')].map((label) => label.textContent?.trim());
+	expect(labels).toContain('Saved item');
+	expect(labels).not.toContain('Username');
+	expect(text).toContain('GitHub webhook secret');
+	approve(host);
+	expect(onApprove).toHaveBeenCalledOnce();
+	await unmount(component);
+});
+
+it('names a saved item on its pending chip, its live grant and the grant chip', async () => {
+	const item = fill({ fill_kind: 'item', username: '', item_label: 'GitHub webhook secret' });
+	const chipHost = target();
+	const chip = mount(HostAccessPendingTrigger, { target: chipHost, props: {
+		request: item, stale: false, open: false, onclick: vi.fn(),
+	} });
+	flushSync();
+	expect(chipHost.querySelector('.eyebrow')?.textContent?.trim()).toBe('Saved item');
+	expect(chipHost.querySelector('button')?.getAttribute('aria-label')).toBe('Review a request to use a saved item');
+	await unmount(chip);
+	const live = { ...item, state: 'active' as const, revision: 2, duration_seconds: 300, expires_at: '2026-01-01T00:05:00Z' };
+	const drawerHost = target();
+	const drawer = mount(HostAccessActiveLeaseDrawer, { target: drawerHost, props: {
+		lease: live, nowMs: Date.parse('2026-01-01T00:00:00Z'), disabled: false, deciding: false,
+		onRevoke: vi.fn(), onClose: vi.fn(),
+	} });
+	flushSync();
+	const text = drawerHost.textContent ?? '';
+	expect(text).toContain('Use a saved item');
+	expect(text).toContain('CORSIA fills it in on this site for the agent. The agent never sees it.');
+	expect(text).toContain('Saved item');
+	expect(text).toContain('GitHub webhook secret');
+	expect(text).not.toContain('Username');
+	await unmount(drawer);
+	const grantHost = target();
+	const grant = mount(HostAccessActiveLeaseChip, { target: grantHost, props: {
+		lease: live, nowMs: Date.parse('2026-01-01T00:00:00Z'), open: false, deciding: false, disabled: false,
+		onOpen: vi.fn(), onClose: vi.fn(), onRevoke: vi.fn(),
+	} });
+	flushSync();
+	expect(grantHost.querySelector('.active-chip-trigger')?.getAttribute('aria-label')).toBe('Saved item');
+	await unmount(grant);
+});
+
+it('does not offer Approve for a fill that lacks what its kind names', () => {
+	expect(approvalReady(fill({ username: '', item_label: null }))).toBe(false);
+	expect(approvalReady(fill({ fill_kind: 'item', username: '', item_label: null }))).toBe(false);
+	// The kind, not which name happens to be present, decides what is shown and checked.
+	expect(approvalReady(fill({ username: '', item_label: 'GitHub webhook secret' }))).toBe(false);
+	expect(approvalReady(fill({ fill_kind: 'item', username: 'me@example.com', item_label: null }))).toBe(false);
+});
+
+it('shows a login as a login even when an item label is present', () => {
+	const login = fill({ item_label: 'GitHub webhook secret' });
+	expect(pendingLabel(login)).toBe('Review a request to sign in with a saved login');
 });

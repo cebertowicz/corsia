@@ -1,10 +1,13 @@
-"""The page half of a saved-login fill: find the sign-in form, check where it sends, type into it, submit it.
+"""The page half of a saved fill: find the sign-in form, check where it sends, type into it, submit it; or, for
+a saved item, check the one field the agent named and where its form sends, and fill it (`item_field`,
+`fill_item`).
 
-browser_login_fill decides whether to fill and reads the saved value; this module never names a saved-login
-reader and receives the value only as an argument to `type_values`, where it lives in locals and in one CDP
-message. Every connection here is a CdpClient: its socket logs nothing and its errors carry no protocol text,
-so neither a frame nor an error message can hold the value. All page work runs in an isolated world (C5), so
-no page script sees the elements chosen or the value except through the field itself, and every DOM property
+browser_login_fill and browser_item_fill decide whether to fill and read the saved value; this module never names
+a saved-value reader and receives the value only as an argument to `type_values` or `fill_item`, where it lives in
+locals and in one CDP message.
+Every connection here is a CdpClient or a frame session on one: its socket logs nothing and its errors carry no
+protocol text, so neither a frame nor an error message can hold the value. All page work runs in an isolated
+world (C5), so no page script sees the elements chosen or the value except through the field itself, and every DOM property
 read goes through the prototype's own getter, so an element named "action" inside a form can't stand in for
 the form's action. Everything this module returns is a fixed status, never page text.
 """
@@ -190,6 +193,86 @@ async def submit(cdp: CdpClient, form: SignInForm) -> str:
             await cdp.call("Input.dispatchKeyEvent", type=kind, key="Enter", code="Enter",
                            windowsVirtualKeyCode=13, **({"text": "\r"} if kind == "keyDown" else {}))
     return status if status in {"enter", "clicked", "changed", "unsubmitted"} else "unsubmitted"
+
+
+# Reads the field an agent named for a saved item: whether it is a password or text input, and its form's resolved
+# action and method. Returns nothing else: never the field's value.
+_ITEM_CHECK = "function () {" + _HELPERS + r"""
+if (!(this instanceof HTMLInputElement) || !['password', 'text'].includes(type.call(this))) return {field: false};
+const form = owner.call(this);
+return {field: true, kind: type.call(this), form: !!form, action: action(form), method: method(form)};
+}"""
+
+# Fills the saved item's value into the checked field, only while it is still the field that was checked.
+_ITEM_FILL = "function (text, kind, sends, how) {" + _HELPERS + r"""
+const still = () => this.isConnected && type.call(this) === kind && action(owner.call(this)) === sends
+  && method(owner.call(this)) === how;
+if (!still()) return 'changed';
+this.focus();
+if (!still()) return 'changed';
+Object.getOwnPropertyDescriptor(I, 'value').set.call(this, text);
+for (const name of ['input', 'change']) this.dispatchEvent(new Event(name, {bubbles: true}));
+return 'typed';
+}"""
+
+
+@dataclass(frozen=True)
+class ItemField:
+    """The checked field for a saved item: its object in our isolated world, its type, and its form's action and
+    method as they were checked."""
+
+    object_id: str
+    kind: str
+    action: str
+    method: str
+
+
+async def field_frame(cdp, frame_id: str | None) -> tuple[str | None, str | None]:
+    """The id and https origin of the frame holding a located field (the target's main frame when `frame_id` is
+    None), from Page.getFrameTree as find_form reads it; the origin is None when that frame isn't https."""
+    found = [frame for frame, top in frames(await cdp.call("Page.getFrameTree"))
+             if (top if frame_id is None else frame.get("id") == frame_id)]
+    if len(found) != 1:
+        return None, None
+    return found[0].get("id"), https_url(found[0].get("securityOrigin"))
+
+
+async def item_field(cdp, frame_id: str | None, node: int, site_origin: str, normalize) -> ItemField | str:
+    """Check the field an agent named for a saved item to be filled on `site_origin`; a refusal key when it may not be.
+
+    The field's frame must be https on exactly that origin (`normalize` is saved_logins.normalized_site), the field
+    a password or text input, and its form, if any, must send securely to that site and not by GET.
+    """
+    frame, origin = await field_frame(cdp, frame_id)
+    if origin is None:
+        return "http_frame"
+    try:
+        if normalize(origin) != site_origin:
+            return "frame_origin"
+    except ValueError:
+        return "frame_origin"
+    world = await cdp.call("Page.createIsolatedWorld", frameId=frame, worldName=_WORLD, grantUniveralAccess=False)
+    resolved = await cdp.call("DOM.resolveNode", backendNodeId=node, executionContextId=world.get("executionContextId"))
+    object_id = (resolved.get("object") or {}).get("objectId")
+    if not isinstance(object_id, str):
+        raise BrowserSessionError(PAGE_CHECK_FAILED)
+    answer = await _value(cdp, "Runtime.callFunctionOn", functionDeclaration=_ITEM_CHECK, objectId=object_id,
+                          returnByValue=True)
+    if not isinstance(answer, dict) or not answer.get("field"):
+        return "not_field"
+    if answer.get("form") and (refusal := _action_refusal(answer.get("action"), site_origin)) is not None:
+        return refusal
+    if answer.get("form") and answer.get("method") == "get":
+        return "get_form"
+    return ItemField(object_id, str(answer.get("kind")), str(answer.get("action")), str(answer.get("method")))
+
+
+async def fill_item(cdp, field: ItemField, text: str) -> str:
+    """Fill the saved item's value into the checked field: 'typed', or 'changed' when it moved or changed."""
+    status = await _value(cdp, "Runtime.callFunctionOn", functionDeclaration=_ITEM_FILL, objectId=field.object_id,
+                          arguments=[{"value": text}, {"value": field.kind}, {"value": field.action},
+                                     {"value": field.method}], returnByValue=True)
+    return status if status in {"typed", "changed"} else "changed"
 
 
 async def _value(cdp: CdpClient, method: str, **params: object) -> object:
