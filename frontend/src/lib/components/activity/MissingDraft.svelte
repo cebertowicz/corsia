@@ -44,7 +44,7 @@
 {#if failure}<p class="failure" role="alert">{unconfirmed ? 'Couldn’t mark this done. Try again.' : 'Don’t send didn’t go through. Try again.'}</p>{/if}
 
 <style>
-	.actions { display: flex; flex-wrap: wrap; column-gap: 44px; row-gap: var(--space-4); margin-bottom: var(--space-3); }
+	.actions { display: flex; flex-wrap: wrap; column-gap: var(--touch-target); row-gap: var(--space-4); margin-bottom: var(--space-3); }
 	p { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-relaxed); }
 	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.failure { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }
