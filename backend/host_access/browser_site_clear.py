@@ -10,6 +10,13 @@ from urllib.parse import urlsplit
 from host_access import browser_cdp
 from host_access.browser_domain import registrable_domain, url_domain
 
+# Chrome for Testing 152.0.7977.75, disposable profile: Storage.setCookies filled
+# 25 domains x 180 cookies with 4,000-byte values. Chrome kept 3,296 plain cookies
+# (its global limit), yielding a ~13.96 MB getCookies reply (~4,237 bytes/cookie).
+# With 25 partitions added, 3,346 cookies (50 partitioned) yielded ~14.18 MB.
+# 32 MiB covers the full plain jar plus roughly 4,000 full-size partitioned cookies.
+SITE_CLEAR_MAX_MESSAGE = 32 * 1024 * 1024
+
 
 async def _call(cdp, method, *, session=None, **params):
     return await asyncio.wait_for(cdp.call_in(session, method, **params), browser_cdp.BROWSER_CALL_TIMEOUT)
@@ -79,7 +86,7 @@ async def clear(endpoint: str, site: str, *, settle_seconds: float = 0.25) -> No
     domain = url_domain(site)
     if not domain:
         raise ValueError("site has no registrable domain")
-    async with browser_cdp.CdpClient(endpoint, max_size=None) as cdp:
+    async with browser_cdp.CdpClient(endpoint, max_size=SITE_CLEAR_MAX_MESSAGE) as cdp:
         cookies = (await _call(cdp, "Storage.getCookies")).get("cookies")
         if not isinstance(cookies, list):
             raise RuntimeError("cookie read did not return a list")

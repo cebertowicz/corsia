@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 from host_access import browser_grant_cleanup as cleanup, browser_grant_copy, browser_grant_records as records
 from host_access import browser_session_launch as launch
@@ -56,6 +58,41 @@ async def test_failed_clear_closes_and_keeps_journal(tmp_path, monkeypatch):
     await cleanup.clear_running(parent, profile, "example.com")
     parent._close_one.assert_awaited_once()
     assert "example.com" in records.pending(profile)
+
+
+@pytest.mark.asyncio
+async def test_oversized_cookie_reply_retains_record_and_fence_when_close_unconfirmed(tmp_path, monkeypatch):
+    profile = str(tmp_path / "profile")
+    records.end(profile, "https://example.com")
+    item = runtime(profile)
+    item.chrome.close = AsyncMock(side_effect=RuntimeError("unconfirmed"))
+    parent = owner(item)
+    parent._close_one = AsyncMock(side_effect=RuntimeError("unconfirmed"))
+    limits = []
+    calls = []
+
+    class OversizedCdp:
+        def __init__(self, _endpoint, *, max_size):
+            limits.append(max_size)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call_in(self, _session, method, **_params):
+            calls.append(method)
+            raise ConnectionClosedError(Close(1009, "message too big"), None)
+
+    monkeypatch.setattr(cleanup.browser_site_clear.browser_cdp, "CdpClient", OversizedCdp)
+    await cleanup.clear_running(parent, profile, "example.com")
+    assert limits == [32 * 1024 * 1024]
+    assert calls == ["Storage.getCookies"]
+    parent._close_one.assert_awaited_once()
+    item.chrome.close.assert_awaited_once()
+    assert "example.com" in records.pending(profile)
+    assert (profile, "example.com") in parent._pending_sites
 
 
 @pytest.mark.asyncio
