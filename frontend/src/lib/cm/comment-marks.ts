@@ -114,7 +114,9 @@ export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 const QUOTE_MARGIN = 8;
 const READER_INPUTS = ['wheel', 'touchstart', 'keydown'] as const;
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
-const TALL_SLACK = 2;
+// scrollTop rounds to a device pixel, so a tall target lands within half of one of its place. Measured on tall table rows at 320, 393
+// and 1440 wide, device pixel ratio 1: at most 0.47 px (0.19, 0.47, 0.36). 1 px covers that at every ratio.
+const TALL_SLACK = 1;
 // A target taller than the band can never be inside it, so it is placed once its top sits at the band's top (under the quote margin
 // when it is placed with one). Asking more of it would send every check after a jump that lands it no nearer.
 const placed = (box: Box | null, band: Box, margin: number) => !!box && (box.bottom - box.top > band.bottom - band.top
@@ -227,12 +229,17 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	// a reader scroll ends the watch, so nothing here pulls the reader back. Its first callback only reports the size the
 	// box already has, which is not a move.
 	let seenSize = false;
+	// A late image can change which element is the scroller, so each listener comes off the element it went on.
+	const listening: Array<[HTMLElement, string]> = [];
+	const listen = (type: string) => {
+		const scroller = visibleRegion(view).scroller;
+		scroller.addEventListener(type, onMove, { passive: true });
+		listening.push([scroller, type]);
+	};
 	const stop = () => {
 		done = true;
 		watch?.disconnect();
-		const scroller = visibleRegion(view).scroller;
-		scroller.removeEventListener('scroll', onMove);
-		for (const input of READER_INPUTS) scroller.removeEventListener(input, onMove);
+		for (const [scroller, type] of listening.splice(0)) scroller.removeEventListener(type, onMove);
 		if (placedIn.get(view) === stop) placedIn.delete(view);
 	};
 	const onMove = () => stop();
@@ -254,7 +261,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	placedIn.get(view)?.();
 	placedIn.set(view, stop);
 	// The reader's own wheel, touch or key ends the placement at once, not only after it has settled.
-	for (const input of READER_INPUTS) visibleRegion(view).scroller.addEventListener(input, onMove, { passive: true });
+	for (const input of READER_INPUTS) listen(input);
 	// CodeMirror refuses a dispatch during its measure cycle, so a repeat jump
 	// waits for the next frame.
 	// A retired jump may still have a frame or a measure queued: each one checks `done` first, so it never moves the reader.
@@ -274,7 +281,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 					steady += 1;
 					if (steady < STEADY_CHECKS) { check(pass); return; }
 					// Settled. From here a scroll is the reader's own, and their place is theirs to keep.
-					visibleRegion(view).scroller.addEventListener('scroll', onMove, { passive: true });
+					listen('scroll');
 					return;
 				}
 				steady = 0;

@@ -350,6 +350,38 @@ describe('a jump whose frame moves after it lands', () => {
 		expect(observers.at(-1)!.disconnected).toBe(true);
 	});
 
+	it('takes each listener off the element it was put on when the scroller changes before it stops', () => {
+		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);
+		const outer = document.body.appendChild(document.createElement('div'));
+		outer.style.overflowY = 'auto';
+		vi.spyOn(outer, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 2000, width: 600 } as DOMRect);
+		outer.appendChild(view.scrollDOM);
+		const scrolls = (element: HTMLElement, scrollable: boolean) => {
+			Object.defineProperty(element, 'scrollHeight', { configurable: true, value: scrollable ? 2000 : 500 });
+			Object.defineProperty(element, 'clientHeight', { configurable: true, value: 500 });
+		};
+		scrolls(view.scrollDOM, true);
+		scrolls(outer, false);
+		// What each element still holds: one more for every add, one less for every remove.
+		const held = new Map<string, number>();
+		for (const [name, element] of [['editor', view.scrollDOM], ['pane', outer]] as const) {
+			const add = element.addEventListener.bind(element), remove = element.removeEventListener.bind(element);
+			const count = (type: string, by: number) => held.set(`${name} ${type}`, (held.get(`${name} ${type}`) ?? 0) + by);
+			vi.spyOn(element, 'addEventListener').mockImplementation((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => { count(type, 1); add(type, listener, options); });
+			vi.spyOn(element, 'removeEventListener').mockImplementation((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => { count(type, -1); remove(type, listener, options); });
+		}
+
+		scrollToRange(view, 450, 454);
+		// A late image lengthens the pane: the editor no longer scrolls on its own and the pane around it does.
+		scrolls(view.scrollDOM, false);
+		scrolls(outer, true);
+		settle();
+		view.scrollDOM.dispatchEvent(new Event('wheel'));
+
+		expect(held.size).toBeGreaterThan(0);
+		expect([...held].filter(([, count]) => count !== 0)).toEqual([]);
+	});
+
 	it('retires the watch of the jump the reader replaced', () => {
 		const observers = watching();
 		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);
