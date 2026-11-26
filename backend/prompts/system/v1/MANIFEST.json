@@ -292,10 +292,10 @@
       "sha256": "087aec1d96f28392addebc03f7c5dcc61bab1b53875f842c2cb2b7496bd2284d"
     },
     {
-      "bytes": 1529,
+      "bytes": 1243,
       "kind": "skill",
       "path": "skills/decision-brief/corsia.yaml",
-      "sha256": "6b63ac77ebfd2b95cebe9dc7cb7ad407a12411f079fd3a9ceb74cd1b5f21bf7d"
+      "sha256": "c327bc21aecaf6f031eb410371f7d59857a1d52b4646c4b0b6bb3cd802f161d8"
     },
     {
       "bytes": 4889,

@@ -2,15 +2,10 @@ handler:
   kind: instruction
 workflow:
   steps:
-    - id: product-chain
-      title: Product-thinking chain recorded
-      required: false          # skip with reason when the decision is not about product behavior
-      difficulty: {default: standard, hard_if: "no approved objective covers the choice"}
     - id: long-form
       title: Analysis and evidence in an artifact
       required: false          # skip with reason when the decision carries everything needed
       check: artifact holding options, trade-offs and evidence
-      after: [product-chain]
       difficulty: {default: standard}
     - id: brief
       title: Brief message to the user
