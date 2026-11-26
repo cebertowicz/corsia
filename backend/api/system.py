@@ -20,6 +20,7 @@ from infra import bulletins, config
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
+from infra.host_cpu import usage_pct as host_cpu_usage_pct
 from infra.platform_paths import app_bundle_root
 from infra.settings import (
     delete_agent_default,
@@ -312,11 +313,6 @@ def _network_setup() -> str | None:
 _system_cache: dict = {"data": None, "ts": 0.0}
 _SYSTEM_CACHE_TTL = 5  # seconds
 
-# cpu_percent(interval=None) returns whole-host CPU % averaged since its previous call,
-# so it never blocks. That first call only opens the window and reads 0.0, so prime it
-# at import: the first poll then reports the interval since startup, not the priming.
-psutil.cpu_percent(interval=None)
-
 
 def _live_platform_status() -> dict:
     """The non-cached poller state included in each system status response."""
@@ -365,8 +361,9 @@ async def system_status(user: dict = Depends(require_user)):
             result["memory"] = {"error": str(e)}
 
         try:
-            # Whole-host CPU % averaged since the previous poll's call (primed at import).
-            usage = psutil.cpu_percent(interval=None)
+            # Busy share of the window since the previous reading, whichever worker
+            # thread took that one.
+            usage = host_cpu_usage_pct()
             result["cpu"] = {
                 "usage_pct": round(usage, 1),
                 "idle_pct": round(100 - usage, 1),
