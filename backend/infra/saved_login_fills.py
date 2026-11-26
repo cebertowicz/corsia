@@ -61,6 +61,7 @@ _NO_THREAD = "A fill request needs the agent's own thread."
 _OTHER_THREAD = "A fill request can only be made for the agent's own thread."
 _DURATION = f"Pick a duration from {MIN_GRANT_SECONDS} to {MAX_GRANT_SECONDS} seconds."
 _OUT_OF_DATE = "The saved login for {site} ({username}) is out of date. The person has a step to sign in to {site} themselves."
+_NOT_THEIRS = "No saved login you may use has that id."
 _AGENT_FALLBACK = "An agent"
 
 
@@ -130,7 +131,7 @@ def _own_thread(thread_id: object) -> str:
     return thread_id
 
 
-def _thread_record(thread_id: str) -> tuple[str, str, str]:
+def thread_record(thread_id: str) -> tuple[str, str, str]:
     """The thread's owner, its visible root and the agent's name, from the server's own records."""
     from core.thread_identity import root_visible_thread_id
     from infra.database import get_db
@@ -170,11 +171,13 @@ def _minutes(seconds: int) -> int | float:
     return seconds // 60 if seconds % 60 == 0 else round(seconds / 60, 2)
 
 
-def _login_usable(login_id: str) -> bool:
+def _login_usable(login_id: str, user_id: str) -> bool:
+    """Not out of date, and saved by the person whose agent holds the grant."""
     try:
-        return saved_logins.get_login(login_id).status == saved_logins.STATUS_OK
+        login = saved_logins.get_login(login_id)
     except KeyStoreError:
         return False
+    return login.status == saved_logins.STATUS_OK and login.saved_by == user_id
 
 
 def _remove(predicate) -> list[_Approval]:
@@ -247,7 +250,9 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         raise FillApprovalError(str(exc)) from None
     if login.status != saved_logins.STATUS_OK:
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
-    user_id, root, agent = _thread_record(clean_thread)
+    user_id, root, agent = thread_record(clean_thread)
+    if login.saved_by != user_id:
+        raise FillApprovalError(_NOT_THEIRS)
     now_iso = utc_now_iso()
     with _lock:
         expired = _prune(time.monotonic())
@@ -274,7 +279,7 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
 
 def may_fill(thread_id: str, login_id: str) -> bool:
     """True only while the person's grant for exactly this thread and login is live, the running
-    turn is that thread, and the login is usable, so a grant never retries a refused password."""
+    turn is that thread, and the login is usable and theirs, so a grant never retries a refused password."""
     if not isinstance(thread_id, str) or not isinstance(login_id, str) or not thread_id or not login_id:
         return False
     running = _context_thread()
@@ -282,14 +287,13 @@ def may_fill(thread_id: str, login_id: str) -> bool:
         return False
     now = time.monotonic()
     with _lock:
-        granted = any(
-            item.state == ACTIVE and item.live(now)
-            and item.thread_id == thread_id and item.login_id == login_id
-            for item in _approvals.values()
-        )
-    if not granted:
+        grant = next((
+            item for item in _approvals.values()
+            if item.state == ACTIVE and item.live(now) and item.thread_id == thread_id and item.login_id == login_id
+        ), None)
+    if grant is None:
         return False
-    if _login_usable(login_id):
+    if _login_usable(login_id, grant.user_id):
         return True
     end_for_login(login_id, deleted=False)
     return False

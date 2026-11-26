@@ -179,10 +179,11 @@ def _results(monkeypatch) -> list[str]:
 async def test_without_a_live_approval_the_person_is_asked_and_nothing_is_filled(world, monkeypatch, caplog):
     world.grants = [False]
     asked = []
-    monkeypatch.setattr(saved_login_fills, "request_fill", lambda *args: asked.append(args) or {})
-    text = await fill.fill_saved_login(THREAD, world.login_id)
+    monkeypatch.setattr(saved_login_fills, "request_fill", lambda *args, **kwargs: asked.append((args, kwargs)) or {})
+    text = await fill.fill_saved_login(THREAD, world.login_id, requested_seconds=600)
     assert text == fill.ASKED.format(site=SITE, username=USER)
-    assert asked == [(THREAD, world.login_id)] and "read" not in world.steps and not world.typed
+    assert asked == [((THREAD, world.login_id), {"requested_seconds": 600})]
+    assert "read" not in world.steps and not world.typed
     _never_shown(world, caplog, text)
 
 

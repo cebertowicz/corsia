@@ -1,6 +1,7 @@
 """Type a saved login into the shared browser's page once the person has approved it (the fill executor).
 
-`fill_saved_login` is server code; no agent verb or tool calls it in this version. In order: the person's
+`fill_saved_login` is server code; an agent reaches it only through browser_fill's saved_login, which names the
+login by site and username (tools/browser_saved_login.py). In order: the person's
 approval (infra.saved_login_fills), a clean document (browser_fill_marks: no agent script ran in it or on its
 site this session, no agent change outlives its documents, and no other window can reach it), where the values go (browser_login_page:
 C5, C7), the fill itself, and the sign-in's result (infra.saved_login_results). It holds the session's action
@@ -62,15 +63,58 @@ _PERSON_SIGNS_IN = {"not_clean": NOT_CLEAN, "get_form": REFUSED["get_form"]}
 _RESULT_KNOWN = frozenset({"signed_in", "rejected"})
 
 
+#: The longest time an agent may ask for, in whole minutes: the grant cap. A standing grant is the person's choice
+#: alone, so nothing an agent passes can ask for one.
+MAX_MINUTES = saved_login_fills.MAX_GRANT_SECONDS // 60
+
+
+def _origin(url: str) -> str | None:
+    """The https origin a login would be saved under, or None for anything else."""
+    try:
+        parts = urlsplit(url.strip())
+        return saved_logins.normalized_site(f"{parts.scheme}://{parts.netloc}")
+    except ValueError:
+        return None
+
+
+def _usable(thread_id: str, url: str) -> list[saved_logins.SavedLogin]:
+    """The logins saved for this URL's https origin by the person who owns the thread (C3: the server's thread row).
+
+    In this version an agent may use every login its person saved; each fill still needs their grant. A login
+    someone else saved is left out, so it answers exactly as one that doesn't exist.
+    """
+    origin = _origin(url)
+    if origin is None:
+        return []
+    try:
+        user_id = saved_login_fills.thread_record(thread_id)[0]
+        return [login for login in saved_logins.logins_for_site(origin) if login.saved_by == user_id]
+    except ValueError:
+        return []
+
+
+def login_named(thread_id: str, site: str, username: str) -> str | None:
+    """The id of the login this thread may use for this site and username, or None. Never shown to the agent."""
+    return next((login.id for login in _usable(thread_id, site) if login.username == username), None)
+
+
+def usable_usernames(thread_id: str, page_url: str) -> list[str]:
+    """The usernames this thread may use on the page's site; the page chooses the list and nothing else."""
+    return [login.username for login in _usable(thread_id, page_url)]
+
+
 def _owner() -> Any:
     from host_access.processes import PROCESS_OWNER
     return PROCESS_OWNER.browser_sessions()
 
 
-async def fill_saved_login(thread_id: str, login_id: str) -> str:
-    """Fill a saved login into the thread's shared page and return the agent's result text."""
+async def fill_saved_login(thread_id: str, login_id: str, *, requested_seconds: int | None = None) -> str:
+    """Fill a saved login into the thread's shared page and return the agent's result text.
+
+    ``requested_seconds`` is only the duration a new request asks for; a live grant is used as it is.
+    """
     if not await asyncio.to_thread(saved_login_fills.may_fill, thread_id, login_id):
-        return await _ask(thread_id, login_id)
+        return await _ask(thread_id, login_id, requested_seconds)
     try:
         login = await asyncio.to_thread(saved_logins.get_login, login_id)
     except ValueError:
@@ -90,10 +134,11 @@ async def fill_saved_login(thread_id: str, login_id: str) -> str:
     return await _result(owner, thread_id, login, status)
 
 
-async def _ask(thread_id: str, login_id: str) -> str:
+async def _ask(thread_id: str, login_id: str, requested_seconds: int | None) -> str:
     """No live approval: ask the person for one, or give them the sign-in when the login is out of date."""
     try:
-        await asyncio.to_thread(saved_login_fills.request_fill, thread_id, login_id)
+        await asyncio.to_thread(
+            partial(saved_login_fills.request_fill, thread_id, login_id, requested_seconds=requested_seconds))
     except saved_login_fills.FillApprovalError as refusal:
         text = str(refusal)
         try:
