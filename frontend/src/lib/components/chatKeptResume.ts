@@ -1,8 +1,9 @@
 // A chat's kept new comments, the first time the chat is drawn (`ChatCommentSelection`): every pressed one in it, new comment
 // or reply, is tried now (`unsentComments`), and one box opens. A pressed draft opens before a typed one, then the one
 // furthest down the chat (newest message, then latest passage). It opens on its passage; on a passage that no longer reads as
-// kept it opens at its message on no text, with why, and goes nowhere on its own. The other typed drafts come back, as
-// before, when their passage is selected.
+// kept it opens at its message on no text. There, one whose post is not yet out is refused, with why, and goes nowhere on
+// its own; one whose post is out (asked for when the connection came up) reads Sending…, and the server's answer settles
+// it. The other typed drafts come back, as before, when their passage is selected.
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { chatTextPoint, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 import { chatAnchorAt, chatPlaceHolds } from '$lib/keptPlace';
@@ -58,8 +59,9 @@ export function resumeKept(root: HTMLElement, threadId: string, rows: Row[], box
 	const chosen = boxFree ? keptToOpen(root, threadId, rows) : undefined;
 	const text = chosen?.body.textContent ?? '';
 	const holds = !chosen || (chosen.draft.place ? chatPlaceHolds(text, chosen.draft.place) : offsetsHold(text, chosen.at, chosen.draft.send?.chat?.quote));
-	// Its passage gone, it is refused here, before anything is sent: it goes nowhere on its own.
-	if (chosen && !holds) {
+	// Its passage gone and no try of it out yet (none was asked for on this page, as when it opens offline), it is refused
+	// here, before anything is sent, and goes nowhere on its own. One whose try is out already is left to the server.
+	if (chosen && !holds && !unsentComments.started(chosen.key)) {
 		keptCommentDrafts.unsend(chosen.key);
 		chatCommentDrafts.refused(chosen.key, commentFailure('comment_quote_gone', null, 'comment', 'sent', threadId).text, true);
 	}

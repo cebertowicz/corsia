@@ -1,12 +1,13 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { get } from 'svelte/store';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
 import { workspaceModels } from '$lib/stores/models';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { SENDING, unsentComments } from '$lib/stores/unsentComments.svelte';
 import { user } from '$lib/stores/auth';
+import { connectionState } from '$lib/stores/connection';
 import { unsentSends } from '$lib/chatCommentDelivery';
 import { commentFailure, postChatComment, retryChatComment } from './composerSend';
 import { CommentSendRefused, sendCommentReply, type ChatComment, type SendableChatComment } from '$lib/chatCommentAnchors';
@@ -485,6 +486,67 @@ describe('a chat opened with kept comments in it', () => {
 		host.querySelector<HTMLButtonElement>('[role="dialog"] button.cancel')!.click(); await settle();
 		expect(box()).toBeNull();
 		expect(keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	// Its passage no longer reads as kept, but its post is out already (the connection came up first): the server settles it.
+	describe('one whose passage no longer reads as kept, with its post already out', () => {
+		const refusal = () => host.querySelector('[role="alert"]');
+		/** Pressed on m1, its post asked for before the chat is drawn, as the connection coming up asks for it. */
+		async function outThenDrawn(answer: () => Promise<unknown>) {
+			const posts = chatRoute(answer);
+			const key = kept(upperAt, 'Its passage changed', true);
+			unsentComments.open(key);
+			await vi.waitFor(() => expect(posts()).toHaveLength(1));
+			setup(send, 1440, { m1: 'rewritten text' }); await settle();
+			return { posts, key };
+		}
+
+		it('opens unplaced reading Sending…, never shows a refusal, posts once and closes when the server takes it', async () => {
+			let take!: () => void;
+			const { posts, key } = await outThenDrawn(() => new Promise(resolve => { take = () => resolve({ ok: true, json: async () => ({ messages: [] }) }); }));
+			const { clientId } = keptCommentDrafts.get(key)!;
+			expect(box()?.value).toBe('Its passage changed');
+			expect(host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')?.textContent).toBe(SENDING);
+			expect(host.querySelector('.cm-comment-pending')).toBeNull();
+			expect(refusal()).toBeNull();
+			take();
+			await vi.waitFor(() => { flushSync(); expect(refusal()).toBeNull(); expect(box()).toBeNull(); });
+			await unsentComments.settled(); await settle();
+			expect(refusal()).toBeNull();
+			expect(posts().map(post => post.input_id)).toEqual([clientId]);
+			expect(keptCommentDrafts.get(key)).toBeUndefined();
+		});
+
+		it('shows the server’s refusal once, keeps the words, and stores nothing when its quote is gone', async () => {
+			let refuse!: () => void;
+			const { posts, key } = await outThenDrawn(() => new Promise(resolve => {
+				refuse = () => resolve({ ok: false, status: 400, json: async () => ({ detail: 'comment_quote_gone', reference: 'ref-q' }) });
+			}));
+			expect(refusal()).toBeNull();
+			// jsdom lays nothing out, so the open box is taken as on screen, as the browser leg finds it.
+			const shown = vi.spyOn(keptCommentDrafts, 'onScreen').mockReturnValue(true);
+			onTestFinished(() => shown.mockRestore());
+			refuse(); await unsentComments.settled(); await settle();
+			expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+			expect(refusal()?.textContent).toContain('The text this comment quotes isn’t in the chat');
+			expect(get(toasts)).toHaveLength(0);
+			expect(box()?.value).toBe('Its passage changed');
+			expect(keptCommentDrafts.get(key)?.send).toBeUndefined();
+			unsentComments.open(key); await unsentComments.settled();
+			expect(posts()).toHaveLength(1);
+		});
+	});
+
+	it('one whose passage no longer reads as kept, opened with its post not out, is refused here and never goes, even once connected', async () => {
+		const posts = chatRoute();
+		const key = kept(upperAt, 'Its passage changed', true);
+		connectionState.set('disconnected');
+		setup(send, 1440, { m1: 'rewritten text' }); await settle();
+		expect(host.querySelector('[role="alert"]')?.textContent).toBe(commentFailure('comment_quote_gone', null, 'comment', 'sent', 'thread').text);
+		connectionState.set('connected'); await unsentComments.settled(); await settle();
+		expect(posts()).toEqual([]);
+		expect(keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(box()?.value).toBe('Its passage changed');
 	});
 
 	it('opens one kept on a table cell on that cell’s words', async () => {

@@ -142,6 +142,8 @@ export const unsentComments = {
 	open(key: string): void { if (key) ask([key]); },
 	/** Its box reads "Sending…": it was pressed, and goes on its own until it posts, is refused or is edited. */
 	sending(key: string): boolean { return sendable(key, keptCommentDrafts.get(key)); },
+	/** A try of it was asked for or made on this page: its post may be out, so only the server's answer settles it. */
+	started(key: string): boolean { return key === current || waiting.includes(key) || lastTry.has(key); },
 	/** Tests only: every try asked for so far has ended. */
 	async settled(): Promise<void> { while (pumping) await pumping; },
 	/** Tests only: a fresh page. */
