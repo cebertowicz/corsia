@@ -8,32 +8,17 @@
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 // The same holds for a comment typed on a passage of a chat (`chatDraftKey`) and a reply typed in a chat's comment thread.
-import { createMentionSelection } from '$lib/components/comments/mentionSelection';
+import type { ImageRegion } from '$lib/api/docs';
 import { elementOnScreen as onScreen } from '$lib/elementOnScreen';
 import { onSignOut, user } from './auth';
 import { newClientId } from './documentWire';
 import type { KeptPlace } from '$lib/keptPlace';
-import { createDraftStorage, NOT_KEPT_MESSAGE, type DraftSend, type NotKept, type StoredDraft } from './keptCommentDraftsStorage';
+import { edited, restored, sameTags, stored, tagsOf, type DraftOrigin, type KeptCommentDraft, type MentionSelection } from './keptCommentDraftShape';
+import { createDraftStorage, NOT_KEPT_MESSAGE, type DraftSend, type NotKept } from './keptCommentDraftsStorage';
 import { toasts } from './toast';
 
 export { NOT_KEPT_MESSAGE };
-
-export type MentionSelection = ReturnType<typeof createMentionSelection>;
-/**
- * `toast`: the toast up now telling why the draft's post failed (`keptCommentDrafts.toast`), while its box is not on screen.
- * `place`: the passage it was written on, when that passage could be told apart (`uniquePlaceOf`). `send`: what its post
- * needs with no box open, from a press until it posts, is refused or is edited; only a draft holding it is sent without the person.
- */
-export type KeptCommentDraft = {
-	body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number]; toast?: string;
-	place?: KeptPlace; send?: DraftSend;
-};
-/** The kept draft a box opened from, once Comment was pressed on it: its id, and the text and tags it held then. */
-export type DraftOrigin = { clientId: string; body: string; tags: string };
-
-/** A draft's tagged agents, compared as a set, as the server stores them. */
-const tagsOf = (tags: MentionSelection, body: string) => [...new Set(tags.occurrences(body).map((item) => item.agent_id))].sort().join('\n');
-const sameTags = (tags: MentionSelection, body: string, sent: string[]) => tagsOf(tags, body) === [...new Set(sent)].sort().join('\n');
+export type { DraftOrigin, KeptCommentDraft, MentionSelection };
 
 /**
  * One reactive cell per key, so a card reads only its own draft: typing in one reply changes nothing another card
@@ -53,27 +38,6 @@ const cell = (key: string): Cell => {
 	if (!found) cells.set(key, found = new Cell());
 	return found;
 };
-/** The draft as this device keeps it: text, tags, id, passage and send; an empty box keeps nothing. */
-const stored = (draft: KeptCommentDraft | undefined): StoredDraft | null => draft?.body
-	? { body: draft.body, tags: draft.mentionSelection.occurrences(draft.body), ...(draft.clientId ? { clientId: draft.clientId } : {}),
-		...(draft.place ? { place: draft.place } : {}), ...(draft.send ? { send: draft.send } : {}) }
-	: null;
-function restored({ body, tags, clientId, place, send }: StoredDraft): KeptCommentDraft {
-	const mentionSelection = createMentionSelection(body);
-	for (const tag of tags) mentionSelection.select(tag.agent_id, tag.start, body.slice(tag.start, tag.end));
-	return { body, mentionSelection, ...(clientId ? { clientId } : {}), ...(place ? { place } : {}), ...(send ? { send } : {}) };
-}
-/**
- * The draft after its box holds `body`. An edit since a press makes it typed again (no `send`), so words never pressed are
- * never sent without the person; its id stays, so its next press finds an earlier one the server stored. A box on a passage
- * says where the draft is (`place`; null for none); a box that does not know leaves it (undefined).
- */
-function edited(prior: KeptCommentDraft | undefined, body: string, mentionSelection: MentionSelection, place?: KeptPlace | null): KeptCommentDraft {
-	const next: KeptCommentDraft = { ...prior, body, mentionSelection };
-	if (prior?.send && prior.body !== body) delete next.send;
-	if (place === null) delete next.place; else if (place) next.place = place;
-	return next;
-}
 /** Memory without storage: the draft goes from this page, and the toasts telling its failure or that it was not kept with it. */
 function drop(key: string): void {
 	const found = cells.get(key);
@@ -200,11 +164,11 @@ export const keptCommentDrafts = {
 		for (const box of (key && boxes.get(key)) || []) if (onScreen(box)) return true;
 		return false;
 	},
-	/** The box's text, the tags it holds and its passage (`edited`); an empty box with no failure to show keeps nothing. */
-	keep(key: string, body: string, mentionSelection: MentionSelection, place?: KeptPlace | null): void {
+	/** The box's text, the tags it holds, its passage and its image area (`edited`); an empty box with no failure to show keeps nothing. */
+	keep(key: string, body: string, mentionSelection: MentionSelection, place?: KeptPlace | null, region?: ImageRegion | null): void {
 		if (!key) return;
 		const prior = kept.get(key);
-		if (body || prior?.error) kept.set(key, edited(prior, body, mentionSelection, place));
+		if (body || prior?.error) kept.set(key, edited(prior, body, mentionSelection, { place, region }));
 		else kept.delete(key);
 	},
 	/** A reply's field (`edited`). A reply has no Cancel: emptying its field clears it, reason and id included. */
@@ -234,7 +198,7 @@ export const keptCommentDrafts = {
 	 */
 	fail(key: string, body: string, mentionSelection: MentionSelection, error: string, freshId = false): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection, toast: prior?.toast, place: prior?.place, send: freshId ? undefined : prior?.send });
+		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection, toast: prior?.toast, place: prior?.place, region: prior?.region, send: freshId ? undefined : prior?.send });
 	},
 	/**
 	 * The toast telling why the draft's post failed (`id`), or none because its box says why (null). The draft holds it
@@ -249,7 +213,7 @@ export const keptCommentDrafts = {
 	/** A new press: the reason goes from the box, and its toast stays until that press ends one way or the other. */
 	clearError(key: string): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection, toast: prior.toast, place: prior.place, send: prior.send });
+		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection, toast: prior.toast, place: prior.place, region: prior.region, send: prior.send });
 	},
 	/** What a box opening from this draft carries with it: the draft's id once Comment was pressed, with the text and tags it held. */
 	origin(key: string): DraftOrigin | undefined {
@@ -291,7 +255,7 @@ export const keptCommentDrafts = {
 		if (!prior) return false;
 		if (prior.body.trim() === sent.trim() && sameTags(prior.mentionSelection, prior.body, sentTags)) { kept.delete(key); return true; }
 		if (prior.toast) toasts.dismiss(prior.toast);
-		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection, place: prior.place });
+		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection, place: prior.place, region: prior.region });
 		return false;
 	},
 	/** Tests only: a fresh page. */

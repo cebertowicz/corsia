@@ -94,6 +94,7 @@
 					occurrence: { from: image.from, to: image.to },
 					post: (region, text, taggedAgentIds, mentions, press) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, press, image.diagramSource),
 					failure: comments.failure,
+					place: () => comments.placeOf(image.from, image.to),
 				}}
 				focus={image.focus ?? null}
 				feedback={comments.feedback ?? null}

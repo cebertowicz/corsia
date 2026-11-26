@@ -297,3 +297,63 @@ describe('how often it tries', () => {
 		now.mockRestore();
 	});
 });
+
+describe('a pressed comment on an image goes on its own', () => {
+	const REGION = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
+	const IMAGE_SEND: DraftSend = { artifactId: 'image-1', threadId: 'thread-1', diagramSource: 'graph TD; A-->B', name: 'flow.png' };
+	const MARKDOWN = { from: 40, to: 57, quote: '![flow](flow.png)', prefix: 'See the chart below.\n\n', suffix: '\n\nNotes follow.' };
+	/** Drawn on its area and typed, then Comment pressed on it, as its box does. */
+	function pressedOnImage(page: Page, { key = page.drafts.imageDraftKey('image-1'), place = undefined as typeof MARKDOWN | null | undefined, send = IMAGE_SEND } = {}) {
+		const body = 'Label this arrow', tags = page.tags.createMentionSelection(body), drafts = page.drafts.keptCommentDrafts;
+		drafts.keep(key, body, tags, place, REGION);
+		return { key, press: drafts.claim(key, body, tags, undefined, send) };
+	}
+
+	it('an image artifact’s, after a reload, on its area and the diagram it was drawn on, under its press’s id', async () => {
+		const { key, press } = pressedOnImage(await open());
+		const page = await open();
+		await connect(page);
+		expect(wire.posts).toHaveLength(1);
+		expect(wire.posts[0]).toMatchObject({ artifactId: 'image-1', body: {
+			client_id: press.clientId, body: 'Label this arrow', region: REGION, diagram_source: 'graph TD; A-->B', thread_id: 'thread-1',
+		} });
+		expect(wire.posts[0].body).not.toHaveProperty('anchor_text');
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	it('an image inside a document’s, on its area and on the image’s markdown by its sides', async () => {
+		const page = await open(), key = page.drafts.imageDraftKey('doc-1', 'flow.png');
+		pressedOnImage(page, { key, place: MARKDOWN, send: { artifactId: 'doc-1', threadId: null, name: 'notes.md' } });
+		page.queue.unsentComments.open(key);
+		await page.queue.unsentComments.settled();
+		expect(wire.posts).toHaveLength(1);
+		expect(wire.posts[0]).toMatchObject({ artifactId: 'doc-1', body: {
+			region: REGION, anchor_text: MARKDOWN.quote, from_off: 40, to_off: 57, anchor_prefix: MARKDOWN.prefix, anchor_suffix: MARKDOWN.suffix,
+		} });
+	});
+
+	it('an image inside a document whose markdown could not be told apart when kept is not sent; one beside it that could be goes', async () => {
+		const page = await open();
+		const lost = page.drafts.imageDraftKey('doc-1', 'flow.png'), placed = page.drafts.imageDraftKey('doc-1', 'other.png');
+		pressedOnImage(page, { key: lost, place: null, send: { artifactId: 'doc-1', threadId: null } });
+		pressedOnImage(page, { key: placed, place: MARKDOWN, send: { artifactId: 'doc-1', threadId: null } });
+		await connect(page);
+		page.queue.unsentComments.open(lost);
+		await page.queue.unsentComments.settled();
+		expect(wire.posts).toHaveLength(1);
+		expect(wire.posts[0].body).toMatchObject({ anchor_text: MARKDOWN.quote });
+		expect(page.queue.unsentComments.sending(lost)).toBe(false);
+		expect(page.drafts.keptCommentDrafts.get(placed)).toBeUndefined();
+	});
+
+	it('the image is gone (404): refused, kept with its words and area, and a notice names the image', async () => {
+		const page = await open(), { key } = pressedOnImage(page);
+		wire.answer.push(refusal(page, 404, null, 'Not found'));
+		await connect(page);
+		await connect(page);
+		expect(wire.posts).toHaveLength(1);
+		expect(page.drafts.keptCommentDrafts.get(key)).toMatchObject({ body: 'Label this arrow', region: REGION });
+		expect(page.drafts.keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(get(page.toast.toasts).map((toast) => toast.message)).toEqual([expect.stringMatching(/^Your comment on flow\.png, “Label this arrow”: /)]);
+	});
+});

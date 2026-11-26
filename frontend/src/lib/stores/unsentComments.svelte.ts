@@ -24,8 +24,10 @@ const waiting: string[] = [];
 const lastTry = new Map<string, number>();
 let pumping: Promise<void> | null = null;
 
-/** The draft's document's name, for a notice when no box of it is on screen. */
-function nameOf(key: string): string {
+/** The name of the draft's document or image, for a notice when no box of it is on screen: the one its press kept, else its key's path. */
+function nameOf(key: string, kept: string | undefined): string {
+	if (kept) return kept;
+	if (!key.startsWith('document:')) return 'an image';
 	try {
 		const [, path] = JSON.parse(key.slice(key.indexOf(':') + 1)) as [string, string];
 		return path.split('/').pop() || path;
@@ -54,7 +56,7 @@ function stopped(key: string, message: string, freshId: boolean): void {
 	keptCommentDrafts.fail(key, draft.body, draft.mentionSelection, message, freshId);
 	keptCommentDrafts.unsend(key);
 	commentDraft.update((value) => value?.key === key ? { ...value, error: message } : value);
-	const toast = keptCommentDrafts.onScreen(key) ? null : toasts.show(`Your comment on ${nameOf(key)}, “${firstWords(draft.body)}”: ${message}`, 'error');
+	const toast = keptCommentDrafts.onScreen(key) ? null : toasts.show(`Your comment on ${nameOf(key, draft.send?.name)}, “${firstWords(draft.body)}”: ${message}`, 'error');
 	keptCommentDrafts.toast(key, toast);
 }
 

@@ -5,7 +5,7 @@ import { CAPTURE_FAILURE, SELECTION_LOST } from './commentSelection';
 import { EARLIER_VERSION_POSTED } from './docComments';
 import { POST_FAILED, TAG_REFUSALS } from '$lib/docViewerOperations';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
-import { DIAGRAM_CHANGED_MESSAGE } from '$lib/imageComments.svelte';
+import { DIAGRAM_CHANGED_MESSAGE } from '$lib/commentFailureMessage';
 
 const timeout = Object.assign(new Error('request timed out after 60000ms (may have committed server-side)'), { name: 'PostTimeoutError' });
 /** Every reason a document's or an image's comment box, or a reply's field, can show under it, as the source words it. */

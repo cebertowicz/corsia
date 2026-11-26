@@ -3,7 +3,7 @@
 	// numbered tags over the image, a Comment button and the comments pill in its
 	// bar, and the document's own cards, composer and drawer beside it. An image
 	// inside a document shows the document's comments on that one image.
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageRegionLayer from './ImageRegionLayer.svelte';
 	import ImageCommentBar from './ImageCommentBar.svelte';
@@ -14,7 +14,8 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
-	import { imageDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+	import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+	import { unsentComments } from '$lib/stores/unsentComments.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
@@ -51,6 +52,8 @@
 			occurrence: ImageOccurrence;
 			post: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: import('$lib/stores/imageRegionComments').ImagePress) => Promise<string>;
 			failure?: (error: unknown) => string;
+			/** The image's markdown as a kept draft's place, when it can be told apart; a draft without one is not sent on its own. */
+			place?: () => import('$lib/keptPlace').KeptPlace | null;
 		} | null;
 		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
 		focus?: { id: string; move?: boolean } | null;
@@ -113,6 +116,10 @@
 			revealed = true;
 		},
 		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
+		where: () => artifactId ? {
+			send: { artifactId, threadId: target?.threadId ?? null, ...(diagramSource !== undefined ? { diagramSource } : {}), name: docPath?.split('/').pop() || docName || alt },
+			place: inDocument ? inDocument.place?.() ?? null : undefined,
+		} : null,
 		onCreated: () => {
 			feedback?.commentCreated();
 			if (artifactId) reload(artifactId);
@@ -160,6 +167,19 @@
 		else if (initialLoadDone) revealed = true;
 	});
 
+	// A kept draft drawn on this image comes back in its box on its area once the image has drawn: sending if it was
+	// pressed (`unsentComments`), else with its words. Opened on a comment, that comment's card shows instead.
+	let resumed = '';
+	$effect(() => {
+		const key = draftKey, kept = keptCommentDrafts.get(key), region = kept?.region;
+		if (!loaded || !canComment || focus || !layer || resumed === key || !region || !kept.body.trim()) return;
+		untrack(() => {
+			if (image.ui.state) return;
+			resumed = key;
+			void image.draw(region, layer!.anchorFor(region));
+			unsentComments.open(key);
+		});
+	});
 	$effect(() => { draftOpen = image.hasDraftText; hasDraft = !!image.draftRegion; });
 	$effect(() => { selectedThread = image.ui.state?.kind === 'thread' ? image.ui.state.id : null; });
 	$effect(() => {

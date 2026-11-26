@@ -1,29 +1,19 @@
-import { tick } from 'svelte';
-import { fromStore } from 'svelte/store';
-import { RequestRefused } from '$lib/api/docs';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
-import { postFailureMessage } from '$lib/docViewerCommentDraft.svelte';
+import { DIAGRAM_CHANGED_MESSAGE, isDiagramChanged, postFailureMessage } from '$lib/commentFailureMessage';
 import { createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
-import { isPoint, type ImageRegion } from '$lib/imageRegions';
+import { createImagePicks } from '$lib/imageCommentPicks.svelte';
+import { regionLabel, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { pickedComments } from '$lib/stores/docComments';
 import { addRegionComment, moveRegion, type ImagePress } from '$lib/stores/imageRegionComments';
 import { forgetDraft, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import { imageDraftKey, keptCommentDrafts, type DraftOrigin } from '$lib/stores/keptCommentDrafts.svelte';
 import { toasts } from '$lib/stores/toast';
-import { DRAFT_KEPT } from '$lib/stores/draftKept';
-
-/** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
-export const DIAGRAM_CHANGED_MESSAGE = `Place the pin on the current diagram. ${DRAFT_KEPT}`;
-const isDiagramChanged = (error: unknown) => error instanceof RequestRefused && error.kind === 'diagram_changed';
-
-const WHOLE = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;
-/** What the composer says a new comment is on, in place of a quote. */
-export function regionLabel(region: ImageRegion): string {
-	return WHOLE(region) ? 'The whole image' : isPoint(region) ? 'Point on the image' : 'Box on the image';
-}
+import { unsentComments } from '$lib/stores/unsentComments.svelte';
+import { unsentOutcome } from '$lib/unsentCommentOutcome';
+import type { DraftSend } from '$lib/stores/keptCommentDraftsStorage';
+import type { KeptPlace } from '$lib/keptPlace';
 
 /**
  * The image viewer's comment state (DCOL-FR13.3): box mode, the region being
@@ -50,10 +40,14 @@ export function createImageComments(context: {
 	 * comment goes on the image artifact. `failure` words what went wrong for the toast.
 	 */
 	post?: () => { create: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: ImagePress) => Promise<string>; failure?: (error: unknown) => string } | null;
+	/**
+	 * What a press's post needs with no box open (`unsentComments`), read as a box is drawn and pressed; for an image inside
+	 * a document, its markdown as a place only when it can be told apart (`uniquePlaceOf`). None: it waits for the person.
+	 */
+	where?: () => { send: DraftSend; place?: KeptPlace | null } | null;
 }) {
 	const ui = createCommentSurfaceState(context.restoreFocus);
 	const key = () => context.draftKey?.() ?? imageDraftKey(context.artifactId());
-	const focused = fromStore(focusedDocComment);
 	/** The toast telling why this viewer's last pin move failed: a later failure replaces it, a move that lands dismisses it. */
 	let pinToast: string | null = null;
 	const tellPin = (id: string | null) => { if (pinToast) toasts.dismiss(pinToast); pinToast = id; };
@@ -69,12 +63,11 @@ export function createImageComments(context: {
 	let draftOrigin: DraftOrigin | undefined;
 	/** The kept draft the open box shows (`imageDraftKey`): the image it was drawn on. */
 	let boxKey = '';
+	/** The open box's image markdown as a place, read as it was drawn (`where`); undefined for an image artifact. */
+	let drawnPlace: KeptPlace | null | undefined;
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
-	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
-	let listPicks = $state(0);
-	let listCandidates = $state<string[] | null>(null);
-	let listCandidateOrder = $state<string[] | null>(null);
+	const picks = createImagePicks(ui, { clearDraft: () => { draftRegion = null; }, reveal: (...args) => context.reveal?.(...args) });
 
 	function show(id: string, anchor: CommentAnchor) {
 		focusedDocComment.set(id);
@@ -83,8 +76,7 @@ export function createImageComments(context: {
 	}
 	/** Every way out but Cancel: the text and its tags stay kept for the next box drawn on this image. */
 	function close() {
-		listCandidates = null;
-		listCandidateOrder = null;
+		picks.clear();
 		ui.close();
 		draftRegion = null;
 		replacingDraft = false;
@@ -130,6 +122,7 @@ export function createImageComments(context: {
 			return;
 		}
 		draftRegion = region;
+		drawnPlace = context.where?.()?.place;
 		boxKey = key();
 		// The composer starts from what the last one on this image held: its text, its tags and why it did not post.
 		const kept = keptCommentDrafts.get(key());
@@ -151,7 +144,12 @@ export function createImageComments(context: {
 		draftError = undefined;
 		let id: string, failure = '', toastId: string | null = null;
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
-		const press: ImagePress = keptCommentDrafts.claim(draftKey, text, tags, draftOrigin);
+		// From the press, a draft that knows where it goes is sent on its own if this post does not go, until it posts, is
+		// refused or is edited (`unsentComments`); its box reads "Sending…" meanwhile.
+		const press: ImagePress = keptCommentDrafts.claim(draftKey, text, tags, draftOrigin, context.where?.()?.send);
+		const pressed = keptCommentDrafts.get(draftKey), place = drawnPlace;
+		if (pressed) keptCommentDrafts.keep(draftKey, pressed.body, pressed.mentionSelection, place, region);
+		let waits = false;
 		// The composer that pressed is still the open one. Its region is its identity: a box drawn while this post is out is
 		// a new region, while its tags can be the same object, carried over from the kept draft.
 		const pressing = () => draftRegion === region;
@@ -163,11 +161,19 @@ export function createImageComments(context: {
 		const now = () => keptCommentDrafts.get(draftKey);
 		try {
 			id = await timedPost(press.clientId, () => submitDocumentComment(
-				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
-				(shown, message) => { toastId = shown; failure = message; },
+				async () => {
+					try {
+						return await (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press));
+					} catch (error) {
+						// A failure that passes, on a draft that goes on its own, is not told: it is tried again as `unsentComments` says.
+						waits = unsentOutcome(error) === 'retry' && unsentComments.sending(draftKey);
+						throw error;
+					}
+				},
+				(shown, message) => { if (!waits) { toastId = shown; failure = message; } },
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : (post?.failure ?? postFailureMessage)(error)),
 				// A changed diagram is told once its refresh ends (below): whether a box is left to say why depends on it.
-				(error) => isDiagramChanged(error) || inBox(),
+				(error) => waits || isDiagramChanged(error) || inBox(),
 			));
 		} catch (error) {
 			const changed = isDiagramChanged(error);
@@ -175,8 +181,10 @@ export function createImageComments(context: {
 				// The pin goes on the redrawn diagram: the text and its tags carry over to the box drawn next, and the toast says why.
 				const held = now();
 				draftBody = held?.body ?? text;
-				// Kept for the redrawn diagram (its key names the new snapshot), which the next box is drawn on.
-				keptCommentDrafts.keep(key(), draftBody, held?.mentionSelection ?? tags);
+				// Kept for the redrawn diagram (its key names the new snapshot), which the next box is drawn on; it waits for that
+				// pin, so it is not sent on its own meanwhile.
+				keptCommentDrafts.unsend(draftKey);
+				keptCommentDrafts.keep(key(), draftBody, held?.mentionSelection ?? tags, undefined, null);
 				draftRegion = null;
 				replacingDraft = true;
 				ui.close();
@@ -187,6 +195,8 @@ export function createImageComments(context: {
 			} else if (failure) {
 				const held = now();
 				keptCommentDrafts.fail(draftKey, held?.body ?? text, held?.mentionSelection ?? tags, failure, failure === EARLIER_VERSION_POSTED);
+				// A failure that is told waits for the person: the draft does not go on its own after it.
+				keptCommentDrafts.unsend(draftKey);
 				// A changed diagram that could not be redrawn leaves the box open: told in it when it is on screen, else in a toast.
 				// The draft holds its toast until its box comes on screen to say why, or it is posted.
 				keptCommentDrafts.toast(draftKey, changed && !inBox() ? toasts.show(failure, 'error') : toastId);
@@ -208,45 +218,6 @@ export function createImageComments(context: {
 		draftError = undefined;
 		mentionSelection = createMentionSelection();
 		if (anchor) show(id, anchor);
-	}
-	/**
-	 * A tag was picked: its card opens beside its box, and closing it returns
-	 * focus to the tag. With the drawer open, the drawer stays and the tag is
-	 * selected there instead, so the drawer can bring its card into view. Either way it is the person's pick, which reads it.
-	 */
-	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
-		listCandidates = null;
-		draftRegion = null;
-		if (ui.state?.kind === 'list') { focusedDocComment.set(id); pickedComments.set(new Set([id])); listPicks += 1; return; }
-		ui.focusMarker([id], opener, anchor);
-	}
-	function openList(opener: HTMLElement) {
-		listCandidates = null;
-		listCandidateOrder = null;
-		ui.openList(opener);
-	}
-	/** Ambiguous touch or pen: use the existing list and mark all candidates in its number order. */
-	function pickCandidates(ids: string[], opener: HTMLElement) {
-		draftRegion = null;
-		if (ui.state?.kind !== 'list') ui.openList(opener);
-		listCandidates = ids;
-		listCandidateOrder = ids;
-		focusedDocComment.set(ids[0]);
-		listPicks += 1;
-	}
-	/** Open a comment's card beside its box, as a pick would: the viewer was opened on it from the document. */
-	function select(id: string, tag: HTMLElement, region: ImageRegion | null | undefined, anchor?: () => DOMRect | null) {
-		draftRegion = null;
-		ui.focusMarker([id], tag, anchor ?? (() => (tag.isConnected ? tag.getBoundingClientRect() : null)));
-		if (region) void tick().then(() => {
-			if (ui.state?.kind === 'thread' && ui.state.id === id) context.reveal?.(id, region);
-		});
-	}
-	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
-	function showFromList(id: string, region: ImageRegion | null | undefined) {
-		listCandidates = null;
-		focusedDocComment.set(id);
-		if (region) context.reveal?.(id, region, true);
 	}
 	/** Move pin: the next box or point drawn becomes the comment's new place. */
 	function movePin(id: string) {
@@ -279,22 +250,20 @@ export function createImageComments(context: {
 		get moving() { return moving?.id ?? null; },
 		get movingRegion() { return moving?.region ?? null; },
 		get moveSaving() { return !!moving?.region; },
-		get listPicks() { return listPicks; },
-		get listCandidates() { return ui.state?.kind === 'list' ? listCandidates : null; },
-		get listCandidateOrder() { return ui.state?.kind === 'list' ? listCandidateOrder : null; },
+		get listPicks() { return picks.listPicks; },
+		get listCandidates() { return picks.listCandidates; },
+		get listCandidateOrder() { return picks.listCandidateOrder; },
 		get draftRegion() { return draftRegion; },
-		get selectedId() {
-			if (ui.state?.kind === 'thread') return ui.state.id;
-			return ui.state?.kind === 'list' ? focused.current : null;
-		},
+		get selectedId() { return picks.selectedId; },
 		/** A card or the composer is open over the image. */
 		get cardOpen() { return ui.state?.kind === 'thread' || ui.state?.kind === 'draft'; },
 		/** The composer has text, so the review bar must not answer over it. */
 		get hasDraftText() { return (!!draftRegion || replacingDraft) && draftBody.trim() !== ''; },
 		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody, mentionSelection, error: draftError } : null; },
-		setDraftBody(text: string) { draftBody = text; keptCommentDrafts.keep(key(), text, mentionSelection); },
+		setDraftBody(text: string) { draftBody = text; keptCommentDrafts.keep(key(), text, mentionSelection, drawnPlace, draftRegion); },
 		threads,
-		close, cancel, openList, toggleBoxMode, draw, submit, pick, pickCandidates, select, showFromList, movePin, onKeydownCapture,
+		close, cancel, toggleBoxMode, draw, submit, movePin, onKeydownCapture,
+		openList: picks.openList, pick: picks.pick, pickCandidates: picks.pickCandidates, select: picks.select, showFromList: picks.showFromList,
 	};
 }
 export type ImageComments = ReturnType<typeof createImageComments>;

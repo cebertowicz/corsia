@@ -7,6 +7,7 @@ import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence, type 
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage, postFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import { uniquePlaceOf, type KeptPlace } from '$lib/keptPlace';
 import { regionColor, type ImageRegion } from '$lib/imageRegions';
 import { token } from '$lib/stores/auth';
 import type { DocComment } from '$lib/stores/docComments';
@@ -29,6 +30,8 @@ export interface DocumentImageComments {
 	post: (from: number, to: number, region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: ImagePress, diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
+	/** The image's markdown as a kept draft's place, only when no other copy shares a side with it (`uniquePlaceOf`). */
+	placeOf: (from: number, to: number) => KeptPlace | null;
 	/** Snapshot the current diagram using the editor's existing render. */
 	refreshDiagram: (from: number, to: number) => Promise<OpenImageRequest | null>;
 	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
@@ -73,6 +76,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
 			post: (from, to, region, body, taggedAgentIds, mentions, press, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions, press),
 			failure: options.session() ? liveFailureMessage : postFailureMessage, feedback: options.feedback(),
+			placeOf: (from, to) => uniquePlaceOf(options.session()?.text.toString() ?? options.text(), from, to),
 			refreshDiagram: async (from, to) => {
 				const root = options.root();
 				if (!root) return null;

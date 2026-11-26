@@ -1,13 +1,17 @@
 // Where `keptCommentDrafts` keeps a draft on this device, so it outlives a reload, a quit and an update restart: one
 // browser storage entry per draft, under the signed-in person's id. Only `keptCommentDrafts` calls this, so a draft has
-// one writer. Stored: the text, its tagged agents, its one client id, the passage it was written on and, once pressed, what
-// its post needs; never the caret or why a post failed.
+// one writer. Stored: the text, its tagged agents, its one client id, the passage or image area it was written on and, once
+// pressed, what its post needs; never the caret or why a post failed.
 import type { MentionOccurrence } from '$lib/components/comments/mentionSelection';
+import type { ImageRegion } from '$lib/api/docs';
 import type { KeptPlace } from '$lib/keptPlace';
 
-/** What a pressed draft's post needs once no box holds it: kept from its press until it posts, is refused or is edited. */
-export type DraftSend = { artifactId: string; threadId: string | null };
-export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string; place?: KeptPlace; send?: DraftSend };
+/**
+ * What a pressed draft's post needs once no box holds it: kept from its press until it posts, is refused or is edited.
+ * `diagramSource`: the diagram an image pin was drawn on. `name`: what a notice calls the item when its key does not say.
+ */
+export type DraftSend = { artifactId: string; threadId: string | null; diagramSource?: string; name?: string };
+export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string; place?: KeptPlace; region?: ImageRegion; send?: DraftSend };
 
 export const DRAFT_STORAGE_PREFIX = 'corsia:commentDraft:v1:';
 /**
@@ -38,11 +42,20 @@ function parsePlace(value: unknown): KeptPlace | undefined {
 	if (!isText(place.quote) || !place.quote || !isText(place.prefix) || !isText(place.suffix)) return undefined;
 	return { from: place.from, to: place.to, quote: place.quote, prefix: place.prefix, suffix: place.suffix };
 }
+const isFraction = (value: unknown): value is number => typeof value === 'number' && value >= 0 && value <= 1;
+/** A stored image area, or nothing when it is not one: the draft then comes back with its words and no area. */
+function parseRegion(value: unknown): ImageRegion | undefined {
+	const region = value as Partial<ImageRegion> | null | undefined;
+	if (!region || !isFraction(region.x) || !isFraction(region.y) || !isFraction(region.w) || !isFraction(region.h)) return undefined;
+	return { x: region.x, y: region.y, w: region.w, h: region.h };
+}
 /** A stored send, or nothing when it is not one: the draft then comes back typed, and waits for a press. */
 function parseSend(value: unknown): DraftSend | undefined {
 	const send = value as Partial<DraftSend> | null | undefined;
 	if (!send || !isText(send.artifactId) || !send.artifactId || !(send.threadId === null || isText(send.threadId))) return undefined;
-	return { artifactId: send.artifactId, threadId: send.threadId };
+	if (![send.diagramSource, send.name].every((value) => value === undefined || isText(value))) return undefined;
+	return { artifactId: send.artifactId, threadId: send.threadId,
+		...(send.diagramSource !== undefined ? { diagramSource: send.diagramSource } : {}), ...(send.name ? { name: send.name } : {}) };
 }
 
 /**
@@ -59,10 +72,10 @@ export function parseStoredDraft(value: string | null): StoredDraft | null {
 		const valid = tags.every((tag) => tag && typeof tag.agent_id === 'string' && Number.isInteger(tag.start) && Number.isInteger(tag.end)
 			&& tag.start >= 0 && tag.start < tag.end && tag.end <= body.length);
 		if (!valid) return null;
-		const place = parsePlace(parsed.place), send = parseSend(parsed.send);
+		const place = parsePlace(parsed.place), region = parseRegion(parsed.region), send = parseSend(parsed.send);
 		return {
 			body, tags: tags.map(({ agent_id, start, end }) => ({ agent_id, start, end })),
-			...(clientId ? { clientId } : {}), ...(place ? { place } : {}), ...(send ? { send } : {}),
+			...(clientId ? { clientId } : {}), ...(place ? { place } : {}), ...(region ? { region } : {}), ...(send ? { send } : {}),
 		};
 	} catch {
 		return null;

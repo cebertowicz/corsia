@@ -1,8 +1,14 @@
 // What a comment's failed post says, in its box or its toast: the same words on every surface for what the server answered.
+import { RequestRefused } from '$lib/api/docs';
 import { CAPTURE_FAILURE, SELECTION_LOST } from '$lib/stores/commentSelection';
 import { plainErrorText } from '$lib/plainError';
 import { POST_FAILED } from '$lib/docViewerOperations';
 import { DRAFT_KEPT } from '$lib/stores/draftKept';
+
+/** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
+export const DIAGRAM_CHANGED_MESSAGE = `Place the pin on the current diagram. ${DRAFT_KEPT}`;
+/** The server refused a pin because the diagram it was drawn on is not the one shown now. */
+export const isDiagramChanged = (error: unknown) => error instanceof RequestRefused && error.kind === 'diagram_changed';
 
 /** What a failed post of a comment anchored in a live document says; an image's region comment there says the same. */
 export function liveFailureMessage(error: unknown): string {
