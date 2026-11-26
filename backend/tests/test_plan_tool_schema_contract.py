@@ -399,7 +399,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_update 9,620 -> 9,680 (+60): `request_review` takes a reviewer's `verdict`, which
 # settles a review step. The field is a bare enum: only a reviewer handed a review step
 # uses it, so its instruction rides in that reviewer's hand-over brief, not in every turn.
-_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_100}
+# plan_decision 3,100 -> 3,200: `options` says to name an option by its label in context, tradeoff
+# and rationale, because the person's screen shows labels only and agents wrote "A ... B ...".
+_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_200}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():
