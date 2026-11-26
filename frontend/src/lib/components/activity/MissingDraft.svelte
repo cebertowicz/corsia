@@ -27,7 +27,7 @@
 {#if failure}<p role="alert">Couldn’t remove this draft. Try again.</p>{/if}
 
 <style>
-	.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+	.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 	p { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-relaxed); }
 	:global(.activity.phone) p { font-size: var(--text-input); }
 </style>
