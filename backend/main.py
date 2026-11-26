@@ -5,6 +5,11 @@ from __future__ import annotations
 import logging
 import os
 
+from infra.log_format import enable_crash_stack_dumps
+
+# A fatal signal in native code otherwise ends the process with no Python stack in the log.
+enable_crash_stack_dumps()
+
 # An operator's LITELLM_LOCAL_MODEL_COST_MAP=true keeps the cost map offline. Otherwise
 # LiteLLM's import-time fetch is turned off and the lifespan refreshes it after startup.
 # CORSIA's own value lasts only for the import, so a process this backend starts (its
