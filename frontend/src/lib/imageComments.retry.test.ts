@@ -7,7 +7,7 @@ const api = vi.hoisted(() => ({ postComment: vi.fn(), fetchComments: vi.fn() }))
 vi.mock('$lib/api/docs', async (original) => ({ ...(await original<object>()), ...api }));
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: vi.fn(() => 'toast'), dismiss: vi.fn() } }));
 
-import { PostTimeoutError } from '$lib/api/boundedRequest';
+import { COMMENT_POST_TIMEOUT_MS, PostTimeoutError } from '$lib/api/boundedRequest';
 import { docComments, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { addDocImageComment } from '$lib/stores/imageRegionComments';
@@ -33,7 +33,7 @@ beforeEach(() => {
 			region_x: BOX.x, region_y: BOX.y, region_w: BOX.w, region_h: BOX.h, region_number: store.rows.size + 1, anchor_text: fields.anchor_text ?? null,
 			tagged_agent_ids: [...new Set<string>(fields.tagged_agent_ids ?? [])].sort() };
 		store.rows.set(fields.client_id, row);
-		if (store.unanswered) { store.unanswered = false; throw new PostTimeoutError(12_000); }
+		if (store.unanswered) { store.unanswered = false; throw new PostTimeoutError(COMMENT_POST_TIMEOUT_MS); }
 		return row;
 	});
 });
@@ -161,7 +161,7 @@ for (const [kind, artifact, make] of surfaces) {
 		land();
 		await first;
 		// The POST goes unanswered and the look for what it may have stored fails too, so the press fails.
-		api.postComment.mockRejectedValueOnce(new PostTimeoutError(12_000)); store.lookupFails = true;
+		api.postComment.mockRejectedValueOnce(new PostTimeoutError(COMMENT_POST_TIMEOUT_MS)); store.lookupFails = true;
 		await expect(comments.submit('Too dark')).rejects.toBeInstanceOf(PostTimeoutError);
 		expect(comments.draft?.body).toBe('Too dark');
 		store.lookupFails = false;

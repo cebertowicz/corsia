@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
-import { fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
+import { fetchWithTimeout } from './docs';
+import { REVIEW_REQUEST_TIMEOUT_MS } from './boundedRequest';
 import type { CommentAttention } from './plansTypes';
 
 export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requested';
@@ -45,7 +46,7 @@ export class ReviewRefusal extends Error {
 // Decision: a read the person is waiting on gets the same budget as a comment post, so the app has one wait
 // budget for a single request; shared on purpose, so they change together. A GET is safe to abort.
 export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead> {
-	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/review`, {}, COMMENT_POST_TIMEOUT_MS);
+	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/review`, {}, REVIEW_REQUEST_TIMEOUT_MS);
 	if (!response.ok) throw new Error(`${response.status}`);
 	return response.json();
 }
@@ -61,7 +62,7 @@ export async function answerReview(artifactId: string, verdict: ReviewVerdict, n
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds }),
-	}, COMMENT_POST_TIMEOUT_MS);
+	}, REVIEW_REQUEST_TIMEOUT_MS);
 	if (response.ok) {
 		const body = await response.json();
 		return body.review;
