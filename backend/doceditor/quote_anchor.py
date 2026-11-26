@@ -137,28 +137,22 @@ def anchor_context(
     return _sides(text, start, end)
 
 
-def kept_place(
-    text: str, quote: str, *, from16: object, prefix: str, suffix: str,
-) -> tuple[int, int] | None:
+def kept_place(text: str, quote: str, *, prefix: str, suffix: str) -> tuple[int, int] | None:
     """Where a comment sent again from a kept draft goes: ``(from_off, to_off)`` in UTF-16, or None.
 
-    It goes only on an occurrence of ``quote`` whose sides, taken as ``anchor_context`` takes them, both
-    equal the kept ``prefix`` and ``suffix``; one matching side is never enough, so a deleted passage never
-    moves onto a copy of its words elsewhere. Among several, the one nearest the kept ``from16`` wins;
-    an equal tie is None, as is no match, so the caller refuses rather than guess.
+    It goes only on the one occurrence of ``quote`` whose sides, taken as ``anchor_context`` takes them, both
+    equal the kept ``prefix`` and ``suffix``. One matching side is never enough, so a deleted passage never
+    moves onto a copy of its words elsewhere; and two or more such occurrences are None too, since nothing in
+    the text tells them apart. The caller refuses rather than guess.
     """
-    if not quote or not isinstance(from16, int) or isinstance(from16, bool):
+    if not quote:
         return None
     hits = [start for start in _overlapping_occurrences(text, quote)
             if _sides(text, start, start + len(quote)) == (prefix, suffix)]
-    if not hits:
+    if len(hits) != 1:
         return None
-    placed = _with_u16(text, hits)
-    nearest = min(abs(start16 - from16) for _, start16 in placed)
-    winners = [start16 for _, start16 in placed if abs(start16 - from16) == nearest]
-    if len(winners) != 1:
-        return None
-    return winners[0], winners[0] + _u16(quote)
+    from16 = _u16(text[:hits[0]])
+    return from16, from16 + _u16(quote)
 
 
 def reanchor_edited(

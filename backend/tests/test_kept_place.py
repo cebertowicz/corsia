@@ -1,5 +1,8 @@
 """A comment sent again from a kept draft goes only where its quote still has both kept sides."""
 
+import json
+from pathlib import Path
+
 from doceditor.quote_anchor import _u16, anchor_context, kept_place
 
 LEAD = 'An opening paragraph long enough to fill a side.\n\n'
@@ -16,7 +19,7 @@ def kept(text: str, quote: str, nth: int = 0) -> dict:
 
 
 def place(text: str, draft: dict):
-    return kept_place(text, draft['quote'], from16=draft['from16'], prefix=draft['prefix'], suffix=draft['suffix'])
+    return kept_place(text, draft['quote'], prefix=draft['prefix'], suffix=draft['suffix'])
 
 
 def span(text: str, quote: str, nth: int = 0) -> tuple[int, int]:
@@ -31,18 +34,18 @@ def test_unchanged_passage_is_placed_where_it_was():
     assert place(text, kept(text, 'Friday')) == span(text, 'Friday')
 
 
-def test_a_repeated_word_goes_to_the_copy_it_was_written_on():
+def test_a_repeated_word_with_other_sides_goes_to_the_copy_it_was_written_on():
     text = LEAD + 'First, ship it.\n\nSecond, ship it again after review.\n'
     assert place(text, kept(text, 'ship', 1)) == span(text, 'ship', 1)
 
 
-def test_two_copies_with_the_same_sides_equally_near_are_refused():
+def test_two_copies_with_the_same_sides_are_refused_even_on_the_one_it_was_written_on():
     filler = 'ab' * 20
     text = filler + 'word' + filler + 'word' + filler
-    draft = kept(text, 'word')
-    first, second = span(text, 'word')[0], span(text, 'word', 1)[0]
-    assert place(text, draft) == span(text, 'word')
-    assert place(text, {**draft, 'from16': (first + second) // 2}) is None
+    assert kept(text, 'word')['prefix'] == kept(text, 'word', 1)['prefix']
+    assert place(text, kept(text, 'word')) is None
+    assert place(text, kept(text, 'word', 1)) is None
+
 
 
 def test_a_deleted_passage_is_refused():
@@ -63,7 +66,7 @@ def test_an_edit_away_from_the_passage_moves_it_with_its_text():
     draft = kept(text, 'final')
     edited = 'A new first line added well before.\n' + text
     assert place(edited, draft) == span(edited, 'final')
-    assert place(edited, draft) != (draft['from16'], draft['from16'] + 5)
+    assert place(edited, draft)[0] != draft['from16']
 
 
 def test_a_short_side_must_still_reach_the_start_of_the_document():
@@ -106,9 +109,15 @@ def test_an_empty_cell_is_placed_on_its_own_cell_source():
     assert place(table.replace('| Alpha |   |', '| Alpha | Lee |'), draft) is None
 
 
-def test_nothing_to_place_without_a_quote_or_a_start():
+def test_nothing_to_place_without_a_quote():
     text = LEAD + 'words\n'
-    draft = kept(text, 'words')
-    assert place(text, {**draft, 'quote': ''}) is None
-    assert place(text, {**draft, 'from16': None}) is None
-    assert place(text, {**draft, 'from16': True}) is None
+    assert place(text, {**kept(text, 'words'), 'quote': ''}) is None
+
+
+def test_the_browser_takes_the_same_sides_as_the_server():
+    # The browser's `placeOf` is checked against this same file (keptPlace.test.ts): one window, counted alike.
+    cases = json.loads((Path(__file__).parents[2] / 'frontend/src/lib/keptPlace.windows.json').read_text())
+    assert len(cases) >= 8
+    for case in cases:
+        sides = anchor_context(case['text'], case['from'], case['to'], case['quote'])
+        assert sides == (case['prefix'], case['suffix']), case['name']

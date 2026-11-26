@@ -98,24 +98,22 @@ def test_an_empty_cell_resent_is_placed_on_its_own_cell(integration_client, inte
     assert (row['from_off'], row['to_off']) == span(path.read_text(), '   ')
 
 
-def test_two_blank_cells_with_the_same_sides_equally_near_are_refused(integration_client, integration_workspace):
+@pytest.mark.parametrize('own', [10, 12], ids=['on the first copy', 'on the second copy'])
+def test_two_blank_cells_with_the_same_sides_are_refused_wherever_the_kept_offset_sits(
+        integration_client, integration_workspace, own):
     blank = '|   |   |\n'
     text = LEAD + '| Plan | Note |\n| --- | --- |\n' + blank * 12 + '| End | z |\n'
     first, second = span(text, '   ', 10), span(text, '   ', 12)
-    sides = [anchor_context(text, *cell, '   ') for cell in (first, second)]
-    assert sides[0] == sides[1]  # rows 6 and 7 of the blank rows: nothing in the text tells them apart
-    path = document(integration_workspace, 'resend-blank-rows.md', text)
+    assert anchor_context(text, *first, '   ') == anchor_context(text, *second, '   ')  # nothing tells them apart
+    path = document(integration_workspace, f'resend-blank-rows-{own}.md', text)
     artifact = _register(integration_client, path)
-    middle = (first[0] + second[0]) // 2
-    passage = {'anchor_text': '   ', 'from_off': middle, 'to_off': middle + 3,
-               'anchor_prefix': sides[0][0], 'anchor_suffix': sides[0][1]}
-    response = resend(integration_client, artifact, passage, 'resend-blank-rows')
+    response = resend(integration_client, artifact, kept(text, '   ', own), f'resend-blank-rows-{own}')
     assert response.status_code == 409, response.text
     assert response.json()['kind'] == 'passage_gone'
     assert _threads(integration_client, artifact) == {}
 
 
-@pytest.mark.parametrize('case', ['deleted', 'prefix edited', 'suffix edited', 'row deleted', 'tie'])
+@pytest.mark.parametrize('case', ['deleted', 'prefix edited', 'suffix edited', 'row deleted', 'copy added'])
 def test_a_kept_draft_whose_passage_cannot_be_told_apart_is_refused_and_not_stored(
         integration_client, integration_workspace, case):
     filler = 'ab' * 20
@@ -126,14 +124,12 @@ def test_a_kept_draft_whose_passage_cannot_be_told_apart_is_refused_and_not_stor
         'suffix edited': (LEAD + 'Budget is final for Q3.\n', 'final', 0, lambda t: t.replace('for Q3', 'for Q4')),
         # The other row's 'Yes' has the same words but other sides: it is not this comment's passage.
         'row deleted': (TABLE, 'Yes', 1, lambda t: t.replace('| Beta | Yes |\n', '')),
-        'tie': (filler + 'word' + filler + 'word' + filler, 'word', 0, lambda t: t),
+        # Unique when written; a second copy with the same sides since: both copies survive, and neither is chosen.
+        'copy added': (filler + 'word' + filler, 'word', 0, lambda t: t + 'word' + filler),
     }[case]
     path = document(integration_workspace, f'resend-refused-{case.replace(" ", "-")}.md', text)
     artifact = _register(integration_client, path)
     passage = kept(text, quote, nth)
-    if case == 'tie':
-        middle = (span(text, quote)[0] + span(text, quote, 1)[0]) // 2
-        passage = {**passage, 'from_off': middle, 'to_off': middle + 4}
     path.write_text(edit(text))
     response = resend(integration_client, artifact, passage, f'refused-{case.replace(" ", "-")}')
     assert response.status_code == 409, response.text

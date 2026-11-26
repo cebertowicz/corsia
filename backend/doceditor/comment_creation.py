@@ -58,7 +58,7 @@ def kept_sides(request) -> bool:
 
 def kept_anchor(text: str, request) -> Anchor:
     """The kept draft's passage in ``text``, found by its quote with both kept sides, or a refusal."""
-    place = kept_place(text, request.quote, from16=request.start, prefix=request.kept_prefix, suffix=request.kept_suffix)
+    place = kept_place(text, request.quote, prefix=request.kept_prefix, suffix=request.kept_suffix)
     if place is None:
         raise passage_gone()
     return Anchor(request.quote, place[0], place[1], request.kept_prefix, request.kept_suffix, text)
