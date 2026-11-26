@@ -1411,7 +1411,8 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(restarting));
+		// A restart passes: the same reply may go once CORSIA is back, so a pressed one is tried again on its own.
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(restarting, false, true));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(restarting);
 		expect(chatCommentPosts()).toEqual([]);
@@ -1428,7 +1429,8 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(notAccepted));
+		// A lost connection passes too; only a chat with no model to answer waits for the person.
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(notAccepted, false, true));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(notAccepted);
 		// Nothing was stored, so nothing is counted as sent.
