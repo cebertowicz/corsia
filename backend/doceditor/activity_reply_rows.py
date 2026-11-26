@@ -124,8 +124,12 @@ def document_rows(db, user_id: str) -> list[dict]:
              (item.parent_id IS NOT NULL AND item.author_kind='agent'
               AND item.artifact_id=root.artifact_id
               AND EXISTS (SELECT 1 FROM threads author WHERE author.id=item.author_thread_id AND author.user_id=?)
-              AND EXISTS (SELECT 1 FROM doc_comments person WHERE person.artifact_id=root.artifact_id
-                          AND person.author_kind='user' AND (person.id=root.id OR person.parent_id=root.id))
+              -- The person commented in this thread: they wrote its root, or a reply under it.
+              -- Each side is an index lookup (the root's own row, idx_doc_comments_parent); one
+              -- EXISTS over the whole document re-scanned every comment in it for every reply.
+              AND (root.author_kind='user'
+                   OR EXISTS (SELECT 1 FROM doc_comments person WHERE person.parent_id=root.id
+                              AND person.author_kind='user' AND person.artifact_id=root.artifact_id))
              ) AS qualifies
       {unread_sql}
     ), counted AS (

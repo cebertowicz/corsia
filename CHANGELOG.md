@@ -17,6 +17,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
+- Activity refreshes quickly again on documents with many comments, and keeps one refresh open at a time, so a comment or other post from a phone over remote access is no longer held waiting for a free connection until it fails.
 - Activity separates your tasks from document reply notifications, groups replies by document, and lets you mark them read there. Each notification names its document by its title rather than its file name, and its count and the bar count only the replies to your comments; marking a document read there still clears all of its unread items, not just the counted replies. Decisions and messages to review are now in Activity instead of above the chat input; Activity also tells you when the list may be out of date.
 - Activity shows instructions for tasks assigned to you.
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
