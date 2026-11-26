@@ -89,14 +89,16 @@ async def _close_failed(owner: Any, runtime: Any) -> bool:
         result = await asyncio.wait_for(owner._close_one(runtime), COMMAND_TIMEOUT)
         if result is None:
             return True
-    except (Exception, asyncio.CancelledError):
-        pass
+        log.warning("browser close after a failed site clear was not confirmed (%s)", type(result).__name__)
+    except Exception as exc:
+        log.warning("browser close after a failed site clear was not confirmed (%s)", type(exc).__name__)
+    # Cancellation propagates: the caller then keeps the record and fence, so commands stay refused.
     try:
         if runtime.chrome is not None:
             await asyncio.wait_for(runtime.chrome.close(), COMMAND_TIMEOUT)
             return await asyncio.wait_for(owner._close_one(runtime), COMMAND_TIMEOUT) is None
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("browser termination after a failed site clear failed (%s)", type(exc).__name__)
     return False
 
 
