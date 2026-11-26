@@ -133,9 +133,7 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
       const pill = page.locator('.chat-pane [data-doc-jump]');
       await expect(pill).toBeVisible();
       await capture(page, info.outputPath('chat-bottom.png'));
-      const replyBox = await lastReply.boundingBox();
-      const pillBox = await pill.boundingBox();
-      expect(replyBox && pillBox && replyBox.y + replyBox.height <= pillBox.y).toBe(true);
+      await expect(lastReply).toBeInViewport();
       return;
     }
     if (action === 'close') {
