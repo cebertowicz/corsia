@@ -155,11 +155,14 @@ def blank(text: str, values: Iterable[str]) -> str:
                     edge = encoded[0] + encoded[-1]
                     patterns[edge[0].isalnum()].add((len("".join(encoded)), _bounded(edge, pattern)))
     groups = []
-    for bounded, entries in patterns.items():
+    # Match a value's own encoded prefix before consuming an escape as its boundary.
+    for bounded in (False, True):
+        entries = patterns[bounded]
         if entries:
-            prefix = r"(?:(?<![^\W_])|(?<=\\[nrtbf])|(?<=\\u[0-9A-Fa-f]{4})|(?<=%[0-9A-Fa-f]{2}))" if bounded else ""
+            prefix = (r"(?:(?<![^\W_])|(?P<escape>\\(?:[nrtbfv0]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}"
+                      r"|U[0-9A-Fa-f]{8})|%(?:25)*[0-9A-Fa-f]{2}))") if bounded else ""
             groups.append(prefix + "(?:" + "|".join(p for _, p in sorted(entries, reverse=True)) + ")")
-    return re.sub("|".join(groups), lambda _: BLANK, text) if groups else text
+    return re.sub("|".join(groups), lambda match: (match.groupdict().get("escape") or "") + BLANK, text) if groups else text
 
 
 def _saved_values() -> frozenset[str]:

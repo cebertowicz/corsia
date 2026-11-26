@@ -153,12 +153,22 @@ async def test_a_short_saved_value_is_hidden_but_not_inside_a_word(state, monkey
 
 
 @pytest.mark.parametrize("value", ["hunter22pass", "123-45-6789"])
-@pytest.mark.parametrize("escape", [r"\n", r"\r", r"\t", r"\b", r"\f", r"\u00a0", r"\u00A0", "%20", "%0A", r"\\n"])
+@pytest.mark.parametrize("escape", [r"\n", r"\r", r"\t", r"\b", r"\f", r"\u00a0", r"\u00A0", "%20", "%0A", r"\\n",
+                                    r"\x0a", r"\v", r"\0", r"\U0001F600", "%2520", "%253D", "%252520"])
 @pytest.mark.parametrize("side", ["before", "after"])
 def test_escaped_boundaries_hide_values(value, escape, side):
     text = f"label{escape}{value}" if side == "before" else f"{value}{escape}label"
     expected = f"label{escape}[hidden]" if side == "before" else f"[hidden]{escape}label"
     assert blanking.blank(text, [value]) == expected
+
+
+def test_escape_between_saved_values_is_preserved_and_both_are_hidden():
+    assert blanking.blank("hunter22pass%2520hunter22pass", ["hunter22pass"]) == "[hidden]%2520[hidden]"
+
+
+def test_encoded_prefix_of_saved_value_is_hidden_with_the_value():
+    assert blanking.blank("q=%2F0", ["/0"]) == "q=[hidden]"
+    assert blanking.blank("q=%20a%20b", [" a b"]) == "q=[hidden]"
 
 
 @contextmanager
