@@ -21,6 +21,8 @@ _SCRIPT = """
 import ctypes
 import faulthandler
 import sys
+import threading
+import time
 
 if sys.argv[1] == "main":
     import main  # noqa: F401  the startup wiring under test
@@ -30,6 +32,19 @@ else:
     enable_crash_stack_dumps()
 
 assert faulthandler.is_enabled()
+
+ready = threading.Event()
+
+
+def idle_worker():
+    ready.set()
+    time.sleep(600)
+
+
+# A second thread alive with a known frame at the moment of the signal, so the dump has
+# to reach past the crashing one to pass.
+threading.Thread(target=idle_worker, daemon=True).start()
+assert ready.wait(10)
 
 
 def crash():
@@ -61,18 +76,26 @@ def _crash_log(tmp_path: Path, mode: str) -> tuple[int, str]:
     return result.returncode, log_file.read_text()
 
 
-def test_direct_enable_dumps_every_thread_stack(tmp_path: Path) -> None:
-    returncode, log = _crash_log(tmp_path, "direct")
+def _assert_dumps_every_thread_stack(returncode: int, log: str) -> None:
+    """The log names the signal, both thread headers, and the frame each thread was in.
+
+    The separate ``Thread 0x`` line is what only ``all_threads=True`` writes: the crashed
+    thread is always ``Current thread 0x``, and every other live thread gets its own
+    ``Thread 0x`` header. Checked per line, so neither phrase can come from anywhere else.
+    """
+    lines = log.splitlines()
 
     assert returncode == -signal.SIGSEGV
     assert "Fatal Python error" in log
-    assert "most recent call first" in log
+    assert any(line.startswith("Current thread 0x") for line in lines)
+    assert any(line.startswith("Thread 0x") for line in lines)
+    assert "in idle_worker" in log
     assert "in crash" in log
+
+
+def test_direct_enable_dumps_every_thread_stack(tmp_path: Path) -> None:
+    _assert_dumps_every_thread_stack(*_crash_log(tmp_path, "direct"))
 
 
 def test_importing_the_backend_enables_the_dump(tmp_path: Path) -> None:
-    returncode, log = _crash_log(tmp_path, "main")
-
-    assert returncode == -signal.SIGSEGV
-    assert "Fatal Python error" in log
-    assert "in crash" in log
+    _assert_dumps_every_thread_stack(*_crash_log(tmp_path, "main"))
