@@ -289,10 +289,13 @@ class PlanDecisionTool(_OperationTool):
     def description(self) -> str:
         return (
             "Author structured plan decisions for the user, with 2-4 A/B/C/D "
-            "options; the parent tier reviews before raise. pick \"any\" is for "
-            "independent items; tradeoffs get their own decision. Decisions are for "
-            "choices: a step only the person's hands can take (sign in, pay) is "
-            "never one, even with a 'drop it' option; plan_update says where it goes."
+            "options; a delegated worker's parent reviews its decision before raise. "
+            "pick \"any\" is for independent items; tradeoffs get their own decision. "
+            "Decisions are for choices someone switching in cold could make from the "
+            "card alone; if they would need a file or the history, put a brief in front "
+            "of them instead (plan_update block_node, owner_kind user, ask_artifact_id). "
+            "A step only the person's hands can take (sign in, pay) is never one, even "
+            "with a 'drop it' option; plan_update says where it goes."
         )
 
     @property

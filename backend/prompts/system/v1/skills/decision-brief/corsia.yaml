@@ -19,9 +19,9 @@ workflow:
       after: [long-form]
       difficulty: {default: routine}
     - id: decision
-      title: Plan decision raised
+      title: Decision raised
       required: true
-      check: plan decision raised with options and one recommendation (pick one) or a pre-ticked set (pick any), answerable as asked without reading the linked document; if they must judge the thing itself, make it an artifact ask instead
+      check: a plan decision (options and one recommendation, or a pre-ticked set) only if someone with none of the history could choose from the card alone; otherwise an artifact ask whose top carries the brief's Shape
       after: [brief]
       difficulty: {default: routine}
       quality:
