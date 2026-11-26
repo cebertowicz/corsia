@@ -37,6 +37,9 @@ class Publication:
     decision: dict
     ranges: dict[str, tuple[int, int]] | None = None
     suggestion_accept: bool = False
+    direct_user: bool = False
+    project_id: str | None = None
+    accepted: tuple[str, ...] = ()
 
     @staticmethod
     def decision_for(path: Path, shared: SharedTarget | None, authority: WriteAuthority | None = None) -> dict:

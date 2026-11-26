@@ -13,7 +13,7 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
+	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll, documentText }: {
 		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean;
 		/** Answered from the card docked to the document canvas's bottom edge. The caller docks only on a phone or a short touch screen; without it the ask keeps its row in the header (also an image's). */
 		docked?: boolean;
@@ -21,6 +21,8 @@
 		pendingSuggestions?: number;
 		/** Accepts them all and puts the accepted text on screen, resolving to how many it accepted; throws when it could not, so no verdict is sent. */
 		onAcceptAll?: () => Promise<number | void>;
+		/** Current editor text, including suggestions accepted by this approval. */
+		documentText?: () => string;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
 		onAnswered?: () => void;
@@ -122,10 +124,16 @@
 		const targetId = artifactId;
 		if (!targetId) return;
 		const targetHoldIds = [...holdIds];
+		let docSha256: string | undefined;
+		if (verdict === 'approved' && documentText) {
+			const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(documentText()));
+			docSha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+		}
 		const outcome = await bar.answer(
 			verdict,
 			() => answerSubmitted(targetHoldIds, { state: verdict, feedback: bar.read?.round_feedback_counts }),
 			(sent) => answerSubmitted(targetHoldIds, { state: sent.verdict, feedback: sent.feedback_counts }),
+			docSha256,
 		);
 		if (outcome === 'sent') {
 			if (bar.artifactId === targetId) answered();

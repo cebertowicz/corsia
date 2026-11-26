@@ -325,6 +325,7 @@ class ClearBody(BaseModel):
     verdict: str | None = None
     note: str | None = None
     hold_ids: list[str] | None = None
+    doc_sha256: str | None = None
 
 
 @router.post("/{artifact_id}/clear")
@@ -337,12 +338,10 @@ async def post_clear(artifact_id: str, body: ClearBody):
     user = _require_user(body.token)
     await _authorize(artifact_id, user)
     woken: list[str] = []
+    from api.attention_approval import clear_with_approval
+
     try:
-        result = await run_in_db(lambda: attention.clear_attention(
-            artifact_id, outcome=body.outcome, condition=body.condition,
-            reason=body.reason, verdict=body.verdict, note=body.note,
-            hold_ids=body.hold_ids, require_hold_ids=True, drives=woken,
-        ))
+        result = await run_in_db(clear_with_approval, artifact_id, body, woken)
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
         raise HTTPException(

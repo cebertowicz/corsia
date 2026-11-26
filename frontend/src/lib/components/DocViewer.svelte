@@ -395,6 +395,6 @@
 	/>
 </div>
 {#snippet reviewControls()}
-	<ReviewBar bind:capsuleClearance={askReach} docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar bind:capsuleClearance={askReach} documentText={() => editText} docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

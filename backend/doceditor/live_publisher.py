@@ -71,6 +71,34 @@ def publish_one(store: LiveStore, row: OwedPublication, *, db=None,
 
 def register_publication(publication: Publication, text: str, result_hash: str, *,
                          stamp: dict | None, db) -> None:
+    from plans import public as plans_public
+    from plans.approval_records import ApprovalChangedDuringSave
+
+    for attempt in range(2):
+        prepared = plans_public.prepare_save_approval(
+            publication.target_path(), text.encode("utf-8"), publication.project_id, db=db,
+        ) if publication.direct_user else None
+        recorded = [False]
+        try:
+            _register_publication(publication, text, result_hash, stamp=stamp, db=db,
+                                  approval_copy=prepared, recorded=recorded, retry=attempt > 0)
+        except ApprovalChangedDuringSave:
+            if prepared is not None:
+                prepared.discard()
+            if attempt:
+                raise
+            continue
+        except BaseException:
+            if prepared is not None:
+                prepared.discard()
+            raise
+        if prepared is not None and not recorded[0]:
+            prepared.discard()
+        return
+
+
+def _register_publication(publication: Publication, text: str, result_hash: str, *,
+                          stamp: dict | None, db, approval_copy, recorded: list[bool], retry: bool) -> None:
     """Register ``text`` as written under ``publication``'s actor and decision.
 
     With a store stamp, a row this store already published is skipped. With
@@ -106,6 +134,10 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
                 actor_thread_id=publication.actor,
                 metadata={"last_written_sha256": result_hash, **({_STAMP: stamp} if stamp else {})},
             )
+            if publication.direct_user:
+                from plans import public as plans_public
+                recorded[0] = plans_public.record_saved_version(db, artifact["id"], approval_copy,
+                                                                  tuple(publication.accepted), retry=retry)
             current_rows = {row[0]: tuple(row[1:]) for row in db.execute(
                 f"SELECT id, snapshot_id, {', '.join(snapshot_reanchor._ANCHOR_FIELDS)} FROM doc_comments "
                 'WHERE artifact_id=? AND parent_id IS NULL AND review=0', (artifact['id'],),

@@ -80,6 +80,7 @@ export function createReviewBarState() {
 		verdict: 'approved' | 'changes_requested',
 		onSendStarted?: () => void,
 		onSendConfirmed?: (answer: ReviewAnswer) => void,
+		docSha256?: string,
 	): Promise<ReviewAnswerOutcome> {
 		const id = artifactId, stamp = generation;
 		if (!id || (phase !== 'ask' && phase !== 'noting')) return 'ignored';
@@ -89,7 +90,7 @@ export function createReviewBarState() {
 		phase = 'sending'; failure = '';
 		onSendStarted?.();
 		try {
-			const sent = await answerReview(id, verdict, verdict !== 'approved' ? note : '', read?.hold_ids ?? []);
+			const sent = await answerReview(id, verdict, verdict !== 'approved' ? note : '', read?.hold_ids ?? [], docSha256);
 			// The hold-keyed card overlay must receive the canonical server response even if this bar moved on.
 			onSendConfirmed?.(sent);
 			if (!current(id, stamp)) return 'sent';
@@ -104,6 +105,7 @@ export function createReviewBarState() {
 				settledAsk = read?.ask_raised_at ?? null;
 				phase = 'stale';
 				await load();
+				if (error.message.includes('still changing')) { phase = 'ask'; failure = error.message; }
 			} else if (error instanceof ReviewRefusal && error.code === 'note_required') {
 				noteDemanded = true; phase = 'noting'; failure = NOTE_NEEDED;
 			} else {

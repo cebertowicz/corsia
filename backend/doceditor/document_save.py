@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.skill_validation import is_skill_file
+from doceditor.skill_save import invalid_skill_save_error as _invalid_skill_save_error, refuse_invalid_skill as _refuse_invalid_skill
 from core.workspace_context_sources import is_read_only_context_path
 from doceditor.comment_actions import DocumentWriter
 from doceditor.document_save_errors import DocumentSaveError, FileChangedOutside
@@ -22,7 +23,7 @@ from doceditor.document_scope import (
 )
 from infra import config
 from infra.auth import owns_thread
-from infra.database import get_db
+from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_off_db
 from infra.guidance_git import save_with_history
 from infra.guidance_targets import HistoryTarget, guidance_target, history_target
@@ -46,25 +47,6 @@ class DocumentSave:
     project_id: str | None = None
     thread_id: str | None = None
     create: bool = False
-
-
-def _invalid_skill_save_error(errors: tuple[str, ...], line: str) -> DocumentSaveError:
-    """Carry the canonical skill refusal through document-save adapters unchanged."""
-    return DocumentSaveError(
-        "invalid_skill",
-        line,
-        {"message": "Invalid SKILL.md", "errors": list(errors), "line": line},
-    )
-
-
-def _refuse_invalid_skill(path: Path, text: str) -> None:
-    """Refuse a SKILL.md that would not load, before any byte is written; other files pass."""
-    if not is_skill_file(path):
-        return
-    from infra.skill_save_validation import invalid_skill_write
-
-    if (refusal := invalid_skill_write({path: text.encode()})) is not None:
-        raise _invalid_skill_save_error(refusal.errors, refusal.line)
 
 
 def _saved_payload(resolved: Path, actor_thread_id: str, extra: dict) -> dict:
@@ -243,6 +225,17 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
 def _write_document(
     body: DocumentSave, resolved: Path, direct_user: bool, expected_sha256: str | None = None,
     reports: list[Callable[[], None]] | None = None, suppress_feedback: bool = False,
+    accepted: tuple[str, ...] = (),
+) -> dict:
+    from doceditor.approval_save import write_with_approval
+
+    return write_with_approval(body, resolved, direct_user, expected_sha256, reports,
+                               suppress_feedback, accepted, _write_document_with_copy)
+
+
+def _write_document_with_copy(
+    body: DocumentSave, resolved: Path, direct_user: bool, expected_sha256: str | None,
+    reports: list[Callable[[], None]] | None, suppress_feedback: bool, approval_hook, plain_state: dict,
 ) -> dict:
     """Blocking. Write a validated document and resolve its artifact identity; with ``reports``, the
     owner report is left there for the caller to run once it holds no lock."""
@@ -265,6 +258,7 @@ def _write_document(
             notify=False,
             expected_sha256=expected_sha256,
             suppress_feedback=suppress_feedback,
+            approval_hook=approval_hook,
         )
     except DurableWritePolicyError as exc:
         raise DocumentSaveError("durable_write_policy", str(exc)) from exc
@@ -274,32 +268,38 @@ def _write_document(
     if body.create:
         resolved.parent.mkdir(parents=True, exist_ok=True)
     reaches_owner = decision is not None and decision.reaches_owner
-    before = resolved.read_bytes() if reaches_owner or (not body.thread_id and resolved.is_file()) else None
+    before = (plain_state["before"] if "before" in plain_state else
+              resolved.read_bytes() if reaches_owner or (not body.thread_id and resolved.is_file()) else None)
+    plain_state["before"] = before
     from doceditor.comment_snapshots import adopt_before_write
     adopt_before_write(resolved, before=before, artifact_id=decision.artifact_id if decision else None)
     # Only the thread-less save compares against the file's prior bytes; a threaded
     # save compares against its registration's last_written_sha256.
     prior_sha256 = hashlib.sha256(before).hexdigest() if before is not None and not body.thread_id else None
     resolved.write_text(body.text, encoding="utf-8")
+    plain_state["published"] = True
     new_sha256 = hashlib.sha256(body.text.encode("utf-8")).hexdigest()
     db = get_db()
     try:
         artifact_type = registry_service.classify(resolved)
-        if body.thread_id:
-            # The thread registers the write; the edit is the user's unless an agent made it.
-            artifact = registry_service.register_write_strict(
-                body.thread_id, str(resolved), metadata={"last_written_sha256": new_sha256},
-                actor_thread_id=UI_THREAD if direct_user else None, db=db,
-            )
-        else:
-            artifact = registry_service.resolve_file_identity(str(resolved), db=db)
-            if artifact is not None:
-                from registry.review_edit_journal import note_content_edit
-
-                note_content_edit(
-                    db, artifact, previous_sha256=prior_sha256,
-                    new_sha256=new_sha256, actor_thread_id=UI_THREAD,
+        with write_transaction(db, scope="document_save_registration") if approval_hook else nullcontext():
+            if body.thread_id:
+                # The thread registers the write; the edit is the user's unless an agent made it.
+                artifact = registry_service.register_write_strict(
+                    body.thread_id, str(resolved), metadata={"last_written_sha256": new_sha256},
+                    actor_thread_id=UI_THREAD if direct_user else None, db=db,
                 )
+            else:
+                artifact = registry_service.resolve_file_identity(str(resolved), db=db)
+                if artifact is not None:
+                    from registry.review_edit_journal import note_content_edit
+
+                    note_content_edit(
+                        db, artifact, previous_sha256=prior_sha256,
+                        new_sha256=new_sha256, actor_thread_id=UI_THREAD,
+                    )
+            if artifact is not None and approval_hook is not None:
+                approval_hook(db, artifact)
         if reports is None:
             _report(decision, resolved, before, actor, db, suppress_feedback=suppress_feedback)
         else:
@@ -371,7 +371,7 @@ async def _save_legacy_document(
         reason,
         lambda path, expected, reports=None: _write_document(
             body, path, direct_user=not by_agent, expected_sha256=expected, reports=reports,
-            suppress_feedback=suppress_feedback,
+            suppress_feedback=suppress_feedback, accepted=accepted,
         ),
         expected_sha256=expected_sha256, history_required=history_required, accepted=accepted,
     )

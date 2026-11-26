@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from pathlib import Path
 
 import pytest
 from auth_fixtures import OWNER_TOKEN, OWNER_USER
 
-from doc_feedback_helpers import add_comment, seed_document
+from doc_feedback_helpers import add_comment
 
 pytestmark = pytest.mark.integration
 
@@ -25,7 +27,16 @@ def _asked_document(thread_id: str) -> str:
             (thread_id, OWNER_USER, "Style", "openai/test-checkpoint", "t", "t"),
         )
         db.commit()
-        artifact = seed_document(db, thread_id, name=f"{thread_id}.md")
+        from infra import config
+        from registry import models
+
+        path = Path(config.WORKSPACE) / f"{thread_id}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("A proposal for review.")
+        artifact = models.register_artifact(
+            integration="local", type="document", external_id=str(path), path=str(path),
+            parent_thread_id=thread_id, title=path.name, db=db,
+        )["id"]
         plan = service.ensure_plan("thread", thread_id, db=db)
         node = service.add_node(
             plan.id, kind="task", title="Review the proposal",
@@ -57,7 +68,15 @@ def _comment(artifact: str) -> None:
 
 
 def _clear(client, artifact: str, **body):
-    payload = {"token": OWNER_TOKEN, **{"outcome": "answer", **body}}
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        row = db.execute("SELECT path FROM artifact_identities WHERE id=?", (artifact,)).fetchone()
+        sha = hashlib.sha256(Path(row["path"]).read_bytes()).hexdigest()
+    finally:
+        db.close()
+    payload = {"token": OWNER_TOKEN, "doc_sha256": sha, **{"outcome": "answer", **body}}
     if "hold_ids" not in payload:
         payload["hold_ids"] = _review(client, artifact)["hold_ids"]
     return client.post(f"/api/attention/{artifact}/clear", json=payload)
@@ -101,6 +120,27 @@ def test_request_changes_without_feedback_or_note_is_refused_with_a_code(integra
         "feedback_counts": {"comments": 0, "suggestions": 0, "edits": 0},
         "feedback_ids": {"comments": [], "suggestions": [], "edits": []},
     }
+
+
+def test_approval_keeps_page_and_records_missing_image(integration_client):
+    from infra.database import get_db
+    from plans.approved_versions import approved_versions_for_node
+
+    artifact = _asked_document(f"rb-copy-{uuid.uuid4().hex[:6]}")
+    db = get_db()
+    try:
+        path = Path(db.execute("SELECT path FROM artifact_identities WHERE id=?", (artifact,)).fetchone()["path"])
+        path.write_text("Approved page\n\n![missing](missing-frame.png)\n")
+        original = path.read_bytes()
+        assert _clear(integration_client, artifact, verdict="approved").status_code == 200
+        row = db.execute("SELECT node_id,doc_sha256,images FROM artifact_approvals WHERE artifact_id=?", (artifact,)).fetchone()
+        assert row["doc_sha256"] == hashlib.sha256(original).hexdigest()
+        copies = approved_versions_for_node(row["node_id"], db=db)[0]["copies"]
+        assert Path(copies[0]["copy_path"]).read_bytes() == original
+        assert copies[0]["sha256"] == row["doc_sha256"]
+        assert copies[1]["not_kept"]
+    finally:
+        db.close()
 
 
 def test_a_second_answer_is_stale_and_clears_nothing(integration_client):

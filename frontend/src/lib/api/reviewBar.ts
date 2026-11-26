@@ -57,11 +57,11 @@ export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead>
  * The session also rides in the Authorization header: the Devices listener admits an `/api` request only by its
  * header or query credential, so a body-only token is refused there before the route reads it.
  */
-export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string, holdIds: string[]): Promise<ReviewAnswer> {
+export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string, holdIds: string[], docSha256?: string): Promise<ReviewAnswer> {
 	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds }),
+		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds, doc_sha256: docSha256 }),
 	}, REVIEW_REQUEST_TIMEOUT_MS);
 	if (response.ok) {
 		const body = await response.json();

@@ -1,5 +1,6 @@
 """SQLite schema DDL used by database initialization."""
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
+from infra.approval_schema import APPROVAL_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
 from infra.fact_extraction_schema import FACT_EXTRACTION_SCHEMA_SQL
@@ -115,7 +116,7 @@ SCHEMA_SQL = f"""
             CHECK (typeof(next_input_order) = 'integer' AND next_input_order > 0),
         next_message_seq INTEGER NOT NULL DEFAULT 1
     );
-    {STRUCTURED_PLAN_SCHEMA_SQL}
+    {STRUCTURED_PLAN_SCHEMA_SQL}{APPROVAL_SCHEMA_SQL}
     {CONTINUATION_SCHEMA_SQL}
     {MESSAGE_SCHEMA_SQL}
     {DELIVERY_FOUNDATION_SCHEMA_SQL}
@@ -474,8 +475,7 @@ SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_artifact_reconcile_receipts_session
         ON artifact_reconcile_receipts(thread_id, created_at DESC);
 
-    {ARTIFACT_RELOCATION_SCHEMA_SQL}
-    {HELD_REPLIES_SCHEMA_SQL}
+    {ARTIFACT_RELOCATION_SCHEMA_SQL}{HELD_REPLIES_SCHEMA_SQL}
     {DOCUMENT_SCHEMA_SQL}
     {MEASUREMENT_BREAKS_SCHEMA_SQL}{MEASUREMENT_INDEX_SQL}
     {WRITE_HOLD_INDEX_SQL}{SCOPED_HISTORY_INDEX_SQL}

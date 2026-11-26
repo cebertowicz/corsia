@@ -147,7 +147,7 @@ def _register_applied(
     before: bytes | None,
     db,
     origin: registration_writer.RegistrationOrigin | None = None,
-    suppress_feedback: bool = False,
+    suppress_feedback: bool = False, approval_hook=None,
 ) -> dict:
     """Register the applied bytes, metadata, and owner events atomically."""
     registration_owner = shared.actor_principal or thread_id
@@ -166,16 +166,14 @@ def _register_applied(
         metadata["update_trigger"] = shared.update_trigger
     with write_transaction(db, scope="register_durable_write"):
         artifact = service.register_write_strict(
-            registration_owner,
-            prepared,
-            description,
-            metadata=metadata,
-            origin=origin,
-            db=db,
+            registration_owner, prepared, description,
+            metadata=metadata, origin=origin, db=db,
         )
         if artifact["external_id"] != external_id:
             raise RuntimeError("Durable write identity changed during registration.")
         settle_promoted_source(source_identity, left, artifact, db=db)
+        if approval_hook is not None:
+            approval_hook(db, artifact)
         # Anchor adoption happens before the file is replaced.
         record_post_write_events(
             shared,
@@ -373,8 +371,8 @@ def _publish_bytes(
     db,
     operation: str,
     direct_user: bool = False,
-    source: Path | None = None, origin: registration_writer.RegistrationOrigin | None = None,
-    notify: bool = True, expected_sha256: str | None = None, suppress_feedback: bool = False,
+    source: Path | None = None, origin: registration_writer.RegistrationOrigin | None = None, notify: bool = True,
+    expected_sha256: str | None = None, suppress_feedback: bool = False, approval_hook=None,
 ) -> dict:
     validate_publication_input(source, content)
     artifact_type, external_id = _intent_identity(shared.path, db=db)
@@ -440,7 +438,7 @@ def _publish_bytes(
             before=before,
             db=db,
             origin=origin,
-            suppress_feedback=suppress_feedback,
+            suppress_feedback=suppress_feedback, approval_hook=approval_hook,
         )
     except Exception as exc:
         if file_applied:
@@ -501,7 +499,7 @@ def write_text(
     origin: registration_writer.RegistrationOrigin | None = None,
     notify: bool = True,
     expected_sha256: str | None = None,
-    suppress_feedback: bool = False,
+    suppress_feedback: bool = False, approval_hook=None,
 ) -> dict | WriteAuthority | None:
     """Publish governed shared text; for any other write, return the ownership decision to report.
 
@@ -538,7 +536,7 @@ def write_text(
             description=description,
             db=db,
             operation="write", direct_user=direct_user,
-            origin=origin, notify=notify, expected_sha256=expected_sha256, suppress_feedback=suppress_feedback,
+            origin=origin, notify=notify, expected_sha256=expected_sha256, suppress_feedback=suppress_feedback, approval_hook=approval_hook,
         )
     finally:
         db.close()
