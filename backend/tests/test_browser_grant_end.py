@@ -129,3 +129,18 @@ def test_deadline_ends_grant_without_read(world, monkeypatch):
     assert ended.wait(4)
     assert grant["id"] not in fills._approvals
     assert "example.com" in pending_site()
+
+
+def test_an_end_with_no_app_loop_defers_the_clear_to_the_next_launch(tmp_path, monkeypatch):
+    target = str(tmp_path / "profile")
+    monkeypatch.setattr(effects, "profile", lambda _item: target)
+    monkeypatch.setattr(effects.app_loop, "_LOOP", None)
+    released, events = [], []
+    release = records.release
+    monkeypatch.setattr(records, "release", lambda *args: (released.append(args), release(*args)))
+    monkeypatch.setattr(effects, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    effects.end(SimpleNamespace(id="grant", site="https://login.example.com"), lambda: None, "expired")
+    assert released == [(target, "example.com")]
+    assert not records.fenced(target)
+    assert records.pending(target) == {"example.com": (["https://login.example.com"], 1)}
+    assert events == [(("browser_signout", "site_clear"), {"properties": {"outcome": "deferred", "cause": "expired"}})]

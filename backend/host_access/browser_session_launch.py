@@ -331,8 +331,20 @@ async def keep_copy_signins(owner: Any, runtime: Any) -> None:
         return
     holder = next((item for item in owner._sessions.values() if item.record.profile == profile
                    and item.chrome is not None and item.record.terminal_state == "running"), None)
-    if holder is not None:
-        await apply_kept_signins(holder)
+    if holder is None:
+        return
+    # Under the lock a site clear takes, so no clear runs between reading the kept file and setCookies.
+    from host_access.browser_grant_cleanup import _acquire
+    try:
+        await _acquire(holder.command_lock)
+    except TimeoutError as exc:
+        logger.warning("kept browser sign-ins wait for the next launch (%s)", type(exc).__name__)
+        return
+    try:
+        if holder.record.terminal_state == "running" and holder.chrome is not None:
+            await apply_kept_signins(holder)
+    finally:
+        holder.command_lock.release()
 
 
 async def apply_kept_signins(runtime: Any) -> None:

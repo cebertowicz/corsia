@@ -1,5 +1,6 @@
 """A site clear fences agents on its holders, retains incomplete work, and fails closed on any error."""
 import asyncio
+import contextlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -254,3 +255,92 @@ def test_copy_writeback_filters_pending_site(tmp_path):
     records.end(profile, "https://example.com")
     browser_grant_copy.merge(profile, [first, second])
     assert launch._read_cookies(launch.kept_signins_path(profile)) == [second]
+
+
+SID = {"name": "sid", "value": "one", "domain": ".example.com", "path": "/"}
+
+
+def _copy_and_holder(tmp_path, monkeypatch, calls, cleared=None):
+    profile = str(tmp_path / "profile")
+    holder = runtime(profile)
+    holder.record.terminal_state = "running"
+    copy = runtime(profile)
+    copy.record = SimpleNamespace(profile=None, site_profile=profile, copy_of="thread", thread_id="copy",
+                                  session="s-copy", terminal_state="resetting")
+    copy.chrome = SimpleNamespace(endpoint="ws://copy", closed=False)
+    parent = owner(holder)
+    parent._sessions["copy"] = copy
+
+    class Cdp:
+        def __init__(self, endpoint, **_kwargs):
+            self.endpoint = endpoint
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, method, **params):
+            if method == "Storage.getCookies":
+                return {"cookies": [SID]}
+            if cleared is not None:  # A clear not held off by the holder's lock runs to its end here.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(cleared.wait(), 1)
+            calls.append(("set", self.endpoint, [cookie["domain"] for cookie in params["cookies"]]))
+            return {}
+    monkeypatch.setattr(launch.browser_cdp, "CdpClient", Cdp)
+    monkeypatch.setattr(launch, "resolve_profile", AsyncMock(return_value=(profile, None)))
+    return profile, holder, copy, parent
+
+
+@pytest.mark.asyncio
+async def test_a_clear_started_after_kept_is_read_waits_until_set_cookies_ran(tmp_path, monkeypatch, reset_records):
+    calls, cleared = [], asyncio.Event()
+    profile, _holder, copy, parent = _copy_and_holder(tmp_path, monkeypatch, calls, cleared)
+    loop = asyncio.get_running_loop()
+    clears = []
+    original = browser_grant_copy.kept
+
+    def kept_then_end(path):
+        rows = original(path)  # Read before the end: the site is still in it.
+        records.end(profile, "https://example.com")
+        loop.call_soon_threadsafe(lambda: clears.append(
+            asyncio.ensure_future(cleanup.clear_running(parent, profile, "example.com", "revoked"))))
+        return rows
+
+    async def clear(endpoint, _site):
+        calls.append(("clear", endpoint))
+        cleared.set()
+    monkeypatch.setattr(browser_grant_copy, "kept", kept_then_end)
+    monkeypatch.setattr(cleanup.browser_site_clear, "clear", clear)
+    async with copy.command_lock:  # As _close_runtime holds it.
+        await launch.keep_copy_signins(parent, copy)
+    await asyncio.gather(*clears)
+    assert calls == [("set", "ws://test", [".example.com"]), ("clear", "ws://test"), ("clear", "ws://copy")]
+    assert launch._read_cookies(launch.kept_signins_path(profile)) == []
+    assert not records.pending(profile) and not records.fenced(profile)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy", ["timeout", "closed_while_waiting"])
+async def test_a_busy_or_closing_holder_leaves_kept_sign_ins_for_the_next_launch(tmp_path, monkeypatch, caplog, busy):
+    calls = []
+    profile, holder, copy, parent = _copy_and_holder(tmp_path, monkeypatch, calls)
+    monkeypatch.setattr(cleanup, "COMMAND_TIMEOUT", 0.05 if busy == "timeout" else 5)
+    await holder.command_lock.acquire()
+    closing = None
+    if busy == "closed_while_waiting":
+        async def close_holder():
+            await asyncio.sleep(0.05)
+            holder.record.terminal_state = "resetting"
+            holder.command_lock.release()
+        closing = asyncio.ensure_future(close_holder())
+    await launch.keep_copy_signins(parent, copy)
+    if closing is not None:
+        await closing
+    else:
+        holder.command_lock.release()
+        assert "kept browser sign-ins wait for the next launch (TimeoutError)" in caplog.text
+    assert calls == []
+    assert launch._read_cookies(launch.kept_signins_path(profile)) == [SID]
