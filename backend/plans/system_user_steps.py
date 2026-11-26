@@ -28,7 +28,10 @@ browser session ended): the person's Won't do through the same writer, with the
 caller's reason, which the agent's wake carries (``plan_wake.notify_closed``).
 The same receipt and already-ended rules apply.
 
-All three join the caller's write transaction when there is one.
+All three join the caller's write transaction when there is one. An ending has
+no plans route around it to drive the threads it woke, so once its write
+commits it hands them to the application loop itself (``_drive_after_commit``),
+as ``boundary.mutate``'s caller does for the person's own Done.
 """
 
 from __future__ import annotations
@@ -113,7 +116,7 @@ def close_user_step(db, node_id: str, *, reason: str, provenance: str) -> bool:
 def _end(
     db, node_id: str, caller: str, operation: str, params: dict, provenance: str, **word,
 ) -> bool:
-    from plans import user_settle
+    from plans import notifications, user_settle
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
@@ -121,19 +124,49 @@ def _end(
             raise errors.PlanInputError(f"{caller} ends only a step open_user_step opened")
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
             return False
-        user_settle.settle(
-            operation,
-            {"node_id": node_id, "expected_revision": node["revision"], **params},
-            f"{VERIFIER_PREFIX}{provenance}",
-            {"db": connection, "actor_id": None, "provenance": provenance},
-            **word,
-        )
+        woken: list[str] = []
+        with notifications.collect_wake_recipients(connection, woken):
+            user_settle.settle(
+                operation,
+                {"node_id": node_id, "expected_revision": node["revision"], **params},
+                f"{VERIFIER_PREFIX}{provenance}",
+                {"db": connection, "actor_id": None, "provenance": provenance},
+                **word,
+            )
+        _drive_after_commit(connection, woken)
         waiting = connection.execute(
             "SELECT COUNT(*) FROM plan_node_dependencies WHERE depends_on_node_id=?", (node_id,),
         ).fetchone()[0]
         log.info("%s %s step %s; %d task(s) waited on it", provenance,
                  "settled" if operation == "mark_done" else "closed", node_id, waiting)
         return True
+
+
+def _drive_after_commit(connection, woken: list[str]) -> None:
+    """Start the woken agents' Turns once this write commits (#3191).
+
+    Their wakes are durable in their FIFOs either way; with no application
+    loop (a script, a unit test) the next input claims them, as before.
+    """
+    if not woken:
+        return
+    import infra.app_loop as app_loop
+    from infra.database import TransactionOwnershipError
+    from infra.write_effects import after_commit
+    from plans.notifications import drive_threads
+
+    def submit() -> None:
+        try:
+            app_loop.submit(drive_threads(tuple(woken)))
+        except app_loop.AppLoopUnavailable:
+            log.debug("no application loop to drive %s; their wakes stay queued", woken)
+
+    try:
+        after_commit(connection, submit)
+    except TransactionOwnershipError:
+        # As plans_changed and the status drain do: the step's write stands and the wakes stay queued.
+        log.warning("woken agents %s not driven: the write's transaction is not owned here; "
+                    "their wakes stay queued", woken)
 
 
 def opened(db, plan_id: str, node_id: str) -> bool:

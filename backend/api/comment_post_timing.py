@@ -23,19 +23,28 @@ COMMENT_TIMING_HEADER = "X-Corsia-Comment-Timing"
 _NUMBER_DIGITS = 9
 _NUMBER = re.compile(rf"\d{{1,{_NUMBER_DIGITS}}}")
 _OUTCOMES = frozenset({"delivered", "failed", "timeout", "earlier"})
+# A refused post says how: ``failed:<status>`` or ``failed:<status>:<code>``, where code is the refusal's own short
+# machine name (``region_target``, ``selection_changed``), never its sentence, so no path or quote can ride along.
+# 32 characters: the longest kind a comment post can be refused with today is ``suggestion_empty_insertion``, 26 (the
+# others, from ``CommentActionError`` in comment_validation, image_regions, doc_images and comment_recipients, plus
+# ``selection_changed`` and ``not_commentable``, are 20 or fewer), so six characters of room remain. The browser's own
+# pattern in frontend/src/lib/stores/commentPostTiming.ts repeats this number.
+_CODE_CHARS = 32
+_FAILED = re.compile(rf"failed:\d{{3}}(?::[a-z][a-z_]{{0,{_CODE_CHARS - 1}}})?")
+_LONGEST_OUTCOME = len("failed:999:") + _CODE_CHARS
 _NUMBER_KEYS = frozenset({"n", "a", "cap", "ens", "pn", "rec", "total", "post", "app", "recms"})
 
 # The longest header the browser builds (timingHeaders in frontend/src/lib/stores/commentPostTiming.ts): a POST's own
 # n, a, cap and ens, plus the last finished post's report, pn, rec, out, total, post, app and recms, every one present:
 #   n, a, cap, ens, pn, total, post, app, recms: key, "=", up to 9 digits  -> 27 key chars + 9 * 10 = 117
 #   rec: "rec=" and 0 or 1                                                  ->   5
-#   out: "out=" and its longest outcome, "delivered"                        ->  13
+#   out: "out=" and its longest outcome, "failed:999:" and a 32-letter code ->  47
 #   10 commas between the 11 pairs                                          ->  10
-# 145 bytes. Anything longer is not a header the browser sent, so it is dropped whole.
+# 179 bytes. Anything longer is not a header the browser sent, so it is dropped whole.
 MAX_HEADER_BYTES = (
     sum(len(key) + 1 + _NUMBER_DIGITS for key in _NUMBER_KEYS - {"rec"})
     + len("rec=1")
-    + len("out=") + max(map(len, _OUTCOMES))
+    + len("out=") + _LONGEST_OUTCOME
     + len(_NUMBER_KEYS)
 )
 
@@ -55,7 +64,7 @@ def parse_comment_timing(raw: str | None) -> dict[str, int | str] | None:
             return None
         if key in _NUMBER_KEYS and _NUMBER.fullmatch(value):
             parsed[key] = int(value)
-        elif key == "out" and value in _OUTCOMES:
+        elif key == "out" and (value in _OUTCOMES or _FAILED.fullmatch(value)):
             parsed[key] = value
         else:
             return None

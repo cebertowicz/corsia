@@ -3,6 +3,7 @@ import { fromStore } from 'svelte/store';
 import { RequestRefused } from '$lib/api/docs';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
+import { postFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import { createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
@@ -164,7 +165,7 @@ export function createImageComments(context: {
 			id = await timedPost(press.clientId, () => submitDocumentComment(
 				() => (post ? post.create(region, text, taggedAgentIds, mentions, press) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions, press)),
 				(shown, message) => { toastId = shown; failure = message; },
-				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
+				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : (post?.failure ?? postFailureMessage)(error)),
 				// A changed diagram is told once its refresh ends (below): whether a box is left to say why depends on it.
 				(error) => isDiagramChanged(error) || inBox(),
 			));

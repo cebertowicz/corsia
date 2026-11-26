@@ -331,3 +331,27 @@ async def test_a_list_past_the_page_check_cap_stays_refused(plan, monkeypatch): 
         with pytest.raises(BrowserSessionError) as refused:
             await browser_control.require_page_access(THREAD, probe, ('open', 'https://example.com/'))
         assert str(refused.value) == browser_control.PAGE_CHECK_REFUSED
+
+
+@pytest.mark.asyncio
+async def test_the_saved_login_list_reads_a_password_pages_address_without_a_step(plan, monkeypatch):  # noqa: F811
+    """browser_fill's no-match list reads the page's address with no agent command, so no step opens for it."""
+    import tools.browser_saved_login as choice
+    from host_access.processes import PROCESS_OWNER
+
+    with _sites('form') as url, _chrome(url.replace('/page.html', '/phone.html')) as endpoint:
+        class Owner:
+            async def has_session(self, _thread_id):
+                return True
+
+            async def page_endpoint(self, _thread_id):
+                return endpoint
+
+        monkeypatch.setattr(PROCESS_OWNER, "browser_sessions", lambda: Owner())
+        assert (await _until(lambda: _visible_password(endpoint))) is True
+        assert await choice._page_url(THREAD) == url.replace('/page.html', '/phone.html')
+        assert _steps(plan["db"]) == []
+
+
+async def _visible_password(endpoint: str) -> bool | None:
+    return True if (await browser_cdp.page_password_probe(endpoint, {})).visible_nodes else None

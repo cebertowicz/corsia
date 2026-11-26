@@ -369,6 +369,19 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		expect(current!.controller.draft?.error).toBe(REASON);
 	});
 
+	it('names the server\'s reason for a refusal, as a live document does, and keeps the generic line for a 409', async () => {
+		open(); composerOnScreen();
+		current!.controller.setBody('Too terse'); flushSync();
+		const gone = '400 {"detail":"the image shots/a.png couldn’t be found.","kind":"region_target"}';
+		vi.mocked(addComment).mockRejectedValueOnce(new Error(gone));
+		await expect(current!.controller.submit('Too terse')).rejects.toThrow('400');
+		const reason = 'Couldn’t post the comment: the image shots/a.png couldn’t be found. Your draft is kept.';
+		expect(current!.controller.draft?.error).toBe(reason);
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('409 {"detail":"client_id collides with another artifact\'s comment"}'));
+		await expect(current!.controller.submit('Too terse')).rejects.toThrow('409');
+		expect(current!.controller.draft?.error).toBe(REASON);
+	});
+
 	it('in a toast when the composer closed while it posted; the composer opened again says why', async () => {
 		open(); composerOnScreen();
 		current!.controller.setBody('Too terse'); flushSync();

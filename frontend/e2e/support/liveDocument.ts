@@ -17,7 +17,7 @@ export interface LiveFrameLog {
 	sockets: WebSocket[];
 }
 
-function watchLiveFrames(page: Page): LiveFrameLog {
+export function watchLiveFrames(page: Page): LiveFrameLog {
 	const log: LiveFrameLog = { opened: new Map(), sockets: [] };
 	page.on('websocket', socket => {
 		if (new URL(socket.url()).pathname !== '/ws') return;
