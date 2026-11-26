@@ -335,7 +335,10 @@
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
 			height: var(--header-bottom);
-			padding-top: max(8px, calc(var(--safe-top) - 28px));
+			/* The row is centred at safe-top + 36px: the box is 64px below the inset, the same as a tab.
+			   In an installed iOS 27 app the system blurs the top of the page down to about safe-top +
+			   34px; the 18px row is sharp from there on, and fully sharp at this centre. */
+			padding-top: calc(var(--safe-top) + 8px);
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
@@ -348,14 +351,27 @@
 			display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-1);
 		}
 		.h-leading { display: contents; }
-		/* An even frosted bar: full blur and one flat tint over the whole header box, ending at its
-		   bottom edge. No gradient and no mask: WebKit masks the blurred backdrop too, so a fading
-		   mask shows the unblurred transcript through the lower header and ends in a hard line. */
+		/* One frosted surface from the top of the screen to the header bottom, with a progressive
+		   fade. WebKit masks the blurred backdrop too, so one masked layer lets the sharp
+		   transcript show through where it fades. Two layers instead: the full blur and tint
+		   (::before) fade out from the row centre to 6px above the bottom; a light blur over them
+		   (::after) runs 8px further, smoothing that fade and ending at the bottom edge. The masks'
+		   opaque stop is currentColor, the header's opaque --text-primary; only its alpha counts. */
 		.shell-header::before {
-			background-image: none;
-			background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);
-			-webkit-mask-image: none;
-			mask-image: none;
+			background-image: linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--safe-top) + 36px),
+				transparent 100%
+			);
+			-webkit-mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));
+			mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));
+		}
+		.shell-header::after {
+			content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+			backdrop-filter: var(--glass-blur-soft);
+			-webkit-backdrop-filter: var(--glass-blur-soft);
+			-webkit-mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
+			mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }
@@ -374,8 +390,8 @@
 		.h-act.overflowable { display: none; }
 		.h-overflow { display: flex; }
 	}
-	/* With reduced transparency --glass-blur is none (app.css), so the phone bar is solid. */
+	/* With reduced transparency the blurs are none (app.css), so the phone bar is solid. */
 	@media (max-width: 768px) and (prefers-reduced-transparency: reduce) {
-		.shell-header::before { background-color: var(--header-top-base); }
+		.shell-header::before { background-image: none; background-color: var(--header-top-base); -webkit-mask-image: none; mask-image: none; }
 	}
 </style>

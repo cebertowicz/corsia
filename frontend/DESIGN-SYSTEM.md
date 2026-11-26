@@ -681,21 +681,31 @@ Two compensating patterns:
    transparent-body trick that lets desktop vibrancy through becomes a
    non-matching color behind the iOS status bar; pinning to primary keeps
    the status-bar bg (driven by theme-color meta) seamless. The installed
-   iOS app uses `apple-mobile-web-app-status-bar-style=default`, so the
-   system draws the status bar above the page and the page starts below
-   it; in that standalone mode `100vh` is the full screen height while
-   the layout viewport is shorter, so the shell sizes to `100dvh` under
+   iOS app uses `apple-mobile-web-app-status-bar-style=black-translucent`,
+   so the page runs under the clock and content scrolls up behind it
+   (`default` draws an opaque white bar above the page, white in dark mode
+   too). In standalone mode `100vh` is the full screen height while the
+   layout viewport can be shorter, so the shell sizes to `100dvh` under
    `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
-2. **Even frosted bar on the phone header** (`Header.svelte`
-   `.shell-header::before` at `max-width: 768px`): `--glass-blur` with one
-   flat tint and no gradient or mask:
+   iOS 27 draws its own soft blur over the top of the page, down to about
+   `safe-top + 34px` in the installed app; anything placed there reads
+   blurred. Keep a text row centred at `safe-top + 36px` or lower (the
+   phone header row sits exactly there).
+2. **One frosted surface on the phone header** (`Header.svelte` at
+   `max-width: 768px`), from the top of the screen to the header bottom,
+   fading out at the bottom over two stacked blur layers:
    ```css
-   background-image: none;
-   background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);
-   mask-image: none;
+   /* ::before: full --glass-blur and the 72% tint, fading from the row centre */
+   background-image: linear-gradient(180deg,
+     color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--safe-top) + 36px),
+     transparent 100%);
+   mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));
+   /* ::after: --glass-blur-soft, smoothing that fade to the bottom edge */
+   mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
    ```
-   No mask: WebKit masks the blurred backdrop too, so a fading mask shows
-   the unblurred content through the lower header and ends in a hard line.
+   Never one masked layer: WebKit masks the blurred backdrop too, so a
+   single fading layer shows sharp content through the fade and ends in a
+   hard line. A flat unmasked tint reads as a slab with a hard bottom edge.
    Under `prefers-reduced-transparency` the bar is solid
    `--header-top-base`. Replaces the inset rim on mobile (which read as a
    hairline seam between iOS status bar and our chrome).
@@ -1181,7 +1191,7 @@ The app's outer shell coordinates four moving parts:
 
 **On mobile / PWA:** body pins to `--bg-primary` (no vibrancy behind);
 sidebar still uses thick glass but blurs `--bg-secondary` rather than the
-desktop. The phone header is an even frosted bar with a flat tint (§2.13).
+desktop. The phone header is one frosted surface that fades out at its bottom (§2.13).
 
 **`AppShellBar`** is a slim chrome strip used on non-chat views (Settings,
 Project) — same drag region + traffic-light inset as ChatHeader, but
@@ -1207,7 +1217,7 @@ the `Section` primitive (different aesthetic — see §3.6 note).
 `ChatHeader` and `AppShellBar` use `--glass-thin` + `--glass-blur` +
 `--glass-rim`. Height = `var(--header-height)` (60 desktop / 64 mobile; 44 Tauri shell — set via `[data-shell="tauri"]`).
 
-**Mobile:** rim suppressed; the bar is an even frosted bar with a flat tint (§2.13).
+**Mobile:** rim suppressed; the bar is one frosted surface that fades out at its bottom (§2.13).
 
 **Tauri shell:** `:global(html[data-shell="tauri"]) .header.shell-inset`
 adds `padding-left: 88px` when sidebar collapsed (clears traffic lights).
@@ -1300,7 +1310,7 @@ Use `--safe-bottom` and `--safe-top`. Examples:
 - InputBar bottom padding includes `var(--safe-bottom)`.
 
 ### 6.3 Mobile glass header
-An even frosted bar replaces the inset rim on the phone header. See §2.13 for the recipe.
+One frosted surface, fading out at its bottom, replaces the inset rim on the phone header. See §2.13 for the recipe.
 
 ### 6.4 Swipe gestures
 Sidebar session rows: rubber-band 0.35×, dominance 1.4×, haptic blip on
