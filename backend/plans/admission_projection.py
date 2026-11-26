@@ -174,7 +174,7 @@ def _facts(node_plans, *, db, memo=None) -> _Facts:
     ``memo`` carries the plan states a delegated step's wait reads, so a
     projection that walks related plans walks each of them once.
     """
-    from plans import wait_causes
+    from plans import decision_waits, wait_causes
 
     pairs = list(node_plans)
     holds, dependencies, watches, attempts = _indexes(
@@ -187,7 +187,7 @@ def _facts(node_plans, *, db, memo=None) -> _Facts:
         watches,
         attempts,
         in_flight,
-        wait_causes.decision_causes(pairs, db=db),
+        decision_waits.decision_causes(pairs, db=db),
         wait_causes.delegation_causes(pairs, db=db, memo=memo),
         wait_causes.paused_since(pairs, db=db),
     )
