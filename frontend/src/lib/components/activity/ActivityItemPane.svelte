@@ -339,7 +339,7 @@
 				{/if}
 			{/snippet}
 			{#if missingDraft}
-				<MissingDraft artifactId={missingArtifact} {offline} {onActed}>{@render chatButton()}</MissingDraft>
+				<MissingDraft artifactId={missingArtifact} draftId={item.external_id} unconfirmed={'unconfirmed' in item.detail && item.detail.unconfirmed === true} {offline} {onActed}>{@render chatButton()}</MissingDraft>
 			{:else}
 				{#if item.kind === 'draft'}<p class="dctx" role="status">Couldn’t open this draft from Activity. Open its chat to find the file.</p>{/if}
 				{@render chatButton()}

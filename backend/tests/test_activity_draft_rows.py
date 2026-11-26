@@ -188,7 +188,13 @@ async def test_missing_registered_draft_remains_and_can_be_discarded(mail, monke
         assert row['detail']['missing'] is True
         assert row['open'] is None
         assert row['detail']['artifact_id'] == artifact_id
-        assert row['title'] == 'Send: email draft'
+        assert row['title'] == 'Email draft'
+        assert row['detail']['unconfirmed'] is False
+        db.execute("UPDATE action_drafts SET state='sending' WHERE id=?", (saved['draft_id'],))
+        db.commit()
+        assert draft_rows(db, owner['id'])[0]['detail']['unconfirmed'] is True
+        db.execute("UPDATE action_drafts SET state='open' WHERE id=?", (saved['draft_id'],))
+        db.commit()
         assert draft_rows(db, owner['id'], subjects=False)[0]['external_id'] == saved['draft_id']
 
         async def tell(*args, **kwargs):

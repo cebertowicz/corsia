@@ -72,7 +72,7 @@ export interface ActivityQueueItem {
 		| ActivityReviewDetail
 		| ActivityTaskDetail
 		| ActivityDocumentDetail
-		| { artifact_id: string | null; missing?: boolean; unread_replies?: number };
+		| { artifact_id: string | null; missing?: boolean; unconfirmed?: boolean; unread_replies?: number };
 }
 
 export interface ActivityQueue {

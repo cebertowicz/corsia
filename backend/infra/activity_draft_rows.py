@@ -69,7 +69,7 @@ def draft_rows(db, user_id: str, *, subjects: bool = True) -> list[dict]:
     including an unsaved live edit, are the source for the displayed subject.
     """
     rows = db.execute(
-        """SELECT d.id, d.path, d.created_at, t.id AS thread_id, t.title AS thread_title,
+        """SELECT d.id, d.path, d.state, d.created_at, t.id AS thread_id, t.title AS thread_title,
                   t.project_id, t.spawned_by, p.name AS project_name
              FROM action_drafts d JOIN threads t ON t.id=d.thread_id
              LEFT JOIN projects p ON p.id=t.project_id
@@ -119,12 +119,12 @@ def draft_rows(db, user_id: str, *, subjects: bool = True) -> list[dict]:
         title = ('email draft' if missing else _subject(raw, fallback)) if subjects else fallback
         result.append({
             'key': f"draft:{row['id']}", 'external_id': row['id'],
-            'renderer': 'draft', 'kind': 'draft', 'title': clip_title(f'Send: {title}'),
+            'renderer': 'draft', 'kind': 'draft', 'title': 'Email draft' if missing else clip_title(f'Send: {title}'),
             'raised_at': row['created_at'],
             'source': {'thread_id': row['thread_id'], 'thread_label': row['thread_title'] or 'Untitled thread',
                        'project_id': row['project_id'], 'project_label': row['project_name'],
                        'parent_reviewed': row['spawned_by'] is not None},
             'open': {'path': absolute, 'artifact_id': artifact_id} if not missing else None,
-            'detail': {'artifact_id': artifact_id, 'missing': missing}, 'priority': 0,
+            'detail': {'artifact_id': artifact_id, 'missing': missing, 'unconfirmed': row['state'] == 'sending'}, 'priority': 0,
         })
     return result
