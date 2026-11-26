@@ -30,7 +30,7 @@ def _columns(db, table: str) -> set[str]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 210
+    assert SCHEMA_VERSION == 211
 
 
 def test_fresh_schema_creates_the_presence_tables():
