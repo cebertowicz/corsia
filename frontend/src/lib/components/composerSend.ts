@@ -39,9 +39,13 @@ function blockedSendText(cause: ReplySendBlock, noun: 'comment' | 'reply'): stri
 	return `Couldn’t send this ${noun} because the connection is unavailable. Your ${noun} stays here; try again.`;
 }
 
+/** Only a chat with no model to answer waits for the person; a restart or a lost connection passes. */
 function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
-	throw new CommentSendRefused(blockedSendText(cause, noun));
+	throw new CommentSendRefused(blockedSendText(cause, noun), false, cause !== 'noModel');
 }
+
+/** Statuses where nothing was refused: the same post may go later (a session to sign in again, a timeout, too many requests, a server error). */
+const passing = (status: number) => status === 401 || status === 408 || status === 429 || status >= 500;
 
 /**
  * Whether the person can raise this chat's model's context window in its details, by the model details' own rule
@@ -75,7 +79,7 @@ async function adoptPosted(response: Response, threadId: string, noun: 'comment'
 	const result = await response.json().catch(() => null);
 	if (!response.ok) {
 		const failure = commentFailure(result?.detail, result?.reference, noun, act, threadId);
-		throw new CommentSendRefused(failure.text, failure.final);
+		throw new CommentSendRefused(failure.text, failure.final, passing(response.status));
 	}
 	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }

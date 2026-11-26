@@ -409,3 +409,106 @@ describe('a pressed reply on a document’s or an image’s thread goes on its o
 		expect(get(page.toast.toasts).map((toast) => toast.message)).toEqual([expect.stringMatching(/^Your comment on notes\.md, “Agreed, Monday works”: /)]);
 	});
 });
+
+describe('a pressed chat comment or reply goes on its own', () => {
+	// Where its box's press keeps it going: the chat, the message by id and seq, and the passage with its whole message around it.
+	const CHAT = { threadId: 'thread-1', messageId: 'm1', seq: 3, from_off: 4, to_off: 10, quote: 'Friday', anchor_prefix: 'Due ', anchor_suffix: ' noon' };
+	const REPLY = { ...CHAT, root_user_message_id: 'input-1', root_cid: 'cid-1' };
+	type Answer = { ok: boolean; status: number; json: () => Promise<unknown> };
+	let answers: (Answer | Error)[] = [];
+	const chatPosts = vi.fn<(body: Record<string, unknown>) => void>();
+	beforeEach(() => {
+		answers = []; chatPosts.mockClear();
+		vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+			if (!String(url).includes('/chat-comments')) return { ok: true, status: 200, json: async () => ({}) };
+			chatPosts(JSON.parse(String(init?.body)));
+			const next = answers.shift() ?? { ok: true, status: 200, json: async () => ({ messages: [] }) };
+			if (next instanceof Error) throw next;
+			return next;
+		}));
+	});
+	afterEach(() => { vi.unstubAllGlobals(); });
+	const answer = (status: number, detail: string) => ({ ok: false, status, json: async () => ({ detail, reference: 'ref-9' }) });
+
+	/** Typed on its passage (a reply, in its comment's thread), then Comment or Send pressed on it, as its box does. */
+	function pressedChat(page: Page, reply = false) {
+		const body = reply ? 'Agreed, Monday works' : 'Move it to Monday please', tags = page.tags.createMentionSelection(body), drafts = page.drafts.keptCommentDrafts;
+		const key = reply ? page.drafts.replyDraftKey(page.drafts.CHAT_REPLY_SCOPE, 'comment-1') : page.drafts.chatDraftKey('thread-1', 'm1', CHAT);
+		if (reply) drafts.keepReply(key, body, tags);
+		else drafts.keep(key, body, tags, { from: 4, to: 10, quote: 'Friday', prefix: 'Due ', suffix: ' noon' });
+		return { key, body, press: drafts.claim(key, body, tags, undefined, { chat: reply ? REPLY : CHAT, name: 'Launch plan' }) };
+	}
+
+	it.each([['a new comment', false], ['a reply', true]] as const)('%s: after a reload, to the chat on its kept message and passage, under its press’s id, and a second try is the same input', async (_name, reply) => {
+		const { key, body, press } = pressedChat(await open(), reply);
+		answers.push(new TypeError('Failed to fetch'));
+		const page = await open();
+		await connect(page);
+		expect(page.queue.unsentComments.sending(key)).toBe(true);
+		await connect(page);
+		expect(chatPosts).toHaveBeenCalledTimes(2);
+		const [first, again] = chatPosts.mock.calls.map(([sent]) => sent as { input_id: string; comment: Record<string, unknown> });
+		// The server stores one input per id: both tries are the same input, so it is stored once.
+		expect([first.input_id, again.input_id]).toEqual([press.clientId, press.clientId]);
+		expect(first.comment).toMatchObject({ seq: 3, from_off: 4, to_off: 10, quote: 'Friday', anchor_prefix: 'Due ', anchor_suffix: ' noon', note: body, ...(reply ? { root_user_message_id: 'input-1', root_cid: 'cid-1' } : {}) });
+		if (!reply) expect(first.comment.root_cid).toBeUndefined();
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+		expect(get(page.toast.toasts)).toHaveLength(0);
+	});
+
+	it.each([
+		['its quote is gone', 400, 'comment_quote_gone', 'The text this comment quotes isn’t in the chat'],
+		['the chat is deleted', 404, 'chat_not_found', 'This chat is deleted'],
+		['the chat’s model is too small', 409, 'comment_model_cap', 'too small a context window'],
+		['any other refusal', 400, 'comment_not_sent', 'Couldn’t send this comment. Try again. Reference: ref-9'],
+	])('%s: refused for good, kept with its words, and a notice names the chat', async (_name, status, detail, says) => {
+		const page = await open(), { key } = pressedChat(page);
+		answers.push(answer(status, detail));
+		await connect(page);
+		await connect(page);
+		await returnToApp(page);
+		expect(chatPosts).toHaveBeenCalledTimes(1);
+		expect(page.drafts.keptCommentDrafts.get(key)).toMatchObject({ body: 'Move it to Monday please' });
+		expect(page.drafts.keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(page.queue.unsentComments.sending(key)).toBe(false);
+		expect(get(page.toast.toasts).map((toast) => toast.message)).toEqual([expect.stringContaining('Your comment on Launch plan, “Move it to Monday please”: ')]);
+		expect(get(page.toast.toasts)[0].message).toContain(says);
+	});
+
+	it.each([
+		['no connection', new TypeError('Failed to fetch')],
+		['a server error', answer(500, 'comment_not_stored')],
+		['a session to sign in again', answer(401, 'sign_in_required')],
+		['too many requests', answer(429, 'too_many')],
+	] as const)('%s: says nothing and goes again on the next trigger', async (_name, first) => {
+		const page = await open(), { key } = pressedChat(page);
+		answers.push(first);
+		await connect(page);
+		expect(page.queue.unsentComments.sending(key)).toBe(true);
+		expect(get(page.toast.toasts)).toHaveLength(0);
+		await connect(page);
+		expect(chatPosts).toHaveBeenCalledTimes(2);
+		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	it('a box’s own press: a restart passes, and only a chat with no model to answer waits for the person', async () => {
+		await open();
+		const outcome = await import('$lib/unsentCommentOutcome');
+		const { postChatComment } = await import('$lib/components/composerSend');
+		const reply = { id: 'c', input_id: 'i', ...CHAT, note: 'n' };
+		const restart = await postChatComment(reply as never, 'thread-1', true, true).catch((error: unknown) => error);
+		const noModel = await postChatComment(reply as never, 'thread-1', false, false).catch((error: unknown) => error);
+		expect([outcome.unsentOutcome(restart), outcome.unsentOutcome(noModel)]).toEqual(['retry', 'refused']);
+		expect(chatPosts).not.toHaveBeenCalled();
+	});
+
+	it('a typed chat comment, never pressed, never goes', async () => {
+		const page = await open(), tags = page.tags.createMentionSelection('Typed only');
+		const key = page.drafts.chatDraftKey('thread-1', 'm1', CHAT);
+		page.drafts.keptCommentDrafts.keep(key, 'Typed only', tags, { from: 4, to: 10, quote: 'Friday', prefix: 'Due ', suffix: ' noon' });
+		await connect(page); await returnToApp(page);
+		page.queue.unsentComments.open(key); await page.queue.unsentComments.settled();
+		expect(chatPosts).not.toHaveBeenCalled();
+		expect(page.drafts.keptCommentDrafts.get(key)?.body).toBe('Typed only');
+	});
+});

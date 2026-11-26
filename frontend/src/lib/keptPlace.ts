@@ -75,10 +75,14 @@ export function uniquePlaceOf(text: string, from: number, to: number, quote = te
 
 /**
  * Whether a chat passage is still at its kept offsets in its message's rendered text. A sent message does not change, so
- * the offsets are exact: the quote and everything before and after it must read as kept (a table's cells included, which
- * the rendered text joins with nothing between them).
+ * the offsets are exact: the quote and its kept sides must read there as kept (a table's cells included, which the rendered
+ * text joins with nothing between them). A repeat of the words elsewhere in the message is never taken for it.
  */
-export function chatPlaceHolds(text: string, anchor: ChatCommentAnchor): boolean {
-	return text.slice(anchor.from_off, anchor.to_off) === anchor.quote
-		&& text.slice(0, anchor.from_off) === anchor.anchor_prefix && text.slice(anchor.to_off) === anchor.anchor_suffix;
+export function chatPlaceHolds(text: string, place: KeptPlace): boolean {
+	return text.slice(place.from, place.to) === place.quote && before(text, place.from) === place.prefix && after(text, place.to) === place.suffix;
+}
+
+/** A chat passage as a press posts it: its quote with the whole of its message's text before and after it. */
+export function chatAnchorAt(text: string, from: number, to: number): ChatCommentAnchor {
+	return { from_off: from, to_off: to, quote: text.slice(from, to), anchor_prefix: text.slice(0, from), anchor_suffix: text.slice(to) };
 }

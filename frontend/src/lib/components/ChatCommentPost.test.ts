@@ -1,10 +1,11 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { get } from 'svelte/store';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
 import { workspaceModels } from '$lib/stores/models';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { SENDING, unsentComments } from '$lib/stores/unsentComments.svelte';
 import { user } from '$lib/stores/auth';
 import { unsentSends } from '$lib/chatCommentDelivery';
 import { commentFailure, postChatComment, retryChatComment } from './composerSend';
@@ -17,6 +18,8 @@ vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
 const sentEvents = () => vi.mocked(emitProductEvent).mock.calls.filter(([surface, event]) => surface === 'composer' && event === 'sent');
 
 let host: HTMLElement;
+/** What the chat brought into view, each element once per call. */
+const scrolled = vi.fn<(this: HTMLElement, options?: ScrollIntoViewOptions) => void>();
 let component: Record<string, unknown> | null = null;
 const anchor = { from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: ' more' };
 const second = { from_off: 5, to_off: 9, quote: 'more', anchor_prefix: 'text ', anchor_suffix: '' };
@@ -26,18 +29,22 @@ function deferred() {
 	const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
 	return { promise, resolve, reject };
 }
-function setup(send: (reply: SendableChatComment) => Promise<void> = () => Promise.resolve(), width = 1440) {
+/** The chat's assistant messages, top to bottom, by id and rendered text. */
+type Bodies = Record<string, string>;
+function setup(send: (reply: SendableChatComment) => Promise<void> = () => Promise.resolve(), width = 1440, bodies: Bodies = { m1: 'text more' }) {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
 	vi.stubGlobal('cancelAnimationFrame', () => {});
 	vi.stubGlobal('innerWidth', width);
 	Object.defineProperty(Range.prototype, 'getClientRects', { value: () => [{ top: 120, bottom: 140, left: 10, right: 60 }], configurable: true });
+	Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: scrolled, configurable: true });
 	host = document.createElement('div');
-	host.innerHTML = '<div class="messages"><div class="message assistant" data-message-id="m1"><div class="long-message-body">text more</div></div></div><div id="mount"></div>';
+	const rows = Object.entries(bodies);
+	host.innerHTML = `<div class="messages">${rows.map(([id, text]) => `<div class="message assistant" data-message-id="${id}"><div class="long-message-body">${text}</div></div>`).join('')}</div><div id="mount"></div>`;
 	document.body.append(host);
 	activeThreadId.set('thread');
-	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [] }] as never);
+	messages.set(rows.map(([id], index) => ({ id, thread_id: 'thread', role: 'assistant', seq: index + 1, chat_comments: [] })) as never);
 	component = mount(Host, { target: host.querySelector('#mount')!, props: { onSendReply: send } });
 }
 async function settle() { for (let i = 0; i < 3; i++) { await tick(); flushSync(); } }
@@ -71,8 +78,8 @@ afterEach(() => {
 	vi.mocked(emitProductEvent).mockClear();
 	threads.set([]); workspaceModels.set([]);
 	for (const on of [anchor, second]) chatCommentDrafts.dropRoot('thread', 'm1', { ...on, quote: '', anchor_prefix: '', anchor_suffix: '' });
-	keptCommentDrafts.reset(); localStorage.clear();
-	Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.unstubAllGlobals();
+	keptCommentDrafts.reset(); unsentComments.reset(); localStorage.clear();
+	Reflect.deleteProperty(Range.prototype, 'getClientRects'); Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView'); scrolled.mockClear(); vi.unstubAllGlobals();
 });
 
 it('holds the text read-only while it posts, shows a refusal in the box, and closes once a retry is stored', async () => {
@@ -113,10 +120,12 @@ it('keeps a refused draft for its passage while another chat is showing', async 
 	expect(chatCommentDrafts.root('thread', 'm1', anchor)).toMatchObject({ text: 'keep this', error: 'The selected text changed.' });
 });
 
-it('keeps the text with a failure nobody named', async () => {
+// A failure nobody named may pass, so the pressed comment reads "Sending…" and goes again on its own; it names no failure.
+it('keeps the text with a failure nobody named, and reads Sending… for it', async () => {
+	user.set({ id: 'person-1', name: 'person-1' });
 	setup(() => Promise.reject(new Error('socket closed'))); await openBox(); await post();
-	expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t send this comment. Try again.');
-	expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry');
+	expect(host.querySelector('[role="alert"]')).toBeNull();
+	expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING);
 	expect(chatCommentDrafts.root('thread', 'm1', anchor)?.text).toBe('Keep my comment');
 });
 
@@ -193,14 +202,17 @@ it('keeps the text with the generic sentence and its reference when the route na
 	expect(get(messages).map(row => row.id)).toEqual(['m1']);
 });
 
-it('sends the same request again when the first press got no answer, so the server stores one comment', async () => {
+it('sends the same request again on its own when the first press got no answer, so the server stores one comment', async () => {
 	const ok = { ok: true, json: async () => ({ messages: [] }) };
 	const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('network down')).mockResolvedValueOnce(ok);
 	vi.stubGlobal('fetch', fetchMock);
+	user.set({ id: 'person-1', name: 'person-1' });
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post('Sent twice, stored once');
-	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
-	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click();
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING); });
+	expect(host.querySelector('[role="alert"]')).toBeNull();
+	// The next trigger (the chat opened again, the connection back, a return to the app) sends it with no press.
+	unsentComments.open(chatCommentDrafts.rootKey('thread', 'm1', anchor)); await unsentComments.settled();
 	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 	const [first, again] = fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)));
 	// The server stores one input per id, so the retry is the same request: one id, the same words and place. Only the box's own per-press comment id differs, which the route never reads.
@@ -217,9 +229,10 @@ it('posts a new draft of the same words under its own new id, not under the id o
 	const ok = { ok: true, json: async () => ({ messages: [] }) };
 	const fetchMock = vi.fn().mockResolvedValueOnce(fail).mockResolvedValueOnce(ok);
 	vi.stubGlobal('fetch', fetchMock);
+	user.set({ id: 'person-1', name: 'person-1' });
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post('Same words');
-	await vi.waitFor(() => { flushSync(); expect(host.querySelector('[role="alert"]')).not.toBeNull(); });
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING); });
 	host.querySelector<HTMLButtonElement>('button.cancel')!.click(); await settle();
 	// The person starts over on the same passage with the same words: a new draft, so a new input.
 	await openBox(); await post('Same words');
@@ -237,16 +250,15 @@ it('posts the comment as the input its kept draft’s client id names, again on 
 	user.set({ id: 'person-1', name: 'person-1' });
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post('Posted under one id');
-	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING); });
 	// Read as the device holds it, so the leg asks only what a person's restart would find.
 	const onDevice = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)!).filter(name => name.startsWith('corsia:commentDraft:v1:'))
 		.map(name => JSON.parse(localStorage.getItem(name)!) as { body: string; clientId?: string });
 	expect(onDevice).toHaveLength(1);
 	const kept = onDevice[0];
 	expect(kept.clientId).toBeTruthy();
+	// Opened again, the chat sends its pressed comment on its own: no press.
 	relaunch(1440, reply => postChatComment(reply, 'thread', false, true));
-	await openBox();
-	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click();
 	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 	expect(fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)).input_id)).toEqual([kept.clientId, kept.clientId]);
 });
@@ -355,7 +367,7 @@ it('shows a Retry answered with a cancelled comment in that state, with no error
 /** The app is left and opened again over the same device storage: nothing of the page is kept. */
 function relaunch(width: number, send?: (reply: SendableChatComment) => Promise<void>) {
 	unmount(component as never); component = null; host.remove();
-	keptCommentDrafts.reset(); user.set({ id: 'person-1', name: 'person-1' });
+	keptCommentDrafts.reset(); unsentComments.reset(); user.set({ id: 'person-1', name: 'person-1' });
 	setup(send, width);
 }
 
@@ -374,4 +386,121 @@ it.each([['the margin column', 1440, false], ['the popover', 1440, true], ['the 
 	if (popover) host.querySelector<HTMLButtonElement>('[data-toggle-margin]')!.click();
 	await openBox();
 	expect(typedBox()?.value).toBe('A comment I did not send');
+});
+
+// A chat opened with kept comments in it: every pressed one goes, and one box opens on its passage (QC1-QC3).
+describe('a chat opened with kept comments in it', () => {
+	const lower = { from_off: 0, to_off: 5, quote: 'other', anchor_prefix: '', anchor_suffix: ' words' };
+	const twoMessages = { m1: 'text more', m2: 'other words' };
+	type Chat = { messageId: string; seq: number; anchor: typeof anchor };
+	const upperAt: Chat = { messageId: 'm1', seq: 1, anchor };
+	const lowerAt: Chat = { messageId: 'm2', seq: 2, anchor: lower };
+	/** Typed on its passage, as the box keeps it; pressed, with where its post goes, as the box's Comment keeps it. */
+	function kept(at: Chat, body: string, pressed: boolean): string {
+		chatCommentDrafts.setRoot('thread', at.messageId, at.anchor, body);
+		const key = chatCommentDrafts.rootKey('thread', at.messageId, at.anchor);
+		if (pressed) keptCommentDrafts.claim(key, body, keptCommentDrafts.get(key)!.mentionSelection, undefined, { chat: { threadId: 'thread', messageId: at.messageId, seq: at.seq, ...at.anchor } });
+		return key;
+	}
+	/** The chat route's posts, answered by `answer` (stored, by default). */
+	function chatRoute(answer: () => Promise<unknown> = async () => ({ ok: true, json: async () => ({ messages: [] }) })) {
+		const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => String(url).includes('/chat-comments') ? answer() : { ok: true, json: async () => ({}) });
+		vi.stubGlobal('fetch', fetchMock);
+		return () => fetchMock.mock.calls.filter(([url]) => String(url).includes('/chat-comments')).map(([, init]) => JSON.parse(String(init?.body)) as { input_id: string; comment: { note: string; seq: number } });
+	}
+	const send = (reply: SendableChatComment) => postChatComment(reply, 'thread', false, true);
+	beforeEach(() => { user.set({ id: 'person-1', name: 'person-1' }); });
+	afterEach(() => { chatCommentDrafts.dropRoot('thread', 'm2', lower); });
+
+	it('opens a pressed comment on its passage reading Sending…, brings it into view, and closes once it posts', async () => {
+		let answer!: () => void;
+		const posts = chatRoute(() => new Promise(resolve => { answer = () => resolve({ ok: true, json: async () => ({ messages: [] }) }); }));
+		const key = kept(upperAt, 'Pressed before the reload', true);
+		const { clientId } = keptCommentDrafts.get(key)!;
+		setup(send); await settle();
+		expect(box()?.value).toBe('Pressed before the reload');
+		expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING);
+		const pending = host.querySelector<HTMLElement>('.cm-comment-pending');
+		expect(pending?.textContent).toBe('text');
+		expect(scrolled.mock.contexts).toEqual([pending]);
+		await vi.waitFor(() => expect(posts()).toHaveLength(1));
+		answer(); await unsentComments.settled();
+		await vi.waitFor(() => { flushSync(); expect(box()).toBeNull(); });
+		expect(posts().map(post => post.input_id)).toEqual([clientId]);
+		expect(keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	it('opens a typed comment on its passage with its words, and sends nothing', async () => {
+		const posts = chatRoute();
+		kept(upperAt, 'Typed, never pressed', false);
+		setup(send); await settle();
+		expect(box()?.value).toBe('Typed, never pressed');
+		expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Comment');
+		await unsentComments.settled();
+		expect(posts()).toEqual([]);
+	});
+
+	it('opens the pressed comment over a typed one further down', async () => {
+		chatRoute(() => new Promise(() => {}));
+		kept(upperAt, 'Pressed, higher up', true);
+		kept(lowerAt, 'Typed, further down', false);
+		setup(send, 1440, twoMessages); await settle();
+		expect(box()?.value).toBe('Pressed, higher up');
+	});
+
+	it('with two pressed, opens the lower one, and posts each exactly once', async () => {
+		let open = true;
+		const held: (() => void)[] = [];
+		const posts = chatRoute(() => new Promise(resolve => {
+			const stored = () => resolve({ ok: true, json: async () => ({ messages: [] }) });
+			if (open) held.push(stored); else stored();
+		}));
+		const upper = kept(upperAt, 'Pressed, higher up', true), below = kept(lowerAt, 'Pressed, further down', true);
+		const ids = [keptCommentDrafts.get(upper)!.clientId, keptCommentDrafts.get(below)!.clientId];
+		setup(send, 1440, twoMessages); await settle();
+		expect(box()?.value).toBe('Pressed, further down');
+		open = false;
+		for (const stored of held.splice(0)) stored();
+		await unsentComments.settled();
+		// One at a time, each under its own id, once; a later trigger finds nothing left to send.
+		unsentComments.open(upper); unsentComments.open(below); await unsentComments.settled();
+		expect(posts().map(post => post.input_id).sort()).toEqual([...ids].sort());
+		expect(keptCommentDrafts.get(upper)).toBeUndefined();
+		expect(keptCommentDrafts.get(below)).toBeUndefined();
+		await vi.waitFor(() => { flushSync(); expect(box()).toBeNull(); });
+	});
+
+	it('opens one whose passage no longer reads as kept at its message, on no text, with why and Cancel, and sends nothing', async () => {
+		const posts = chatRoute();
+		const key = kept(upperAt, 'Its passage changed', true);
+		setup(send, 1440, { m1: 'rewritten text' }); await settle();
+		expect(box()?.value).toBe('Its passage changed');
+		expect(host.querySelector('[role="alert"]')?.textContent).toBe(commentFailure('comment_quote_gone', null, 'comment', 'sent', 'thread').text);
+		expect(host.querySelector('[role="dialog"] button.submit')).toBeNull();
+		expect(host.querySelector('.cm-comment-pending')).toBeNull();
+		await unsentComments.settled();
+		expect(posts()).toEqual([]);
+		expect(keptCommentDrafts.get(key)?.send).toBeUndefined();
+		host.querySelector<HTMLButtonElement>('[role="dialog"] button.cancel')!.click(); await settle();
+		expect(box()).toBeNull();
+		expect(keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	it('opens one kept on a table cell on that cell’s words', async () => {
+		chatRoute(() => new Promise(() => {}));
+		const cell = { from_off: 13, to_off: 19, quote: 'Friday', anchor_prefix: 'TaskDueLaunch', anchor_suffix: 'ReviewMonday' };
+		kept({ messageId: 'm1', seq: 1, anchor: cell }, 'On the launch date', true);
+		setup(send, 1440, { m1: '<table><tr><td>Task</td><td>Due</td></tr><tr><td>Launch</td><td>Friday</td></tr><tr><td>Review</td><td>Monday</td></tr></table>' });
+		await settle();
+		expect(box()?.value).toBe('On the launch date');
+		expect(host.querySelector('td .cm-comment-pending')?.textContent).toBe('Friday');
+		chatCommentDrafts.dropRoot('thread', 'm1', cell);
+	});
+
+	it('with no kept comment, opens no box and moves nothing into view', async () => {
+		chatRoute();
+		setup(send, 1440, twoMessages); await settle();
+		expect(box()).toBeNull();
+		expect(scrolled).not.toHaveBeenCalled();
+	});
 });

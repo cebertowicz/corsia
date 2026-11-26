@@ -10,8 +10,11 @@ import { posting } from './commentPostTiming';
 import { connectionState } from './connection';
 import { keptCommentDrafts } from './keptCommentDrafts.svelte';
 import { toasts } from './toast';
-import { replyOf, sendable, sendUnsent } from '$lib/unsentCommentSend';
+import { isChat, replyOf, sendable, sendUnsent } from '$lib/unsentCommentSend';
 import { unsentOutcome, unsentReason } from '$lib/unsentCommentOutcome';
+import { CommentSendRefused } from '$lib/chatCommentAnchors';
+import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
+import { CHAT_REPLY_SCOPE } from './commentDraftKeys';
 
 /** What a pressed comment's box, or a pressed reply's line, reads while it goes on its own. */
 export const SENDING = 'Sending…';
@@ -28,10 +31,11 @@ let pumping: Promise<void> | null = null;
 
 /**
  * The name of the draft's document or image, for a notice when no box of it is on screen: the one its press kept, else its
- * key's path; a reply's, the document or image its thread is on.
+ * key's path; a reply's, the document or image its thread is on. A chat's is its title, kept at its press.
  */
 function nameOf(key: string, kept: string | undefined): string {
 	if (kept) return kept;
+	if (onChat(key)) return 'a chat';
 	const reply = replyOf(key);
 	if (reply) return nameOf(reply.scope, undefined);
 	if (!key.startsWith('document:')) return 'an image';
@@ -48,21 +52,27 @@ function firstWords(body: string): string {
 	return words.length > 6 ? `${words.slice(0, 6).join(' ')}…` : words.join(' ');
 }
 
+/** A chat's new comment or a reply in a chat's comment thread: its box is chat's own (`chatCommentDrafts`). */
+const onChat = (key: string) => isChat(key) || replyOf(key)?.scope === CHAT_REPLY_SCOPE;
+
 /** It posted: an unedited draft goes, and its box with it, as when the person's own press posts. */
 function posted(key: string, text: string, taggedAgentIds: string[]): void {
-	if (keptCommentDrafts.posted(key, text, taggedAgentIds)) commentDraft.update((value) => value?.key === key ? null : value);
+	if (!keptCommentDrafts.posted(key, text, taggedAgentIds)) return;
+	if (onChat(key)) chatCommentDrafts.wentOnItsOwn(key);
+	else commentDraft.update((value) => value?.key === key ? null : value);
 }
 
 /**
  * It will not go as it is, or an earlier version went: the draft keeps its words with the reason and is never sent again
  * without the person. The reason shows in its box when one is on screen; otherwise a notice names the document, once.
  */
-function stopped(key: string, message: string, freshId: boolean): void {
+function stopped(key: string, message: string, freshId: boolean, final: boolean): void {
 	const draft = keptCommentDrafts.get(key);
 	if (!draft) return;
 	keptCommentDrafts.fail(key, draft.body, draft.mentionSelection, message, freshId);
 	keptCommentDrafts.unsend(key);
-	commentDraft.update((value) => value?.key === key ? { ...value, error: message } : value);
+	if (onChat(key)) chatCommentDrafts.refused(key, message, final);
+	else commentDraft.update((value) => value?.key === key ? { ...value, error: message } : value);
 	const toast = keptCommentDrafts.onScreen(key) ? null : toasts.show(`Your comment on ${nameOf(key, draft.send?.name)}, “${firstWords(draft.body)}”: ${message}`, 'error');
 	keptCommentDrafts.toast(key, toast);
 }
@@ -89,7 +99,7 @@ async function attempt(key: string, again = false): Promise<void> {
 		const outcome = unsentOutcome(error);
 		if (outcome === 'retry') return;
 		if (outcome === 'fresh' && !again && renewed(key)) return attempt(key, true);
-		stopped(key, unsentReason(error), outcome === 'earlier');
+		stopped(key, unsentReason(error), outcome === 'earlier', error instanceof CommentSendRefused && error.final);
 	}
 }
 

@@ -7,10 +7,21 @@ import type { ImageRegion } from '$lib/api/docs';
 import type { KeptPlace } from '$lib/keptPlace';
 
 /**
- * What a pressed draft's post needs once no box holds it: kept from its press until it posts, is refused or is edited.
- * `diagramSource`: the diagram an image pin was drawn on. `name`: what a notice calls the item when its key does not say.
+ * Where a chat comment or a chat reply goes: its chat, the message it is on (by id and by `seq`, as the post names it) and
+ * the passage, as its box captured it; a reply also names the comment it answers (`root_user_message_id`, `root_cid`).
  */
-export type DraftSend = { artifactId: string; threadId: string | null; diagramSource?: string; name?: string };
+export type ChatSend = {
+	threadId: string; messageId: string; seq: number; from_off: number; to_off: number; quote: string; anchor_prefix: string; anchor_suffix: string;
+	root_user_message_id?: string; root_cid?: string;
+};
+/**
+ * What a pressed draft's post needs once no box holds it: kept from its press until it posts, is refused or is edited.
+ * A document's or an image's names its artifact; a chat's, where it goes (`chat`). `diagramSource`: the diagram an image
+ * pin was drawn on. `name`: what a notice calls the item when its key does not say.
+ */
+export type DraftSend =
+	| { artifactId: string; threadId: string | null; diagramSource?: string; name?: string; chat?: never }
+	| { chat: ChatSend; name?: string; artifactId?: never };
 export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string; place?: KeptPlace; region?: ImageRegion; send?: DraftSend };
 
 export const DRAFT_STORAGE_PREFIX = 'corsia:commentDraft:v1:';
@@ -49,13 +60,33 @@ function parseRegion(value: unknown): ImageRegion | undefined {
 	if (!region || !isFraction(region.x) || !isFraction(region.y) || !isFraction(region.w) || !isFraction(region.h)) return undefined;
 	return { x: region.x, y: region.y, w: region.w, h: region.h };
 }
+/** A stored chat send, or nothing when it is not one. */
+function parseChatSend(value: unknown): ChatSend | undefined {
+	const chat = value as Partial<ChatSend> | null | undefined;
+	if (!chat || !isText(chat.threadId) || !chat.threadId || !isText(chat.messageId) || !chat.messageId || !Number.isInteger(chat.seq)) return undefined;
+	if (!isOffset(chat.from_off) || !isOffset(chat.to_off) || chat.to_off <= chat.from_off) return undefined;
+	if (![chat.quote, chat.anchor_prefix, chat.anchor_suffix].every(isText) || !chat.quote) return undefined;
+	const root = chat.root_user_message_id !== undefined || chat.root_cid !== undefined;
+	if (root && !(isText(chat.root_user_message_id) && chat.root_user_message_id && isText(chat.root_cid) && chat.root_cid)) return undefined;
+	return {
+		threadId: chat.threadId, messageId: chat.messageId, seq: chat.seq as number, from_off: chat.from_off, to_off: chat.to_off,
+		quote: chat.quote as string, anchor_prefix: chat.anchor_prefix as string, anchor_suffix: chat.anchor_suffix as string,
+		...(root ? { root_user_message_id: chat.root_user_message_id, root_cid: chat.root_cid } : {}),
+	};
+}
 /** A stored send, or nothing when it is not one: the draft then comes back typed, and waits for a press. */
 function parseSend(value: unknown): DraftSend | undefined {
-	const send = value as Partial<DraftSend> | null | undefined;
-	if (!send || !isText(send.artifactId) || !send.artifactId || !(send.threadId === null || isText(send.threadId))) return undefined;
-	if (![send.diagramSource, send.name].every((value) => value === undefined || isText(value))) return undefined;
+	const send = value as { artifactId?: unknown; threadId?: unknown; diagramSource?: unknown; name?: unknown; chat?: unknown } | null | undefined;
+	if (!send || !(send.name === undefined || isText(send.name))) return undefined;
+	const name = send.name ? { name: send.name } : {};
+	if (send.chat !== undefined) {
+		const chat = parseChatSend(send.chat);
+		return chat ? { chat, ...name } : undefined;
+	}
+	if (!isText(send.artifactId) || !send.artifactId || !(send.threadId === null || isText(send.threadId))) return undefined;
+	if (!(send.diagramSource === undefined || isText(send.diagramSource))) return undefined;
 	return { artifactId: send.artifactId, threadId: send.threadId,
-		...(send.diagramSource !== undefined ? { diagramSource: send.diagramSource } : {}), ...(send.name ? { name: send.name } : {}) };
+		...(send.diagramSource !== undefined ? { diagramSource: send.diagramSource } : {}), ...name };
 }
 
 /**

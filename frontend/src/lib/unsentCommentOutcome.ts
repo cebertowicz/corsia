@@ -1,5 +1,6 @@
 // What a pressed comment's post sent again without the person (`unsentComments`) does next, by what the server answered.
 import { RequestRefused } from '$lib/api/docs';
+import { CommentSendRefused } from '$lib/chatCommentAnchors';
 import { DocOpenError, ImageFileError } from '$lib/docOpenRefusal';
 import { EarlierVersionPosted } from '$lib/stores/commentVersion';
 import { notCommentableMessage, TAG_REFUSALS } from '$lib/docViewerOperations';
@@ -28,6 +29,8 @@ const statusOf = (error: unknown): number | null => {
 export function unsentOutcome(error: unknown): UnsentOutcome {
 	if (error instanceof EarlierVersionPosted) return 'earlier';
 	if (error instanceof DocOpenError || error instanceof ImageFileError) return 'refused';
+	// A chat's post says itself whether it was refused, in the sentence its box shows.
+	if (error instanceof CommentSendRefused) return error.passes ? 'retry' : 'refused';
 	const status = statusOf(error);
 	if (status === null || status === 401 || status === 408 || status === 429 || status >= 500) return 'retry';
 	if (status !== 409) return 'refused';
@@ -41,7 +44,7 @@ export function unsentOutcome(error: unknown): UnsentOutcome {
  * server's own sentence (its passage is gone, the document no longer takes comments), which says the draft is kept.
  */
 export function unsentReason(error: unknown): string {
-	if (error instanceof EarlierVersionPosted) return error.message;
+	if (error instanceof EarlierVersionPosted || error instanceof CommentSendRefused) return error.message;
 	const sentence = notCommentableMessage(error) ?? (error instanceof RequestRefused && error.kind ? TAG_REFUSALS[error.kind] : undefined);
 	if (sentence) return sentence;
 	if (statusOf(error) === 409) {

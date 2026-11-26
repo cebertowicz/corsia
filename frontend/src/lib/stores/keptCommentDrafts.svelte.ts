@@ -143,10 +143,12 @@ export function showsDraft(node: Element, key: string) {
 	};
 }
 
-export { CHAT_REPLY_SCOPE, chatDraftKey, documentDraftKey, imageDraftKey, replyDraftKey } from './commentDraftKeys';
+export { CHAT_REPLY_SCOPE, chatDraftKey, chatDraftOf, documentDraftKey, imageDraftKey, replyDraftKey } from './commentDraftKeys';
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
+	/** The keys of every draft held now. */
+	keys(): string[] { return [...cells].filter(([, found]) => found.draft).map(([key]) => key); },
 	/** The keys of the drafts pressed and not yet posted, refused or edited since (`send`), whose post may go on its own. */
 	pressed(): string[] { return [...cells].filter(([, found]) => found.draft?.send).map(([key]) => key); },
 	/** What the line under the draft's box says while this device does not keep it (`NOT_KEPT_MESSAGE`), else ''. */

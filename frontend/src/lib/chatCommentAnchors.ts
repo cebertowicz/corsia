@@ -16,10 +16,12 @@ export type SendableChatComment = ChatComment & { input_id: string };
 
 /**
  * A comment or reply send that was refused; its message is the sentence the person reads in the box.
- * `final` when no press of the box can send it (its chat is deleted), so the box offers no Retry.
+ * `final` when no press of the box can send it (its chat is deleted), so the box offers no Retry. `passes` when nothing
+ * was refused (no connection, a restart, a server error, a session to sign in again, too many requests): the same post may
+ * go on a later try, so a pressed draft is tried again on its own (`unsentComments`) and nothing is said meanwhile.
  */
 export class CommentSendRefused extends Error {
-	constructor(message: string, readonly final = false) { super(message); }
+	constructor(message: string, readonly final = false, readonly passes = false) { super(message); }
 }
 
 /** The sentence for a send that failed for a cause nobody named. */

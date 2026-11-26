@@ -14,6 +14,17 @@ export function imageDraftKey(artifactId: string | null, image = ''): string {
 export function chatDraftKey(threadId: string, messageId: string, anchor: { from_off: number; to_off: number }): string {
 	return `chat:${JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off])}`;
 }
+/** The chat, message and passage offsets a `chatDraftKey` names, or null for a key that is no chat comment's. */
+export function chatDraftOf(key: string): { threadId: string; messageId: string; from_off: number; to_off: number } | null {
+	if (!key.startsWith('chat:')) return null;
+	try {
+		const [threadId, messageId, from_off, to_off] = JSON.parse(key.slice('chat:'.length)) as unknown[];
+		if (typeof threadId !== 'string' || typeof messageId !== 'string' || !Number.isInteger(from_off) || !Number.isInteger(to_off)) return null;
+		return { threadId, messageId, from_off: from_off as number, to_off: to_off as number };
+	} catch {
+		return null;
+	}
+}
 /** The scope of a reply to a chat's comment thread (`replyDraftKey`): the thread's id is a comment's own UUID, so it keys the reply wherever the card is shown. */
 export const CHAT_REPLY_SCOPE = 'chat';
 /** A reply to one thread, under the document or image it is written on (`documentDraftKey`, `imageDraftKey`); a thread's id alone keys it where there is neither. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findPlace, placeOf, uniquePlaceOf } from './keptPlace';
+import { chatAnchorAt, chatPlaceHolds, findPlace, placeOf, uniquePlaceOf } from './keptPlace';
 import windows from './__tests__/fixtures/kept-place-windows.contract.json';
 
 const LEAD = 'An opening paragraph long enough to fill a side.\n\n';
@@ -84,5 +84,25 @@ describe('a passage keeps its place only when no other copy shares either side',
 		const text = LEAD + 'The launch moves to Friday.\n';
 		const at = text.indexOf('Friday');
 		expect(uniquePlaceOf(text, at, at + 6, 'Monday')).toBeNull();
+	});
+});
+
+describe('a chat passage holds only at its kept offsets, with its kept sides', () => {
+	const text = 'Ship it Friday. If not Friday, then Monday.';
+	const first = text.indexOf('Friday'), second = text.indexOf('Friday', first + 1);
+
+	it('a repeated word: the kept copy holds, and the other copy is never taken for it', () => {
+		const place = placeOf(text, second, second + 6);
+		expect(chatPlaceHolds(text, place)).toBe(true);
+		// The message reads differently before it: the kept offsets land on other words, so it does not hold.
+		expect(chatPlaceHolds(`Now: ${text}`, place)).toBe(false);
+		// The first copy has the same words but not the kept sides.
+		expect(chatPlaceHolds(text, { ...place, from: first, to: first + 6 })).toBe(false);
+	});
+
+	it('text in a table, whose cells the rendered text joins with nothing between them', () => {
+		const cells = 'TaskDueLaunchFridayReviewMonday', at = cells.indexOf('Friday');
+		expect(chatPlaceHolds(cells, placeOf(cells, at, at + 6))).toBe(true);
+		expect(chatAnchorAt(cells, at, at + 6)).toEqual({ from_off: at, to_off: at + 6, quote: 'Friday', anchor_prefix: 'TaskDueLaunch', anchor_suffix: 'ReviewMonday' });
 	});
 });
