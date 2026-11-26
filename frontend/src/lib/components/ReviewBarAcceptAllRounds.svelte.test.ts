@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
-import type { ReviewBarRead } from '$lib/api/reviewBar';
+import { ReviewRefusal, type ReviewBarRead } from '$lib/api/reviewBar';
 import { submittedAnswers } from '$lib/stores/cardAnswers';
 
 // The accepted-suggestions count belongs to the receipt it produced: a later round on the same mounted bar never repeats it.
@@ -70,6 +70,16 @@ describe('ReviewBar approval hash', () => {
 		finish();
 		const expected = createHash('sha256').update('After suggestion\n').digest('hex');
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1'], expected));
+	});
+
+	it('returns to the ask and shows the server message when the document is still changing', async () => {
+		vi.stubGlobal('crypto', webcrypto);
+		api.answerReview.mockRejectedValue(new ReviewRefusal('ask_stale', 'The document is still changing. Reload and try again.'));
+		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', documentText: () => 'Text\n' } });
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.review-bar.ask')?.textContent).toContain('still changing'));
+		expect(button('Approve')).toBeTruthy();
 	});
 
 	it('sends no document hash when requesting changes', async () => {
