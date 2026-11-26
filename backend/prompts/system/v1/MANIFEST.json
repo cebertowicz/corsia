@@ -292,10 +292,10 @@
       "sha256": "e6fbfc50507f7bf60e8af1f84861448f5e05dd2ac755f492a4c8b36f247b5e4d"
     },
     {
-      "bytes": 4692,
+      "bytes": 4832,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "005a2bd9ab2876134a2e5293399c4eaf7fbcb35540a94a5c768fa42e0c9dbc7b"
+      "sha256": "4570f19d80a671dd3ca3616007a5aa5ee5e9586600e5dc6933964da6b9593921"
     },
     {
       "bytes": 1505,

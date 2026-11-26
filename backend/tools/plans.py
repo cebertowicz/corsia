@@ -289,11 +289,14 @@ class PlanDecisionTool(_OperationTool):
     def description(self) -> str:
         return (
             "Author structured plan decisions for the user, with 2-4 A/B/C/D "
-            "options; a delegated worker's parent reviews its decision before raise. "
+            "options; a delegated worker's parent reviews its decision before raise; "
+            "an agent with no parent calls parent_review, then raise, itself. "
             "pick \"any\" is for independent items; tradeoffs get their own decision. "
             "Decisions are for choices someone switching in cold could make from the "
-            "card alone; if they would need a file or the history, put a brief in front "
-            "of them instead (plan_update block_node, owner_kind user, ask_artifact_id). "
+            "card alone. If the context has to explain background first (terms, figures "
+            "or side effects the options depend on), or they need to see something laid "
+            "out (a layout, a design, a draft), it is not a card: write a brief and put it "
+            "in front of them (plan_update block_node, owner_kind user, ask_artifact_id). "
             "A step only the person's hands can take (sign in, pay) is never one, even "
             "with a 'drop it' option; plan_update says where it goes."
         )
