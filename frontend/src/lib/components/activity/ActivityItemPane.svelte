@@ -333,11 +333,16 @@
 	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
+			{#snippet chatButton()}
+				{#if sourceThread}
+					<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>{item.source.thread_label === 'Untitled thread' ? 'Open the chat' : `Open ${item.source.thread_label}’s chat`}</Button>
+				{/if}
+			{/snippet}
 			{#if missingDraft}
-				<MissingDraft artifactId={missingArtifact} {offline} {onActed} />
-			{:else if item.kind === 'draft'}<p class="dctx" role="status">Couldn’t open this draft from Activity. Open its chat to find the file.</p>{/if}
-			{#if sourceThread}
-				<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>{item.source.thread_label === 'Untitled thread' ? 'Open the chat' : `Open ${item.source.thread_label}’s chat`}</Button>
+				<MissingDraft artifactId={missingArtifact} {offline} {onActed}>{@render chatButton()}</MissingDraft>
+			{:else}
+				{#if item.kind === 'draft'}<p class="dctx" role="status">Couldn’t open this draft from Activity. Open its chat to find the file.</p>{/if}
+				{@render chatButton()}
 			{/if}
 		{/snippet}
 	</ActivityKindPanel>

@@ -134,11 +134,15 @@ describe('Activity list', () => {
 
 	it('shows a failure when a missing draft cannot be removed', async () => {
 		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			source: activitySource('Untitled thread', 'thread-1'),
 			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
 		alsoServe('/api/email-drafts/art-draft/discard', () => respond(500, {}));
 		render(); await settle();
 		buttonNamed('Don’t send')!.click();
 		await vi.waitFor(() => expect(alert()).toContain('Couldn’t remove this draft. Try again.'));
+		const actions = buttonNamed('Don’t send')!.parentElement!;
+		expect(actions).toBe(buttonNamed('Open the chat')!.parentElement);
+		expect(actions.nextElementSibling?.getAttribute('role')).toBe('alert');
 		expect(rows()).toHaveLength(1);
 	});
 
