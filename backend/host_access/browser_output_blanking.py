@@ -2,9 +2,9 @@
 
 Every agent browser command's text comes back through ``tools.browser_runtime._run_owned``: its result,
 and the text of any error it raised. That one place calls :func:`blank_output` once per command, which reads
-the saved passwords once (``infra.saved_logins.blanking_values``) and replaces each whole-token form, raw,
-URL-encoded, HTML-escaped or JSON-encoded, and with its whitespace as a snapshot or page text shows it,
-with :data:`BLANK`. Number-shaped values also match other digit groupings.
+the saved passwords once (``infra.saved_logins.blanking_values``) and replaces each form, raw, URL-encoded,
+HTML-escaped or JSON-encoded, and with its whitespace as a snapshot or page text shows it, with :data:`BLANK`.
+Text forms match whole tokens; number-shaped values match other digit groupings with digit boundaries.
 That covers snapshots, page text, `get` results (get html too), eval and script results, console and network
 logs, and error text.
 
@@ -142,9 +142,10 @@ def _digit_forms(digits: str) -> set[tuple[str, ...]]:
 
 
 def blank(text: str, values: Iterable[str]) -> str:
-    """Hide whole-token forms and alternate groupings of numeric values, longest first."""
+    """Hide whole-token text and digit-bounded numeric forms, longest first."""
     forms = {form for value in values for form in encodings(value)}
     patterns: dict[bool, set[tuple[int, str]]] = {True: set(), False: set()}
+    numbers: dict[bool, set[tuple[int, str]]] = {True: set(), False: set()}
     for form in forms:
         patterns[form[0].isalnum()].add((len(form), _bounded(form, re.escape(form))))
         if all(char.isdigit() or char in " -./" for char in form):
@@ -153,7 +154,8 @@ def blank(text: str, values: Iterable[str]) -> str:
                 for encoded in _digit_forms(digits):
                     pattern = r"(?: *|[-./]|\++|(?:%20)+|%2[fF]|\\{1,2}/)".join(map(re.escape, encoded))
                     edge = encoded[0] + encoded[-1]
-                    patterns[edge[0].isalnum()].add((len("".join(encoded)), _bounded(edge, pattern)))
+                    suffix = r"(?!\d)" if edge[-1].isdigit() else ""
+                    numbers[edge[0].isdigit()].add((len("".join(encoded)), pattern + suffix))
     groups = []
     # Match a value's own encoded prefix before consuming an escape as its boundary.
     for bounded in (False, True):
@@ -162,7 +164,13 @@ def blank(text: str, values: Iterable[str]) -> str:
             prefix = (r"(?:(?<![^\W_])|(?P<escape>\\(?:[nrtbfv0]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}"
                       r"|U[0-9A-Fa-f]{8})|%(?:25)*[0-9A-Fa-f]{2}))") if bounded else ""
             groups.append(prefix + "(?:" + "|".join(p for _, p in sorted(entries, reverse=True)) + ")")
-    return re.sub("|".join(groups), lambda match: (match.groupdict().get("escape") or "") + BLANK, text) if groups else text
+    for bounded in (False, True):
+        if numbers[bounded]:
+            prefix = (r"(?:(?<!\d)|(?P<number_escape>\\(?:[nrtbfv0]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}"
+                      r"|U[0-9A-Fa-f]{8})|%(?:25)*[0-9A-Fa-f]{2}))") if bounded else ""
+            groups.append(prefix + "(?:" + "|".join(p for _, p in sorted(numbers[bounded], reverse=True)) + ")")
+    return re.sub("|".join(groups), lambda m: (m.groupdict().get("escape") or m.groupdict().get("number_escape") or "")
+                  + BLANK, text) if groups else text
 
 
 def _saved_values() -> frozenset[str]:

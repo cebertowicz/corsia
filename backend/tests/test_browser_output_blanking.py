@@ -498,6 +498,17 @@ def test_encoded_unicode_digit_groupings(written):
     assert blanking.blank(f"({written})", ["١-٢٣"]) == "([hidden])"
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("Account123456789", "Account[hidden]"), ("123-45-6789SSN", "[hidden]SSN"),
+    ("x123456789y", "x[hidden]y"), ("_123456789_", "_[hidden]_"),
+    ("0123456789", "0123456789"), ("1234567890", "1234567890"),
+    ("٣123456789", "٣123456789"), ("123456789٣", "123456789٣"),
+    ("ssn%20123-45-6789", "ssn%20[hidden]"), (r"ssn\u00a0123-45-6789", r"ssn\u00a0[hidden]"),
+])
+def test_number_boundaries_allow_letters_but_not_digits(text, expected):
+    assert blanking.blank(text, ["123-45-6789"]) == expected
+
+
 def test_token_boundaries_and_non_alphanumeric_edges():
     assert blanking.blank("a1 xa1 a1x éa1 a1٣ _a1_ !a1!", ["a1"]) == (
         "[hidden] xa1 a1x éa1 a1٣ _[hidden]_ ![hidden]!")
