@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	// The Comment button is the document's own (the one the editor floats beside a selection); this only holds it at the bottom of the visible screen.
-	let { column, offered, children }: { column: HTMLElement | undefined; offered: boolean; children: Snippet } = $props();
+	let { column, offered, above = 0, children }: { column: HTMLElement | undefined; offered: boolean; above?: number; children: Snippet } = $props();
 	let bar = $state<HTMLDivElement>();
 	let bottom = $state(0);
 	let left = $state(0);
@@ -10,6 +10,7 @@
 		const root = column, element = bar;
 		// Measured again each time the offer comes or goes: the column can move (a page or panel sliding in) without resizing, and the bar must not keep an earlier place.
 		void offered;
+		const reach = above;
 		if (!root || !element) return;
 		const viewport = window.visualViewport;
 		const update = () => {
@@ -17,16 +18,29 @@
 			left = bounds.left;
 			width = bounds.width;
 			const lift = Math.max(0, window.innerHeight - ((viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight)));
-			bottom = lift;
+			// Held above whatever stands at the canvas's foot (the ask card), not over its buttons; the keyboard still wins when it is higher.
+			// The card reaches the canvas's padded foot, so its top is its reach above the canvas box plus that padding.
+			const clear = reach > 0 ? reach + (Number.parseFloat(getComputedStyle(root).getPropertyValue('--canvas-pad-bottom')) || 0) : 0;
+			// The same rule for the jump control the canvas shows at its foot (the canvas marks it `data-notice-jump`): where it would sit under the button's width, the button is held just above it.
+			const canvas = root.closest('.doc');
+			const jump = canvas?.hasAttribute('data-notice-jump') ? canvas.querySelector('[data-doc-jump] button') : null;
+			const face = element.firstElementChild?.getBoundingClientRect();
+			const jumpRect = jump?.getBoundingClientRect();
+			const jumpClear = jumpRect && face && jumpRect.width > 0 && face.width > 0 && jumpRect.left < face.right && face.left < jumpRect.right ? window.innerHeight - jumpRect.top : 0;
+			bottom = Math.max(lift, clear, jumpClear);
 			// The room is what the button covers of the document's column, never more: a button on a column that ends above the page's foot covers less than its own height.
 			// The holder's top is worked out from the lift just set, not read back: the lift reaches the page at the next flush, so a measured top is the one before the move.
 			const height = element.getBoundingClientRect().height;
-			root.style.setProperty('--document-comment-room', `${Math.max(0, Math.min(height, bounds.bottom - (window.innerHeight - lift - height)))}px`);
+			root.style.setProperty('--document-comment-room', `${Math.max(0, Math.min(height + Math.max(0, bottom - lift), bounds.bottom - (window.innerHeight - bottom - height)))}px`);
 		};
 		update();
 		const observer = new ResizeObserver(update);
 		observer.observe(element);
 		observer.observe(root);
+		// The canvas marks and unmarks its jump control by an attribute, which no resize or scroll follows.
+		const canvasMarks = root.closest('.doc');
+		const marks = canvasMarks ? new MutationObserver(update) : null;
+		if (canvasMarks) marks?.observe(canvasMarks, { attributes: true, attributeFilter: ['data-notice-jump'] });
 		viewport?.addEventListener('resize', update);
 		viewport?.addEventListener('scroll', update);
 		window.addEventListener('resize', update);
@@ -36,6 +50,7 @@
 		window.addEventListener('animationend', update, true);
 		return () => {
 			observer.disconnect();
+			marks?.disconnect();
 			viewport?.removeEventListener('resize', update);
 			viewport?.removeEventListener('scroll', update);
 			window.removeEventListener('resize', update);
