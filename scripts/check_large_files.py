@@ -26,7 +26,7 @@ ALLOWLIST: dict[str, str] = {
     "desktop/src-tauri/icons/*": "desktop bundle icons required by the build",
     "desktop/src-tauri/icons/*/*": "desktop bundle icons required by the build",
     "docs/*.png": "documentation screenshots",
-    "docs/live-review.gif": "README live co-editing demo",
+    "docs/readme/*.gif": "README demo animations",
     "THIRD-PARTY-NOTICES.md": "licence texts of every bundled package, shipped inside the app",
 }
 
