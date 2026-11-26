@@ -203,11 +203,13 @@ def directed_sql(alias: str) -> str:
 
     These are the comments the canonical recipients writer sent the person, and a suggestion
     among them counts only until it is decided.
+    ``CROSS JOIN`` keeps the comment's own batch items first (idx_doc_feedback_batch_items_comment):
+    with no ANALYZE the planner otherwise starts from every batch sent to the person, for every comment.
     """
     return f"""({alias}.author_kind='agent'
                AND ({alias}.replacement IS NULL OR {alias}.decision IS NULL)
                AND EXISTS (SELECT 1 FROM doc_feedback_batch_items batch_item
-                           JOIN doc_feedback_batches batch ON batch.id=batch_item.batch_id
+                           CROSS JOIN doc_feedback_batches batch ON batch.id=batch_item.batch_id
                            WHERE batch_item.comment_id={alias}.id AND batch.artifact_id={alias}.artifact_id
                              AND batch.recipient_id=?)
                AND EXISTS (SELECT 1 FROM threads author

@@ -57,7 +57,8 @@ def test_replies_to_the_person_cost_linear_in_the_document():
     assert _steps(large) < 6 * _steps(small)
 
 
-def test_a_document_the_person_never_commented_in_costs_linear():
+def test_a_document_the_person_never_commented_in_costs_nothing_as_it_grows():
+    # Only documents holding a comment by the person are read, so this one's comments are never visited.
     small, large = _document(400, person_commented=False), _document(1600, person_commented=False)
     assert document_rows(large, 'u') == []
-    assert _steps(large) < 6 * _steps(small)
+    assert _steps(large) <= _steps(small) + 1
