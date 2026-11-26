@@ -2,10 +2,12 @@
 
 A task held for the user with nothing to act on reads red while the user's
 queue is empty, so the plan looks stalled and no one moves it. An agent's
-``block_node`` on the user therefore names its ask. A choice answerable
-as asked, even one from a document, is a raised decision, which already holds
+``block_node`` on the user therefore names its ask. A choice someone with no
+history could make from the card alone is a raised decision, which already holds
 its source task (``plans.wait_causes``), so a block beside one is refused.
-Anything the user must judge itself is a registered artifact the plan's thread owns: the block links it to the task with the existing
+Anything else the user must decide or judge (a choice that needs its background,
+a draft, a design) is a brief: a registered artifact the plan's thread owns. The
+block links it to the task with the existing
 ``attention`` role and raises it in the user's one attention pile. When the
 user clears that ask, the holds it placed clear and the agent is told
 (``cleared``). ``shared/planning/plans-simplify-2026-09-29.md``.
@@ -27,10 +29,11 @@ NO_ASK = (
     "route that fits. A fact or preference only they know: ask in chat with "
     "post_update and arm a deadline watch on this task to carry the wait. A "
     "step only their hands can take: add a task with assignee user, how-to in "
-    "its description. A choice they can answer as asked, even one from a "
-    "document: raise a decision on this task; it holds the task by itself. "
-    "Only if they must judge the thing itself (a draft to send, a design, "
-    "requirements): register it and pass its artifact id as ask_artifact_id."
+    "its description. A choice someone with no history could make from the "
+    "card alone: raise a decision on this task; it holds the task by itself. "
+    "Anything else they must decide or judge (a choice that needs its "
+    "background, a draft to send, a design, requirements): write a brief, "
+    "register it and pass its artifact id as ask_artifact_id."
 )
 DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "
