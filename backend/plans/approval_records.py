@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 def record_approval(
     db: sqlite3.Connection, *, artifact_id: str, node_id: str | None,
-    source: str, source_id: str | None, doc_sha256: str, images: list[dict],
+    source: str, source_id: str | None, doc_sha256: str, images: list[dict], prepared=None,
 ) -> None:
     """Record one prepared version in the caller's transaction.
 
@@ -35,21 +35,26 @@ def record_approval(
         (artifact_id, node_id, source, source_id, doc_sha256, json.dumps(images),
          datetime.now(timezone.utc).isoformat()),
     )
+    if prepared is not None:
+        from infra.write_effects import after_commit
+        after_commit(db, prepared.restore_missing)
 
 
 def _delete_unreferenced(db: sqlite3.Connection, copies: list[dict]) -> None:
     """Recheck committed records before removing superseded copies."""
     from pathlib import Path
+    from plans.approval_copies import copy_lock
 
-    for copy in copies:
-        digest = copy["sha256"]
-        page = db.execute("SELECT 1 FROM artifact_approvals WHERE doc_sha256=? LIMIT 1", (digest,)).fetchone()
-        image = db.execute(
-            "SELECT 1 FROM artifact_approvals a, json_each(a.images) i "
-            "WHERE json_extract(i.value, '$.sha256')=? LIMIT 1", (digest,),
-        ).fetchone()
-        if page is None and image is None:
-            Path(copy["copy_path"]).unlink(missing_ok=True)
+    with copy_lock:
+        for copy in copies:
+            digest = copy["sha256"]
+            page = db.execute("SELECT 1 FROM artifact_approvals WHERE doc_sha256=? LIMIT 1", (digest,)).fetchone()
+            image = db.execute(
+                "SELECT 1 FROM artifact_approvals a, json_each(a.images) i "
+                "WHERE json_extract(i.value, '$.sha256')=? LIMIT 1", (digest,),
+            ).fetchone()
+            if page is None and image is None:
+                Path(copy["copy_path"]).unlink(missing_ok=True)
 
 
 class ApprovalChangedDuringSave(RuntimeError):
@@ -69,8 +74,8 @@ def record_saved_version(db: sqlite3.Connection, artifact_id: str, prepared, acc
             return False
         for suggestion_id in accepted:
             record_approval(db, artifact_id=artifact_id, node_id=None, source="suggestion",
-                            source_id=suggestion_id, doc_sha256=prepared.doc_sha256, images=prepared.images)
+                            source_id=suggestion_id, doc_sha256=prepared.doc_sha256, images=prepared.images, prepared=prepared)
     else:
         record_approval(db, artifact_id=artifact_id, node_id=None, source="save", source_id=None,
-                        doc_sha256=prepared.doc_sha256, images=prepared.images)
+                        doc_sha256=prepared.doc_sha256, images=prepared.images, prepared=prepared)
     return True

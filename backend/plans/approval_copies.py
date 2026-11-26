@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,11 +13,22 @@ from doceditor.doc_images import resolve_image_path
 from doceditor.document_scope import path_write_allowed, scope_roots
 
 
+copy_lock = threading.Lock()
+
+
 @dataclass
 class PreparedCopies:
     doc_sha256: str
     images: list[dict]
     created: list[Path]
+    contents: dict[Path, bytes]
+
+    def restore_missing(self) -> None:
+        """Restore copies reused before a competing cleanup committed."""
+        with copy_lock:
+            for path, raw in self.contents.items():
+                if not path.exists():
+                    _copy(path.parent, raw, path.suffix, [], {})
 
     def discard(self) -> None:
         """Remove copies created by a write that rolled back."""
@@ -42,7 +54,7 @@ def _discard_created(paths: list[Path], db) -> None:
     _delete_unreferenced(db, copies)
 
 
-def _copy(root: Path, raw: bytes, suffix: str, created: list[Path]) -> str:
+def _copy(root: Path, raw: bytes, suffix: str, created: list[Path], contents: dict[Path, bytes]) -> str:
     digest = hashlib.sha256(raw).hexdigest()
     root.mkdir(parents=True, exist_ok=True)
     path = root / (digest[:16] + suffix)
@@ -54,6 +66,7 @@ def _copy(root: Path, raw: bytes, suffix: str, created: list[Path]) -> str:
     except FileExistsError:
         if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError("approved version damaged")
+    contents[path] = raw
     return digest
 
 
@@ -103,8 +116,9 @@ def prepare(path: Path, raw: bytes, project_id: str | None, *, db) -> PreparedCo
         raise ValueError("document scope has no planning folder")
     target = roots[-1] / ".corsia" / "approved"
     created: list[Path] = []
+    contents: dict[Path, bytes] = {}
     try:
-        digest = _copy(target, raw, path.suffix, created)
+        digest = _copy(target, raw, path.suffix, created, contents)
         images: list[dict] = []
         for url in _images(raw.decode("utf-8")):
             resolved = resolve_image_path(str(path), url)
@@ -115,11 +129,11 @@ def prepare(path: Path, raw: bytes, project_id: str | None, *, db) -> PreparedCo
                 image = Path(resolved).resolve()
                 if not path_write_allowed(image, roots):
                     raise ValueError("image outside document scope")
-                sha = _copy(target, image.read_bytes(), image.suffix, created)
+                sha = _copy(target, image.read_bytes(), image.suffix, created, contents)
                 images.append({"path": original, "sha256": sha})
             except (OSError, ValueError) as exc:
                 images.append({"path": original, "not_kept": str(exc)})
-        return PreparedCopies(digest, images, created)
+        return PreparedCopies(digest, images, created, contents)
     except Exception:
         _discard_created(created, db)
         raise

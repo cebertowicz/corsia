@@ -245,7 +245,7 @@ def _clear_attention(
                 plans_public.record_artifact_approval(
                     _db, artifact_id=str(row["id"]), node_id=str(ask["node_id"]),
                     source="bar", source_id=str(ask["hold_id"]),
-                    doc_sha256=approved_version.doc_sha256, images=approved_version.images,
+                    doc_sha256=approved_version.doc_sha256, images=approved_version.images, prepared=approved_version,
                 )
         defer_condition = None
         if outcome == "defer":

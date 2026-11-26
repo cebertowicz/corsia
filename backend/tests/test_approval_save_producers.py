@@ -153,3 +153,44 @@ def test_approval_disappears_during_save(ownership_scope, monkeypatch, producer)
         register_publication(publication, "after", hashlib.sha256(b"after").hexdigest(), stamp=None, db=scope["db"])
     assert _rows(scope["db"], artifact["id"]) == []
     assert created and all(not copy.exists() for copy in created)
+
+
+def test_save_restores_copy_reused_before_competing_cleanup(ownership_scope, monkeypatch):
+    """A real save reuses a copy, another save deletes it, then the first commits."""
+    from plans import public
+
+    scope = ownership_scope
+    paths = [scope["root"] / ".threads" / scope["owner"] / name for name in ("old.md", "new.md")]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("initial")
+        service.register_write_strict(scope["owner"], str(path), db=scope["db"])
+        artifact = service.find_file_identity(str(path), db=scope["db"])
+        record_approval(scope["db"], artifact_id=artifact["id"], node_id=None, source="bar", source_id="hold",
+                        doc_sha256=hashlib.sha256(b"initial").hexdigest(), images=[])
+    scope["db"].commit()
+
+    def save(path, text):
+        _write_document(DocumentSave(str(path), text, project_id="project-alpha", thread_id=scope["owner"]),
+                        path, direct_user=True)
+
+    save(paths[0], "shared bytes")
+    original = public.prepare_save_approval
+    observed = []
+
+    def interleave(path, *args, **kwargs):
+        prepared = original(path, *args, **kwargs)
+        if path == paths[1]:
+            copy = next(iter(prepared.contents))
+            assert copy.exists()
+            save(paths[0], "replacement")
+            observed.append(not copy.exists())
+        return prepared
+
+    monkeypatch.setattr(public, "prepare_save_approval", interleave)
+    save(paths[1], "shared bytes")
+    copy = next((scope["root"] / ".corsia" / "approved").glob(hashlib.sha256(b"shared bytes").hexdigest()[:16] + ".md"))
+    assert observed == [True]
+    assert copy.read_bytes() == b"shared bytes"
+    artifact = service.find_file_identity(str(paths[1]), db=scope["db"])
+    assert _rows(scope["db"], artifact["id"])[-1]["doc_sha256"] == hashlib.sha256(b"shared bytes").hexdigest()
