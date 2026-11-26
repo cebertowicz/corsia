@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 
+from websockets.exceptions import ConnectionClosed
+
 from host_access import browser_cdp_frames, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_saved_fills import saved_fill_document as _saved_fill_document
 from host_access.browser_cdp import PasswordProbe
@@ -33,6 +35,12 @@ PASSWORD_READ_REFUSED = (
     "This page has shown a password field, so running scripts on it and reading that field stay refused."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
+# The agent's refusal when its own page check fails: every command re-checks the same page, so it names the way out.
+# Session teardown passes a failed check (browser_session_commands.guard_close).
+PAGE_CHECK_REFUSED = (
+    PAGE_CHECK_FAILED + ". If this keeps happening on this page, close the browser with browser_close and open the "
+    "page again."
+)
 # A failed plan write loses at most the person's task for the page, never the browser itself. What became of
 # the row is unknown (a failed read or emit leaves it in place), so the wording claims neither state.
 STEP_NOT_RECORDED = (
@@ -226,7 +234,7 @@ async def reopen_held_page(thread_id: str, probe: browser_pane_state.Probe, reop
     try:
         result = await probe(_known_nodes(thread_id))
     except Exception as exc:
-        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+        raise BrowserSessionError(PAGE_CHECK_REFUSED) from exc
     if result.visible_nodes or _guarded_visits.get(thread_id) or browser_step_lifecycle.held_pages(thread_id):
         await reopen()
 
@@ -259,9 +267,9 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         result = await probe(_known_nodes(thread_id))
     except Exception as exc:
         if isinstance(exc, BrowserSessionError) and str(exc) == PAGE_CHECK_FAILED:
-            raise
-        log.warning("browser page check failed for thread %s: %s", thread_id, type(exc).__name__)
-        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+            raise BrowserSessionError(PAGE_CHECK_REFUSED) from exc
+        log.warning("browser page check failed for thread %s: %s%s", thread_id, type(exc).__name__, _close_codes(exc))
+        raise BrowserSessionError(PAGE_CHECK_REFUSED) from exc
     event = browser_step_lifecycle.Event(
         "declare" if instruction is not None else "list_tabs" if lists_tabs else "probe", result,
         session=session, instruction=instruction or "",
@@ -290,6 +298,14 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
     return result, None
+
+
+def _close_codes(exc: BaseException) -> str:
+    """A closed DevTools socket's close codes, numbers only: 1009 is our own size limit, 1006 a lost connection."""
+    if not isinstance(exc, ConnectionClosed):
+        return ""
+    sent, received = exc.sent, exc.rcvd
+    return f" (close sent {sent.code if sent else None}, received {received.code if received else None})"
 
 
 def _page_source(thread_id: str, probe: browser_pane_state.Probe,

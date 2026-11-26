@@ -39,7 +39,7 @@ class FramedPage:
         self._session_parents = {}
         self.calls = []
 
-    def __call__(self, _endpoint):
+    def __call__(self, _endpoint, **_options):
         return self
 
     async def __aenter__(self):

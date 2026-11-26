@@ -302,6 +302,38 @@ async def test_a_password_field_in_a_cross_origin_frame_opens_the_step_and_stays
 
 
 @pytest.mark.asyncio
+async def test_a_long_list_naming_the_search_word_is_checked_and_left(plan):  # noqa: F811
+    """One DOM.setChildNodes event for a long list passes 1 MiB (#3392): the check still answers, open passes,
+    and a sign-in field added to that list is still found and guarded."""
+    rows = "Array.from({length: 12000}, (_, i) => `<div class='row item' data-k='${'y'.repeat(40)}'>password ${i}</div>`)"
+    with _chrome('about:blank') as endpoint:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=f"document.body.innerHTML = '<div id=list>' + {rows}.join('') + '</div>'; 0")
+        probe = partial(browser_cdp.page_password_probe, endpoint)
+        assert not (await probe({})).visible_nodes
+        assert await browser_control.require_page_access(THREAD, probe, ('open', 'https://example.com/')) is None
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression="document.getElementById('list').insertAdjacentHTML('beforeend',"
+                           " '<input type=password style=\"position:fixed;left:10px;top:10px;width:120px;height:24px\">')")
+        with pytest.raises(BrowserSessionError, match='asks for a password'):
+            await browser_control.require_page_access(THREAD, probe, ('snapshot',))
+
+
+@pytest.mark.asyncio
+async def test_a_list_past_the_page_check_cap_stays_refused(plan, monkeypatch):  # noqa: F811
+    """A page whose list passes the probe's message cap fails closed, naming the way out, never open."""
+    monkeypatch.setattr(browser_cdp, 'PAGE_PROBE_MAX_MESSAGE', 2**20)
+    rows = "Array.from({length: 12000}, (_, i) => `<div class='row item' data-k='${'y'.repeat(40)}'>password ${i}</div>`)"
+    with _chrome('about:blank') as endpoint:
+        async with browser_cdp.CdpClient(endpoint) as cdp:
+            await cdp.call('Runtime.evaluate', expression=f"document.body.innerHTML = '<div id=list>' + {rows}.join('') + '</div>'; 0")
+        probe = partial(browser_cdp.page_password_probe, endpoint)
+        with pytest.raises(BrowserSessionError) as refused:
+            await browser_control.require_page_access(THREAD, probe, ('open', 'https://example.com/'))
+        assert str(refused.value) == browser_control.PAGE_CHECK_REFUSED
+
+
+@pytest.mark.asyncio
 async def test_the_saved_login_list_reads_a_password_pages_address_without_a_step(plan, monkeypatch):  # noqa: F811
     """browser_fill's no-match list reads the page's address with no agent command, so no step opens for it."""
     import tools.browser_saved_login as choice
