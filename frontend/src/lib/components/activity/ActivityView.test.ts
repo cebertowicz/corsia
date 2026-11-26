@@ -143,6 +143,16 @@ describe('Activity list', () => {
 		await vi.waitFor(() => expect(rows()).toHaveLength(0));
 	});
 
+	it('keeps an unconfirmed missing draft when acknowledgement fails', async () => {
+		served = [activityItem({ key: 'draft:missing', external_id: 'draft-1', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unconfirmed: true } })];
+		alsoServe('/api/attention/drafts/draft-1/acknowledge', () => respond(500, {}));
+		render(); await settle();
+		buttonNamed('Done')!.click();
+		await vi.waitFor(() => expect(alert()).toContain('Couldn’t mark this done. Try again.'));
+		expect(rows()).toHaveLength(1);
+	});
+
 	it('explains why removing an open missing draft is paused offline', async () => {
 		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
 			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
