@@ -181,6 +181,13 @@ def test_plan_decision_rationale_publishes_its_purpose_and_limit():
     assert rationale["description"].startswith("Why you recommend it")
 
 
+def test_plan_decision_options_publish_name_by_label():
+    from tools.plans import PlanDecisionTool
+
+    options = PlanDecisionTool().parameters["properties"]["params"]["properties"]["options"]
+    assert "name an option by its label" in options["description"]
+
+
 @pytest.mark.parametrize("operation", sorted(_MUTATION_REQUIRED))
 def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(operation):
     from tools.plans import PlanUpdateTool
@@ -399,7 +406,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_update 9,620 -> 9,680 (+60): `request_review` takes a reviewer's `verdict`, which
 # settles a review step. The field is a bare enum: only a reviewer handed a review step
 # uses it, so its instruction rides in that reviewer's hand-over brief, not in every turn.
-_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_100}
+# plan_decision 3,100 -> 3,200: `options` says to name an option by its label in context, tradeoff
+# and rationale, because the person's screen shows labels only and agents wrote "A ... B ...".
+_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_200}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

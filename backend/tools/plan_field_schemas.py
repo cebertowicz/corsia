@@ -322,6 +322,7 @@ DECISION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "minItems": public.DECISION_MIN_OPTIONS,
         "maxItems": public.DECISION_MAX_OPTIONS,
         "items": _OPTION_SCHEMA,
+        "description": "In context, tradeoff and rationale, name an option by its label: the person never sees ids (A, B).",
     },
     "other_enabled": {
         "type": "boolean",
