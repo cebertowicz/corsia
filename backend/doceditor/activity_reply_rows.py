@@ -53,14 +53,6 @@ def _first_heading(path: str) -> str:
     return ''
 
 
-def _row_title(row) -> str:
-    """The registry's name for the document, as the row carries it until ``resolve_row_titles``
-    replaces a bare file name with the document's own heading (the approved naming rule)."""
-    title = clip_title(_flat(row['artifact_title']))
-    name = str(row['artifact_path'] or '').replace('\\', '/').rsplit('/', 1)[-1]
-    return title or name or 'A document'
-
-
 def resolve_row_titles(rows: list[dict]) -> None:
     """Name each given row by its document's own heading when the registry holds only the
     file's name (the approved naming rule). The queue calls this on the page it is returning,
@@ -83,7 +75,10 @@ def _document_row(artifact: str, rows: list, sources: dict) -> dict:
         label = _agent(sources[row['author_thread_id']])
         if label not in agents:
             agents.append(label)
-    registered = clip_title(_flat(latest['artifact_title']))
+    # The naming rule, written once: the registry names the row unless it holds only the
+    # file's name — compared raw, so a long or repeated-space name still matches itself —
+    # and then the document's own heading replaces it, on the returned page only.
+    registered = str(latest['artifact_title'] or '').strip()
     name = str(latest['artifact_path'] or '').replace('\\', '/').rsplit('/', 1)[-1]
     detail = {'artifact_id': artifact, 'unread': len(rows), 'latest_reply_id': latest['latest_unread_id'],
               'agents': agents, 'threads': [{'root_id': root, 'reply_id': reply} for root, reply in threads.items()]}
@@ -92,7 +87,7 @@ def _document_row(artifact: str, rows: list, sources: dict) -> dict:
     return {
         'renderer': 'document', 'kind': 'document', 'key': f'doc:{artifact}',
         'external_id': f'doc:{artifact}',
-        'title': _row_title(latest),
+        'title': clip_title(_flat(registered or name or 'A document')),
         'raised_at': latest['created_at'], 'source': sources[latest['author_thread_id']],
         'open': {'artifact_id': artifact, 'comment_id': latest['root_id']},
         'detail': detail,

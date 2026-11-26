@@ -195,3 +195,22 @@ def test_a_fifo_never_blocks_the_title_read(tmp_path):
     fifo = tmp_path / 'pipe.md'
     os.mkfifo(fifo)
     assert _first_heading(str(fifo)) == ''
+
+
+def test_a_long_or_repeated_space_file_name_still_resolves_to_the_heading(tmp_path):
+    """The registry-file-name match compares raw values, so a name that clip or _flat would
+    alter still recognises itself and gets its heading (the naming rule holds for it too)."""
+    db = _doc_db()
+    long_name = f"{'section' * 30}.md"  # longer than the clip length: its clipped title differs
+    _file_doc(db, tmp_path, title=long_name, file_name=long_name, body='# The long one\n\nText.\n')
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'The long one'
+    spaced = 'Onboarding  notes.md'  # repeated space: _flat would collapse it
+    (tmp_path / spaced).write_text('# Spaced title\n\nText.\n')
+    db.execute("UPDATE artifact_identities SET title=?, path=? WHERE id='d1'", (spaced, str(tmp_path / spaced)))
+    rows = document_rows(db, 'u1')
+    resolve_row_titles(rows)
+    [row] = rows
+    assert row['title'] == 'Spaced title'

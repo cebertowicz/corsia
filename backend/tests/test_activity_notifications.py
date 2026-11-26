@@ -161,3 +161,43 @@ def test_a_document_the_caller_cannot_reach_refuses_the_whole_call(isolated_db, 
         assert _client(monkeypatch).post('/api/attention/notifications/read', json=body).status_code == 404
     finally:
         db.close()
+
+
+def test_route_returns_the_documents_own_title_and_no_internal_path(isolated_db, monkeypatch, tmp_path):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc, _, _ = _answered(db)
+        document = tmp_path / 'Onboarding notes.md'
+        document.write_text('# Onboarding: who owns which file\n\nWho owns what.\n')
+        db.execute("UPDATE artifact_identities SET title=?, path=? WHERE id=?", ('Onboarding notes.md', str(document), doc))
+        db.commit()
+        [row] = _client(monkeypatch).get('/api/attention/queue?view=activity').json()['notifications']['items']
+        assert row['title'] == 'Onboarding: who owns which file'  # the route resolved it
+        assert 'heading_path' not in row['detail']
+    finally:
+        db.close()
+
+
+def test_route_opens_no_file_for_rows_past_the_page_cap(isolated_db, monkeypatch, tmp_path):
+    from api import attention as api_attention
+    from doceditor import activity_reply_rows
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        for i in (1, 2):
+            doc, _, _ = _answered(db)
+            document = tmp_path / f'notes{i}.md'
+            document.write_text(f'# Heading {i}\n\nText.\n')
+            db.execute("UPDATE artifact_identities SET title=?, path=? WHERE id=?", (f'notes{i}.md', str(document), doc))
+        db.commit()
+        monkeypatch.setattr(api_attention, 'QUEUE_ITEMS_CAP', 1)
+        reads = []
+        real = activity_reply_rows._first_heading
+        monkeypatch.setattr(activity_reply_rows, '_first_heading', lambda path: (reads.append(path), real(path))[1])
+        body = _client(monkeypatch).get('/api/attention/queue?view=activity').json()['notifications']
+        assert body['count'] == 2 and len(body['items']) == 1
+        assert reads == [str(tmp_path / 'notes2.md')]  # the row the cut dropped opened no file
+        assert body['items'][0]['title'] == 'Heading 2'
+    finally:
+        db.close()
