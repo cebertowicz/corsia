@@ -18,14 +18,6 @@ const ws = vi.hoisted(() => ({ on: vi.fn((_event: string, _handler: () => void) 
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/api/plans', async (importOriginal) => ({ ...(await importOriginal<object>()), ...planApi }));
 vi.mock('$lib/ws', () => ws);
-// Above the phone width the ask is as shipped before the one-row header; a phone keeps the two answers.
-const phone = vi.hoisted(() => ({ isMobile: null as unknown as import('svelte/store').Writable<boolean>, isShortTouch: null as unknown as import('svelte/store').Writable<boolean> }));
-vi.mock('$lib/stores/viewport', async (importOriginal) => {
-	const { writable: store } = await import('svelte/store');
-	phone.isMobile = store(false);
-	phone.isShortTouch = store(false);
-	return { ...(await importOriginal<typeof import('$lib/stores/viewport')>()), isMobile: phone.isMobile, isShortTouch: phone.isShortTouch };
-});
 
 const counts = (comments = 0, suggestions = 0, edits = 0) => ({ comments, suggestions, edits });
 function read(comments = 0): ReviewBarRead {
@@ -39,7 +31,7 @@ function read(comments = 0): ReviewBarRead {
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 async function render(draftOpen = false, onAnswered?: () => void) {
-	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered, desktopForm: true } });
+	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
 	flushSync();
 }
@@ -52,8 +44,6 @@ beforeEach(() => {
 	api.answerReview.mockReset();
 	planApi.mutateUserTask.mockReset();
 	ws.on.mockClear();
-	phone.isMobile.set(false);
-	phone.isShortTouch.set(false);
 	token.set(null);
 	submittedAnswers.set({});
 });
@@ -64,20 +54,7 @@ afterEach(() => {
 });
 
 describe('ReviewBar', () => {
-	it('offers all three answers regardless of feedback', async () => {
-		api.fetchReviewBar.mockResolvedValue(read(0));
-		await render();
-		expect(button('Approve')).toBeTruthy();
-		expect(button('Approve with changes')).toBeTruthy();
-		expect(button('Send back')).toBeTruthy();
-		unmount(component!); component = null; host.innerHTML = '';
-		api.fetchReviewBar.mockResolvedValue(read(2));
-		await render();
-		expect(button('Approve with changes')).toBeTruthy();
-	});
-
-	it.each(['isMobile', 'isShortTouch'] as const)('offers the two answers, Approve and Send back, on a phone (%s)', async (query) => {
-		phone[query].set(true);
+	it('offers the two answers, Approve and Send back, regardless of feedback', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 		expect(button('Approve')).toBeTruthy();
@@ -98,7 +75,7 @@ describe('ReviewBar', () => {
 		},
 	);
 
-	it.each(['Send back', 'Approve with changes'])('returns focus to %s when its note is dismissed', async (label) => {
+	it.each(['Send back'])('returns focus to %s when its note is dismissed', async (label) => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 		button(label)!.click();
@@ -468,26 +445,16 @@ describe('ReviewBar', () => {
 		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('comments');
 	});
 
-	it.each(['Approve', 'Approve with changes'])('R3: an open comment draft blocks %s, which would send the round\'s comments, and Send back opens no note', async (label) => {
+	it('R3: an open comment draft blocks an Approve that sends comments, and Send back', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(2));
 		await render(true);
-		button(label)!.click();
+		button('Approve')!.click();
 		flushSync();
 		expect(host.textContent).toContain(DRAFT_OPEN);
 		expect(api.answerReview).not.toHaveBeenCalled();
 		button('Send back')!.click();
 		flushSync();
 		expect(host.querySelector('textarea')).toBeNull();
-	});
-
-	it('an ask that does not opt in to the desktop form, an image\'s, keeps the two answers above the phone width', async () => {
-		api.fetchReviewBar.mockResolvedValue(read(2));
-		component = mount(ReviewBar, { target: host, props: { artifactId: 'img-1' } });
-		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
-		expect(button('Send back')).toBeTruthy();
-		expect(button('Approve with changes')).toBeUndefined();
-		expect(button('Approve all')).toBeUndefined();
-		expect(host.textContent).not.toContain('Approve all accepts');
 	});
 
 	it('a plain Approve is not blocked by a draft, and answers the request it shows', async () => {
@@ -513,11 +480,11 @@ describe('ReviewBar', () => {
 		const onAnswered = vi.fn();
 		await render(false, onAnswered);
 		api.answerReview.mockRejectedValueOnce(new Error('500'));
-		button('Approve with changes')!.click();
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		expect(onAnswered).not.toHaveBeenCalled();
-		api.answerReview.mockResolvedValueOnce({ verdict: 'approved_with_changes', note: null, feedback_counts: counts(2) });
-		button('Approve with changes')!.click();
+		api.answerReview.mockResolvedValueOnce({ verdict: 'approved', note: null, feedback_counts: counts(2) });
+		button('Approve')!.click();
 		await vi.waitFor(() => expect(onAnswered).toHaveBeenCalledTimes(1));
 	});
 });

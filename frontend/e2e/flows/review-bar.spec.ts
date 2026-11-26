@@ -977,10 +977,10 @@ test.describe('desktop row below 600px canvas (900 closed)', () => {
 	});
 });
 
-/** As shipped at f51bbda8e, above the phone width the ask offers its three answers, and with open suggestions Approve all with what it accepts; the phone's own two answers are the legs above. */
+/** Above the phone width the document's ask in the row offers the same two answers as on a phone, Send back and Approve, and with open suggestions the line saying what Approve also accepts. */
 for (const [width, mode] of [[1440, 'closed'], [1280, 'default']] as const) test.describe(`desktop ask answers (${width})`, () => {
 	test.use({ hasTouch: false, isMobile: false });
-	test(`@surface:review-bar the ask keeps Approve with changes, Approve all and its hint at ${width}`, async ({ page, request }, info) => {
+	test(`@surface:review-bar the ask offers Send back and Approve, and what Approve also accepts, at ${width}`, async ({ page, request }, info) => {
 		test.skip(info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
 		const doc = await seed(request, `Desktop answers ${width}`);
 		raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
@@ -992,10 +992,9 @@ for (const [width, mode] of [[1440, 'closed'], [1280, 'default']] as const) test
 		await open(page, doc, mode, 'light');
 		await page.setViewportSize({ width, height: 900 }); await settled(page);
 		const row = page.locator('.review-bar.ask');
-		await expect(row.getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
-		await expect(row.getByRole('button', { name: 'Approve with changes', exact: true })).toBeVisible();
+		await expect(row.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 		await expect(row.getByRole('button', { name: 'Send back', exact: true })).toBeVisible();
-		await expect(row.getByText('Approve all accepts the 2 open suggestions.')).toBeVisible();
-		await expect(row.locator('.rb-derived'), 'the phone-only line is not drawn').toHaveCount(0);
+		await expect(row.getByRole('button', { name: /^Approve (all|with changes)/ }), 'two answers, no third').toHaveCount(0);
+		await expect(row.locator('.rb-derived')).toHaveText('Also accepts 2 suggestions');
 	});
 });
