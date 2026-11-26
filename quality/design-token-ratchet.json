@@ -977,6 +977,13 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
+    "frontend/src/lib/components/DocViewerRow.svelte": {
+      "raw_colors": 0,
+      "raw_px": 2,
+      "heavy_borders": 0,
+      "raw_shadows": 0,
+      "row_menu_buttons": 0
+    },
     "frontend/src/lib/components/DocViewerStatus.svelte": {
       "raw_colors": 0,
       "raw_px": 23,
