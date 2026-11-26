@@ -10,7 +10,7 @@ import logging
 import pytest
 
 from host_access import browser_login_fill as fill
-from infra import product_events, saved_login_fills, saved_logins
+from infra import product_events, saved_fill_identity, saved_login_fills, saved_logins
 from infra.database import get_db
 from test_browser_login_fill import SITE, USER, world  # noqa: F401 - the fixture
 import tools.browser_saved_login as choice
@@ -143,7 +143,7 @@ async def test_the_executor_answers_another_persons_out_of_date_login_with_no_st
 
     monkeypatch.setattr(fill, "_person_step", person_step)
     text = await fill.fill_saved_login(THREAD, theirs)
-    assert declared == [] and text == saved_login_fills._NOT_THEIRS
+    assert declared == [] and text == saved_fill_identity._NOT_THEIRS
     assert _requests() == []
 
 

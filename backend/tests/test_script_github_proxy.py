@@ -103,11 +103,13 @@ async def test_proxy_streams_request_body_before_it_is_complete():
 
 
 @pytest.mark.asyncio
-async def test_proxy_gives_budget_the_decoded_403_body_and_client_the_raw_one(monkeypatch):
+async def test_proxy_gives_budget_and_client_the_decoded_403_body(monkeypatch):
+    # The answer is read whole and decoded, so its saved values can be hidden: the client gets plain bytes
+    # with no Content-Encoding, and the forwarder asks GitHub for an uncompressed answer.
     import gzip
     import json
 
-    recorded = []
+    recorded, seen = [], []
 
     class Budget:
         def blocked_until(self, low_priority):
@@ -120,12 +122,49 @@ async def test_proxy_gives_budget_the_decoded_403_body_and_client_the_raw_one(mo
     raw = gzip.compress(json.dumps(message).encode())
 
     def upstream(request):
+        seen.append(request)
         return httpx.Response(403, headers={"content-encoding": "gzip", "content-type": "application/json"},
                               stream=httpx.ByteStream(raw))
 
     response = await _request("api.github.com", lambda: "synthetic-value", upstream, read_budget=Budget())
     assert recorded == [(403, message)]
-    assert raw in response
+    assert seen[0].headers["accept-encoding"] == "identity"
+    head, _, body = response.partition(b"\r\n\r\n")
+    assert json.loads(body) == message and b"content-encoding" not in head.lower()
+
+
+@pytest.mark.asyncio
+async def test_proxy_withholds_an_answer_over_the_limit():
+    from automation.script_github_proxy import OVER_RESPONSE
+    from automation.script_tool_channel import REQUEST_LIMIT
+
+    response = await _request("api.github.com", lambda: "synthetic-value",
+                              lambda request: httpx.Response(200, content=b"x" * (REQUEST_LIMIT + 1)))
+    assert b"502" in response and OVER_RESPONSE in response and b"xxxx" not in response
+
+
+@pytest.mark.asyncio
+async def test_proxy_hides_a_saved_value_in_the_answer(monkeypatch):
+    from automation import script_blanking
+
+    monkeypatch.setattr(script_blanking, "saved_values", lambda: frozenset({"saved-secret-value"}))
+    response = await _request("api.github.com", lambda: "synthetic-value", lambda request: httpx.Response(
+        200, headers={"x-echo": "saved-secret-value"}, content=b'{"echo": "saved-secret-value"}'))
+    assert b"200" in response and b"saved-secret-value" not in response
+
+
+@pytest.mark.asyncio
+async def test_proxy_withholds_the_answer_when_saved_values_are_unreadable(monkeypatch):
+    from automation import script_blanking
+    from automation.script_github_proxy import UNCHECKED
+
+    def unreadable():
+        raise script_blanking.Unchecked
+
+    monkeypatch.setattr(script_blanking, "saved_values", unreadable)
+    response = await _request("api.github.com", lambda: "synthetic-value",
+                              lambda request: httpx.Response(200, content=b"answer"))
+    assert b"502" in response and UNCHECKED in response and b"answer" not in response
 
 
 @pytest.mark.asyncio

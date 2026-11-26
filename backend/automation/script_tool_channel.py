@@ -1,4 +1,8 @@
-"""Run-scoped tool calls as the owner of an authenticated script."""
+"""Run-scoped tool calls as the owner of an authenticated script.
+
+Every saved value is hidden from a call's arguments before the tool runs (``script_blanking``),
+so a script can't hand one to its agent; a call that can't be checked doesn't run.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -8,8 +12,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from automation import script_blanking
 from infra import state
-from infra.db_async import run_in_db
+from infra.db_async import run_in_db, run_off_db
 from infra.fresh_threads import resolve_spawn_working_dir
 from infra.tool_result_errors import is_error_result
 from subagents.harness_tool_bridge import build_tool_registry
@@ -20,6 +25,7 @@ SOCKET_ENV = "CORSIA_SCRIPT_TOOL_SOCKET"
 REQUEST_LIMIT = 8 * 1024 * 1024
 OVER_LIMIT = (f"Tool request is larger than {REQUEST_LIMIT // (1024 * 1024)} MiB and was not run. "
               "Split the input across smaller tool calls.\n")
+UNCHECKED = "Tool request refused: CORSIA couldn't check it for saved values.\n"
 logger = logging.getLogger(__name__)
 
 
@@ -29,11 +35,12 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
         request: Any = json.loads(await reader.readuntil(b"\n"))
         if not isinstance(request, dict) or not isinstance(request.get("name"), str) or not isinstance(request.get("arguments"), dict):
             raise ValueError("expected a tool name and JSON object")
+        arguments = script_blanking.structure(request["arguments"], await run_off_db(script_blanking.saved_values))
         context = state._current_thread_id.set(thread_id)
         turn = state._current_turn_identity.set(None)
         try:
             with state.tool_invocation_context(None):
-                result = await registry.execute(request["name"], request["arguments"])
+                result = await registry.execute(request["name"], arguments)
         finally:
             state._current_turn_identity.reset(turn)
             state._current_thread_id.reset(context)
@@ -41,6 +48,9 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
     except asyncio.LimitOverrunError:
         logger.warning("script tool request over %d bytes", REQUEST_LIMIT)
         response = {"code": 1, "stdout": "", "stderr": OVER_LIMIT}
+    except script_blanking.Unchecked:
+        logger.warning("script tool request refused: saved values unreadable")
+        response = {"code": 1, "stdout": "", "stderr": UNCHECKED}
     except Exception as exc:
         logger.warning("script tool request failed: %s", type(exc).__name__)
         response = {"code": 1, "stdout": "", "stderr": "Tool request failed.\n"}

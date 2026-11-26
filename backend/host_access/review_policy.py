@@ -101,6 +101,8 @@ STANDING_SCRIPT_REVIEW_SYSTEM_POLICY = (
     "source of a bare name (looked up on PATH and the working directory) or a bare node "
     "package name (resolved from node_modules in this folder or any folder above it); judge it "
     "only from what the shown text says it loads. "
+    "Allow registers the script unless it names saved items; a script that names saved "
+    "items always goes to the person. "
 )
 STANDING_SCRIPT_AUTO_APPROVE_ON = (
     " Auto approval is enabled: allow registers the script; ask_person sends it to the person."

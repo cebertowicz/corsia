@@ -52,7 +52,7 @@ def sandbox(isolated_db, monkeypatch, tmp_path, short_system_temp):
         if required:
             pytest.fail("CORSIA_REQUIRE_SAFEHOUSE=1 but Safehouse is unavailable")
         pytest.skip("Agent Safehouse is unavailable")
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from host_access.processes import ProcessOwner
     from infra.database import get_db
 
@@ -340,7 +340,7 @@ async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypat
     """Exercise the real script sandbox and gh client against a fake upstream."""
     from contextlib import asynccontextmanager
     import httpx
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from connections import github_agent
 
     _account(monkeypatch, "ready", Path(os.environ["HOME"]) / "agent-gh")
@@ -353,14 +353,14 @@ async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypat
         return httpx.Response(200, headers={"content-type": "application/json"},
                               stream=httpx.ByteStream(b'{"login":"fake"}'))
 
-    original = script_sandbox.github_proxy
+    original = script_clients.github_proxy
 
     @asynccontextmanager
     async def proxy(path, credential, **kwargs):
         async with original(path, credential, transport=httpx.MockTransport(upstream), **kwargs):
             yield
 
-    monkeypatch.setattr(script_sandbox, "github_proxy", proxy)
+    monkeypatch.setattr(script_clients, "github_proxy", proxy)
     path = _script(sandbox, "authenticated.sh", 'gh api user\n')
     run = await run_script(THREAD_ID, None, path, run_id="auth-gh", timeout_seconds=30, authenticated=True)
     assert run.returncode == 0, run.stderr
@@ -371,11 +371,11 @@ async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypat
 
 @pytest.mark.asyncio
 async def test_agent_shell_cannot_connect_to_authenticated_run_socket(sandbox, monkeypatch, tmp_path):
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from connections.github_agent import AgentAccountView
     from tools import shell_guard
 
-    async with script_sandbox._authenticated_client(THREAD_ID, AgentAccountView("needs_auth")) as (_, socket_path, _, _):
+    async with script_clients._authenticated_client(THREAD_ID, AgentAccountView("needs_auth")) as (_, socket_path, _, _, _):
         code = ("import socket; s=socket.socket(socket.AF_UNIX); "
                 f"s.connect({str(socket_path)!r}); print('connected')")
         command = f"python3 -c {shlex.quote(code)}"
@@ -396,10 +396,10 @@ async def test_agent_shell_cannot_connect_to_authenticated_run_socket(sandbox, m
 
 @pytest.mark.asyncio
 async def test_another_script_cannot_connect_to_authenticated_run_socket(sandbox, monkeypatch):
-    from automation import script_sandbox
+    from automation import script_clients, script_sandbox
     from connections.github_agent import AgentAccountView
 
-    async with script_sandbox._authenticated_client(THREAD_ID, AgentAccountView("needs_auth")) as (_, socket_path, _, _):
+    async with script_clients._authenticated_client(THREAD_ID, AgentAccountView("needs_auth")) as (_, socket_path, _, _, _):
         probe = ("import socket,sys\n"
                  "s=socket.socket(socket.AF_UNIX)\n"
                  f"try: s.connect({str(socket_path)!r})\n"

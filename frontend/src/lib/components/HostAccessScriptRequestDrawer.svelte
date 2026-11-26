@@ -42,6 +42,9 @@
 	<div class="decision-body">
 		<section><span class="section-label">File</span><p>{request.script_path}</p></section>
 		<section><span class="section-label">When it runs</span><p>{cadence(request.trigger?.cadence_seconds ?? null)}</p></section>
+		{#if request.saved_items?.length}
+			<section><span class="section-label">Saved items it uses</span>{#each request.saved_items as item, index (index)}<p>{item.place ? `${item.label}, sent only to ${item.place}` : `${item.label}, given to the script`}</p>{/each}</section>
+		{/if}
 		{#if text(request.purpose)}
 			<section class="purpose"><span class="section-label">Purpose</span><p>{request.purpose}</p></section>
 		{/if}

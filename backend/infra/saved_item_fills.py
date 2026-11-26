@@ -6,7 +6,8 @@ durations, "Until I turn it off" (the person's alone), events and restart
 behaviour, all in ``infra.saved_login_fills``. Only what names the item lives
 here: :func:`request_item_fill` raises its request, :func:`granted_site` reads
 its grant, and :func:`end_for_item` ends its approvals when its value is
-cleared or its entry removed.
+cleared or its entry removed. :func:`usable_item` is the check a fill request
+and a script that uses the item (``automation.script_items``) both run.
 
 A login is filled only on the site it was saved for. An item has no site of
 its own, so its request carries the https origin of the frame holding the
@@ -35,6 +36,18 @@ def _same(name: str):
     return lambda approval: approval.kind == ITEM and approval.item == name
 
 
+def usable_item(thread_id: str, name: str) -> saved_items.SavedItem:
+    """The saved item the thread may use, refused when it isn't the person's own saved item or has no value."""
+    own_thread(thread_id)
+    try:
+        item = saved_items.get_item(name)
+    except KeyStoreError as exc:
+        raise FillApprovalError(str(exc)) from None
+    if not item.is_set:
+        raise FillApprovalError(_UNSET.format(label=item.label))
+    return item
+
+
 def request_item_fill(thread_id: str, name: str, site: str, *, requested_seconds: object = None) -> dict[str, Any]:
     """Ask the person to approve this thread filling this saved item on ``site``; return the request.
 
@@ -43,16 +56,11 @@ def request_item_fill(thread_id: str, name: str, site: str, *, requested_seconds
     """
     requested = None if requested_seconds is None else saved_login_fills._duration(requested_seconds)
     clean_thread = own_thread(thread_id)
-    try:
-        item = saved_items.get_item(name)
-    except KeyStoreError as exc:
-        raise FillApprovalError(str(exc)) from None
+    item = usable_item(clean_thread, name)
     try:
         clean_site = saved_logins.normalized_site(site)
     except KeyStoreError:
         raise FillApprovalError(_NOT_SECURE) from None
-    if not item.is_set:
-        raise FillApprovalError(_UNSET.format(label=item.label))
     return saved_login_fills.open_request(
         clean_thread, saved_login_fills.thread_record(clean_thread), requested, _same(item.name),
         kind=ITEM, login_id=None, item=item.name, item_label=item.label, site=clean_site, username="",

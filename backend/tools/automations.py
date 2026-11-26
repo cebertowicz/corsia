@@ -48,6 +48,24 @@ _SERIES_ITEM = _schema(
     ["key"],
 )
 
+_SAVED_ITEMS = {
+    "type": "array",
+    "description": (
+        "script kind, with authenticated=true: the saved items the script uses. "
+        "{\"name\": <Settings › Keys item>, \"place\": <host>}: CORSIA sends it, only to "
+        "https://<host>; {\"name\": <Keys item>, \"given\": true}: the script reads it with "
+        "corsia item; {\"login\": <saved login id>}: its password, sent only to the login's "
+        "own site. Changing the list means registering the script again."
+    ),
+    "items": _schema(
+        {
+            "name": {"type": "string"}, "login": {"type": "string"},
+            "place": {"type": "string"}, "given": {"type": "boolean"},
+        },
+        [],
+    ),
+}
+
 
 def _check_workflow(thread_id: str, project_id: str | None, workflow: Any) -> None:
     """Refuse a script schedule's workflow that is not one of the owner's own workflow skills."""
@@ -97,6 +115,9 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: st
     if params.get("workflow") is not None:
         _check_workflow(thread_id, project_id, params["workflow"])
     if reviewed is None:
+        from automation.script_items import declared
+
+        declared(thread_id, params.get("saved_items"), authenticated=False)  # refused: needs authenticated=true
         path, sha256 = script_schedules.pin_script(str(params["script_path"]), workspace=WORKSPACE)
         authentication = None
     else:
@@ -231,7 +252,12 @@ class AutomationScheduleTool(Tool):
             "For authenticated commands set authenticated=true, purpose, and user_request quoting "
             "the person's request. Once approved, scripts run corsia tool <name> '<json>' as their "
             "agent; tools needing a live conversation, such as shell and sends, are refused. "
-            "corsia github <gh args> runs as the agents' GitHub account."
+            "corsia github <gh args> runs as the agents' GitHub account. "
+            "A script that uses a saved item or saved login lists it in saved_items; the person always "
+            "approves it. corsia send <METHOD> <https-url> [-H 'Name: value']... [--data <text>|@file|-] "
+            "sends a request with {{corsia-item:<name>}} or {{corsia-login:<id>}} in a header or a JSON "
+            "body, and CORSIA puts the value in, only for that item's place. corsia item <name> prints "
+            "an item given to the script."
         )
 
     @property
@@ -298,6 +324,7 @@ class AutomationScheduleTool(Tool):
                         "Leave it out for agent-level measures."
                     ),
                 },
+                "saved_items": _SAVED_ITEMS,
                 "timeout_seconds": {
                     "type": "integer",
                     "minimum": 1,

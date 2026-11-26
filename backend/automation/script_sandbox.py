@@ -12,7 +12,8 @@ read channel for that repository (``script_github_channel``) and the
 ``corsia`` client, the owner tool channel and a ``gh`` forwarder, so it acts
 with its agent's access; every other run gets none of these. The forwarder adds
 the agents' account's credential, or, when there is no agents' account, the host
-``gh`` login's, the login agent shells then use too.
+``gh`` login's, the login agent shells then use too. When its approval names saved
+items, it also gets the saved-item sockets (``script_clients``).
 
 Each run hides the person's and agents' GitHub homes from the script itself.
 """
@@ -24,17 +25,17 @@ import logging
 import os
 import shlex
 import tempfile
-from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from automation.script_github_channel import SOCKET_ENV as GITHUB_READ_SOCKET_ENV, github_channel
-from automation.script_github_proxy import github_proxy
-from automation.script_tool_channel import SOCKET_ENV, tool_channel
+from automation import script_clients
+from automation.script_clients import ScriptSandboxError
+from automation.script_github_channel import SOCKET_ENV as GITHUB_READ_SOCKET_ENV
+from automation.script_items import RunItems
+from automation.script_tool_channel import SOCKET_ENV
 from connections import github_agent
 from connections.github_agent import AgentAccountView, Cause
 from connections.github_agent_home import configured_root, default_home
-from connections.github_person import person_forwarder_credential
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
@@ -58,7 +59,7 @@ from tools.shell_guard import (
 from tools.shell_policy import load_shell_repo_policies
 from tools.sandbox_git import sandbox_any_case, sandbox_literal
 import tools.shell_sandbox as shell_sandbox
-from tools.unix_socket_policy import corsia_temp_root, corsia_temp_root_for_bind
+from tools.unix_socket_policy import corsia_temp_root_for_bind
 
 log = logging.getLogger(__name__)
 
@@ -68,10 +69,6 @@ STDERR_CAP_BYTES = 8 * 1024
 _INTERPRETERS = {
     ".py": "python3", ".sh": "bash", ".bash": "bash", ".js": "node", ".mjs": "node",
 }
-
-
-class ScriptSandboxError(RuntimeError):
-    """The run could not start; its message is shown to the owner."""
 
 
 @dataclass(frozen=True)
@@ -86,9 +83,13 @@ class ScriptRun:
     github_locked: str | None = None
     #: True when CORSIA's own shutdown stopped the script before it finished.
     stopped_by_shutdown: bool = False
+    #: Whether stdout ran past the cap, taken before saved values are blanked out of it; None reads it now.
+    over_cap_raw: bool | None = None
 
     @property
     def over_cap(self) -> bool:
+        if self.over_cap_raw is not None:
+            return self.over_cap_raw
         return len(self.stdout) > STDOUT_CAP_BYTES
 
 
@@ -134,6 +135,7 @@ async def run_script(
     rule_id: str | None = None,
     github_repo: str | None = None,
     authenticated: bool = False,
+    saved_items: RunItems | None = None,
 ) -> ScriptRun:
     """Run ``script`` in the owner's protected envelope and return its capped output.
 
@@ -141,12 +143,13 @@ async def run_script(
     the envelope grants read-write, and removed once the run ends. ``trace`` is a
     rule-started run's rule chain, handed to ``corsia event emit`` (``events.trace_env``).
     ``github_repo`` is the repository a rule run's claimed event names; only then
-    does the run get a GitHub read channel, and only for that repository.
+    does the run get a GitHub read channel, and only for that repository. ``saved_items``
+    are what an approved run may use; only an authenticated run gets their sockets.
     """
     await _checked_environment()
     if stdin is None:
         return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace,
-                          rule_id, github_repo, authenticated)
+                          rule_id, github_repo, authenticated, saved_items)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -156,7 +159,7 @@ async def run_script(
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
         return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace,
-                          rule_id, github_repo, authenticated)
+                          rule_id, github_repo, authenticated, saved_items)
     finally:
         Path(name).unlink(missing_ok=True)
 
@@ -164,79 +167,27 @@ async def run_script(
 async def _run(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
     stdin: Path | None, trace: tuple[str, ...], rule_id: str | None, github_repo: str | None,
-    authenticated: bool,
+    authenticated: bool, saved_items: RunItems | None = None,
 ) -> ScriptRun:
     view = await run_in_db(github_agent.view)
     if view.answer_pending:
         view = await run_off_db(github_agent.verify_now)
     if not authenticated:
         if github_repo is not None:
-            async with _legacy_github_client(thread_id, run_id, rule_id, github_repo) as (socket, client):
+            async with script_clients._legacy_github_client(thread_id, run_id, rule_id, github_repo) as (
+                socket, client,
+            ):
                 return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
                                                stdin, trace, None, None, None, client, view,
                                                github_read_socket=socket)
         return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
                                        stdin, trace, None, None, None, None, view)
-    async with _authenticated_client(thread_id, view) as (socket_dir, tool_socket, config_dir, client_dir):
+    async with script_clients._authenticated_client(thread_id, view, saved_items) as (
+        socket_dir, tool_socket, config_dir, client_dir, item_env,
+    ):
         return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
-                                       stdin, trace, socket_dir, tool_socket, config_dir, client_dir, view)
-
-
-@asynccontextmanager
-async def _legacy_github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
-    """The repository-scoped read channel for rule-started scripts that are not authenticated.
-
-    A bridge with one exit: Agent Substrate deletes it, the read socket, its environment
-    name and ``cli_github``'s legacy branch in one change once the scripts that read through
-    it (the GitHub screen's) run as authenticated scripts.
-    """
-    stack = AsyncExitStack()
-    try:
-        socket = await stack.enter_async_context(github_channel(thread_id, run_id, rule_id, repo=repo))
-        directory = Path(stack.enter_context(tempfile.TemporaryDirectory(
-            prefix="github-client-", dir=corsia_temp_root_for_bind(thread_id))))
-        client = directory / "corsia"
-        client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
-        client.chmod(0o700)
-    except OSError as exc:
-        await stack.aclose()
-        raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}: {exc}") from exc
-    async with stack:
-        yield socket, directory
-
-
-@asynccontextmanager
-async def _authenticated_client(thread_id: str, view: AgentAccountView):
-    """Run-private sockets and a script-readable configuration containing no credential."""
-    async with AsyncExitStack() as stack:
-        socket_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="r", dir=corsia_temp_root())))
-        tool_socket = socket_dir / "t"
-        await stack.enter_async_context(tool_channel(tool_socket, thread_id))
-        client_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(
-            prefix="script-client-", dir=corsia_temp_root_for_bind(thread_id))))
-        client = client_dir / "corsia"
-        client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
-        client.chmod(0o700)
-        config_dir = None
-        if view.ready or (view.absent and await asyncio.to_thread(_host_login_available)):
-            from events.connectors.github_read_budget import budget, person_budget
-
-            # With no agents' account an approved script reads as the host gh login, as agent shells do.
-            credential = ((lambda: github_agent.script_forwarder_credential(view)) if view.ready
-                          else person_forwarder_credential)
-            github_socket = socket_dir / "g"
-            await stack.enter_async_context(github_proxy(
-                github_socket, credential, read_budget=budget if view.ready else person_budget,
-            ))
-            config_dir = client_dir / "gh"
-            config_dir.mkdir(mode=0o700)
-            (config_dir / "config.yml").write_text(f"http_unix_socket: {github_socket}\n")
-            # gh won't run without a stored login; the forwarder adds the real one. The key is split
-            # so credential scanners don't take this placeholder for a secret.
-            (config_dir / "hosts.yml").write_text(
-                "github.com:\n    user: script\n    oauth_" + "token: placeholder\n"
-            )
-        yield socket_dir, tool_socket, config_dir, client_dir
+                                       stdin, trace, socket_dir, tool_socket, config_dir, client_dir, view,
+                                       item_env=item_env)
 
 
 #: One line per account cause: what is wrong, and who fixes it or what CORSIA does next.
@@ -264,15 +215,6 @@ _UNAPPROVED = ("scripts get no GitHub login: this script isn't approved to use G
                "authenticated=true so the person can approve it")
 _NO_HOST_LOGIN = ("there is no agents' GitHub account and no GitHub CLI login on this computer; the person "
                   "needs to sign in to GitHub CLI or connect an agents' GitHub account")
-
-
-def _host_login_available() -> bool:
-    """Whether the host ``gh`` login can serve a forwarder; the credential read is discarded."""
-    try:
-        person_forwarder_credential()
-    except ValueError:
-        return False
-    return True
 
 
 def github_lock_reason(view: AgentAccountView, *, approved: bool = True, host_login: bool = True) -> str | None:
@@ -331,7 +273,7 @@ async def _run_with_channel(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
     stdin: Path | None, trace: tuple[str, ...], socket_dir: Path | None, socket_path: Path | None,
     config_dir: Path | None, client_dir: Path | None, view: AgentAccountView,
-    *, github_read_socket: Path | None = None,
+    *, github_read_socket: Path | None = None, item_env: dict[str, str] | None = None,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
     # Keep the shell's locked Git configuration, without exposing either gh home.
@@ -342,6 +284,7 @@ async def _run_with_channel(
         env[GITHUB_READ_SOCKET_ENV] = str(github_read_socket)
     if socket_path is not None:
         env[SOCKET_ENV] = str(socket_path)
+    env.update(item_env or {})
     if config_dir is not None:
         env["GH_CONFIG_DIR"] = str(config_dir)
         env["GH_PROMPT_DISABLED"] = "1"

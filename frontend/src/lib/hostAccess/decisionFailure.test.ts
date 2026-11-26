@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { HostAccessApiError } from '$lib/api/hostAccess';
 import {
 	APPROVAL_CHANGED, APPROVE_FAILED, DENY_FAILED, NEW_DETAILS, NEW_DETAILS_SCRIPT, REJECT_FAILED, REVOKE_FAILED,
-	decisionFailure,
+	RULES_CHANGED, decisionFailure,
 } from './decisionFailure';
 
 const SERVER = 'Internal Server Error';
@@ -22,6 +22,17 @@ describe('decisionFailure', () => {
 		}
 		for (const kind of ['lease', 'fill'] as const) {
 			expect(decisionFailure(refused(409), 'revoke', kind)).toEqual({ notice: APPROVAL_CHANGED, refresh: true, gone: false });
+		}
+	});
+
+	it('says the script’s rules changed only for a script 409 carrying that line, and reads it again', () => {
+		for (const decision of ['approve', 'reject'] as const) {
+			expect(decisionFailure(refused(409, RULES_CHANGED), decision, 'script'))
+				.toEqual({ notice: RULES_CHANGED, refresh: true, gone: false });
+		}
+		for (const kind of ['lease', 'fill'] as const) {
+			expect(decisionFailure(refused(409, RULES_CHANGED), 'approve', kind))
+				.toEqual({ notice: NEW_DETAILS, refresh: true, gone: false });
 		}
 	});
 

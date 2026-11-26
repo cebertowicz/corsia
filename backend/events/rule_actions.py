@@ -25,7 +25,8 @@ class RuleRefused(ValueError):
 
 def check_script(db: sqlite3.Connection, writer: str, script_id: Any, extra: Mapping[str, Any]) -> str:
     """The script a ``run_script`` rule may run: one of its writer's own active script
-    schedules. ``extra`` are the fields that belong to other actions, all refused."""
+    schedules, or one waiting for the person's approval, which runs nothing until then.
+    ``extra`` are the fields that belong to other actions, all refused."""
     given = sorted(name for name, value in extra.items() if value is not None)
     if given:
         raise RuleRefused(f"A run_script rule takes no {' or '.join(given)}: it runs your script, "
@@ -33,12 +34,12 @@ def check_script(db: sqlite3.Connection, writer: str, script_id: Any, extra: Map
     if not isinstance(script_id, str) or not script_id:
         raise RuleRefused("run_script needs script_id, the id automation_list shows for one of your "
                           "script schedules.")
-    row = db.execute("SELECT thread_id, state FROM automation_schedules WHERE id=? AND kind='script'",
-                     (script_id,)).fetchone()
+    row = db.execute("SELECT thread_id, state, json_extract(payload_json, '$.authentication.state') AS approval "
+                     "FROM automation_schedules WHERE id=? AND kind='script'", (script_id,)).fetchone()
     if row is None or row["thread_id"] != writer:
         raise RuleRefused(f"{script_id} isn't one of your script schedules; automation_list shows "
                           "yours, and automation_schedule registers one.")
-    if row["state"] != "active":
+    if row["state"] != "active" and not (row["state"] == "paused" and row["approval"] == "pending"):
         raise RuleRefused(f"Your script schedule {script_id} is {row['state']}; register the script "
                           "again with automation_schedule and use the new id.")
     return script_id

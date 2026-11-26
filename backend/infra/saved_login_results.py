@@ -26,15 +26,16 @@ def _record(thread_id: str, login_id: str, result: Literal["filled", "rejected",
 
 
 def audit(conn: Connection, *, site: str, thread_id: str, result: str, login_id: str = "",
-          item: str | None = None) -> None:
+          item: str | None = None, script_id: str | None = None) -> None:
     """One fill's history row, naming exactly one login (its id, item NULL) or one saved item (its entry name,
-    login_id empty). The table predates items and SQLite can't add that rule to it without a rebuild, so it's here."""
+    login_id empty). The table predates items and SQLite can't add that rule to it without a rebuild, so it's here.
+    ``script_id`` is the script schedule that used it, when a script did rather than a fill."""
     if bool(login_id) == bool(item):
         raise KeyStoreError("A fill's history row names exactly one saved login or one saved item.")
     conn.execute(
-        "INSERT INTO saved_login_fill_audit (created_at, login_id, item, site, thread_id, result) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (utc_now_iso(), login_id, item, site, thread_id, result),
+        "INSERT INTO saved_login_fill_audit (created_at, login_id, item, site, thread_id, result, script_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (utc_now_iso(), login_id, item, site, thread_id, result, script_id),
     )
 
 

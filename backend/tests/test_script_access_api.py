@@ -12,8 +12,7 @@ from automation.script_schedules import create_script
 from infra.auth import require_human_user, require_user
 
 
-@pytest.mark.parametrize("decision,expected", [("approve", "approved"), ("reject", "denied")])
-def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monkeypatch, decision, expected):
+def _pending_app(isolated_db, tmp_path, monkeypatch):
     from api.host_access import router
     from events import delivery
     from infra import state
@@ -36,14 +35,22 @@ def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monk
     app.dependency_overrides[require_human_user] = lambda: person
     monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock(return_value=True))
     monkeypatch.setattr(state, "broadcast_to_user", lambda *args: None)
-    client = TestClient(app)
+    return TestClient(app), person, schedule, path
+
+
+@pytest.mark.parametrize("decision,expected", [("approve", "approved"), ("reject", "denied")])
+def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monkeypatch, decision, expected):
+    from events import delivery
+
+    client, person, schedule, path = _pending_app(isolated_db, tmp_path, monkeypatch)
     leases = client.get("/api/host-access/leases?root_thread_id=owner",
                         headers={"X-CORSIA-Interactive-UI": "1"}).json()["leases"]
     request = next(row for row in leases if row["kind"] == "script")
     assert request["script_path"] == str(path)
     assert request["reviewer_reason"] == "appropriate"
     assert request["state"] == "awaiting_user" and "revision" not in request
-    payload = {"application_hash": request["application_hash"]}
+    assert request["saved_items"] == [] and len(request["rules_hash"]) == 64
+    payload = {"application_hash": request["application_hash"], "rules_hash": request["rules_hash"]}
     headers = {"X-CORSIA-User-Decision": request["decision_capability"]}
     person["id"] = "other"
     url = f"/api/host-access/leases/scripts/{schedule.id}/{decision}"

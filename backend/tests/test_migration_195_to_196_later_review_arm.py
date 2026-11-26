@@ -48,7 +48,7 @@ def _armed(db, plan_id):
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 210
+    assert SCHEMA_VERSION == 211
     assert MIGRATIONS[195] is migrate_195_to_196
 
 
