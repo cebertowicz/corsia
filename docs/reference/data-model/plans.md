@@ -51,6 +51,17 @@ erDiagram
 
 ## Tables
 
+### `activity_draft_acknowledgements`
+
+Source: `backend/infra/activity_draft_ack_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `user_id` | TEXT | Yes | Yes | — | — |
+| `draft_id` | TEXT | Yes | Yes | — | action_drafts.id |
+
+Indexes: `sqlite_autoindex_activity_draft_acknowledgements_1` (user_id, draft_id, unique).
+
 ### `activity_rank_nudges`
 
 Source: `backend/infra/activity_ranking_schema.py`.

@@ -1,6 +1,7 @@
 """SQLite schema DDL used by database initialization."""
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
+from infra.activity_draft_ack_schema import ACTIVITY_DRAFT_ACK_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
 from infra.fact_extraction_schema import FACT_EXTRACTION_SCHEMA_SQL
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
@@ -27,6 +28,7 @@ from infra.lesson_placement_check_schema import LESSON_PLACEMENT_CHECK_SCHEMA_SQ
 from infra.managed_process_schema import MANAGED_PROCESS_SCHEMA_SQL
 from infra.measurement_schema import MEASUREMENT_BREAKS_SCHEMA_SQL, MEASUREMENT_INDEX_SQL
 from infra.message_schema import MESSAGE_SCHEMA_SQL
+from infra.model_profiles_schema import MODEL_PROFILES_SCHEMA_SQL
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 from infra.plan_liveness_schema import PLAN_LIVENESS_SCHEMA_SQL
 from infra.plan_schema import STRUCTURED_PLAN_SCHEMA_SQL
@@ -40,7 +42,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 209
+SCHEMA_VERSION = 210
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -123,21 +125,11 @@ SCHEMA_SQL = f"""
     {STAGING_SCHEMA_SQL}
     {CONTINUITY_SCHEMA_SQL}
     {PRESENCE_SCHEMA_SQL}
-    {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}{EMAIL_SCREENS_SCHEMA_SQL}
+    {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}{ACTIVITY_DRAFT_ACK_SCHEMA_SQL}{EMAIL_SCREENS_SCHEMA_SQL}
     {OUTCOME_EVENTS_SCHEMA_SQL}
     {LESSON_PLACEMENT_CHECK_SCHEMA_SQL}
     {PROVIDER_AVAILABILITY_TABLE_SQL};
-    CREATE TABLE IF NOT EXISTS model_profiles (
-        model_id TEXT PRIMARY KEY,
-        context_window INTEGER,
-        temperature REAL,
-        parallel_slots INTEGER DEFAULT 1,
-        reasoning_budget INTEGER DEFAULT -1,
-        flash_attention INTEGER DEFAULT 1,
-        custom_args TEXT,
-        max_tokens INTEGER,
-        updated_at TEXT
-    );
+    {MODEL_PROFILES_SCHEMA_SQL}
         CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(thread_id, created_at);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_session_seq
         ON messages(thread_id, seq);

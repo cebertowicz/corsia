@@ -19,11 +19,12 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 209 and MIGRATIONS[142] is migrate_142_to_143
+    assert SCHEMA_VERSION == 210 and MIGRATIONS[142] is migrate_142_to_143
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
+    db.execute("DROP TABLE activity_draft_acknowledgements")  # Added after schema 142.
     db.execute(f"DROP INDEX {_INDEX}")
     rows = [
         ("d1", "plan-decision", json.dumps({"plan_decision": {"source_node_id": "n1", "node_id": "r1"}})),
@@ -40,7 +41,7 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 209)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 210)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     assert db.execute(schema).fetchall() == fresh.execute(schema).fetchall()
     assert _index_sql(db) is not None

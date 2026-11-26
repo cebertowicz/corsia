@@ -115,6 +115,14 @@ export function headerLayout(lines: Iterable<string>): { text: string; lines: He
 	return { text: texts.join('\n'), lines: found };
 }
 
+/** The current subject for an email tab, or its ordinary title if the subject is empty. */
+export function emailTabTitle(draft: EmailDraftInfo | undefined, fallback: string): string {
+	if (!draft) return fallback;
+	const header = headerLayout(draft.header.text.split('\n'));
+	const subject = header.lines.find((line) => line.key === 'subject');
+	return subject ? header.text.slice(subject.valueFrom, subject.to).trim() || fallback : fallback;
+}
+
 /** The server's reading of the recipients while it read this same header text; null while an edit it hasn't read is in. */
 export function currentRecipients(header: ServerHeader | null | undefined, headerText: string): HeaderRecipient[] | null {
 	return header && header.text === headerText ? header.recipients : null;

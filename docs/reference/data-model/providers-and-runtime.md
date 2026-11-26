@@ -75,7 +75,7 @@ Indexes: `sqlite_autoindex_managed_process_retirements_1` (handle, unique).
 
 ### `model_profiles`
 
-Source: `backend/infra/schema.py`.
+Source: `backend/infra/model_profiles_schema.py`.
 
 | Column | Type | Primary key | NOT NULL | Default | References |
 |---|---|---|---|---|---|

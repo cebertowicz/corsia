@@ -74,6 +74,10 @@ def draft_rows(db, user_id: str, *, subjects: bool = True) -> list[dict]:
              FROM action_drafts d JOIN threads t ON t.id=d.thread_id
              LEFT JOIN projects p ON p.id=t.project_id
             WHERE d.kind='email' AND d.state IN ('open', 'sending') AND t.user_id=?
+              AND (d.state='open' OR NOT EXISTS (
+                  SELECT 1 FROM activity_draft_acknowledgements ack
+                   WHERE ack.user_id=t.user_id AND ack.draft_id=d.id
+              ))
               AND d.id = (
                   SELECT newest.id FROM action_drafts newest
                    WHERE newest.kind=d.kind AND newest.path=d.path

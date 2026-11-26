@@ -2,6 +2,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 import type { ArtifactTab } from '$lib/stores/artifactWorkspace';
+import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -27,6 +28,7 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	emailDraftHeaders.set({});
 });
 
 function renderStrip(overrides: Partial<{
@@ -49,6 +51,15 @@ function renderStrip(overrides: Partial<{
 }
 
 describe('ArtifactTabStrip', () => {
+	it('updates the tab and its close label when an email subject changes', () => {
+		renderStrip();
+		flushSync(() => emailDraftHeaders.set({ 'art-1': { id: 'draft', header: { text: 'Subject: First subject', recipients: [] } } }));
+		expect(host.querySelector('.tab-title')?.textContent).toContain('First subject');
+		expect(host.querySelector('.tab-close')?.getAttribute('aria-label')).toBe('Close First subject');
+		flushSync(() => emailDraftHeaders.set({ 'art-1': { id: 'draft', header: { text: 'Subject: Updated subject', recipients: [] } } }));
+		expect(host.querySelector('.tab-title')?.textContent).toContain('Updated subject');
+	});
+
 	it('renders every tab title and marks the active one selected', () => {
 		renderStrip({ activeKey: 'tab-2' });
 		const tabEls = host.querySelectorAll('[role="tab"]');

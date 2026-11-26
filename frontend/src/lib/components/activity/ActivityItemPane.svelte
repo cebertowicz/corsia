@@ -53,7 +53,7 @@
 	// Every band here, the document's own review band included, names the agent asking at rest.
 	setContext(ASKER_AT_REST, true);
 	setContext(REVIEW_ANSWERED, () => void onActed());
-	setContext(EMAIL_DRAFT_SETTLED, () => { if (item.kind === 'draft') void onActed(); });
+	setContext(EMAIL_DRAFT_SETTLED, untrack(() => item.kind === 'draft') ? () => void onActed() : undefined);
 
 	const decision = $derived(decisionOf(item));
 	const held = $derived(heldOf(item));

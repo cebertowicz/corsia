@@ -19,6 +19,8 @@ from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
 from api.attention_notifications import router as notifications_router
+from api.attention_draft_ack import router as draft_ack_router, _acknowledge_draft as _acknowledge_draft
+from api.attention_review_bar import _review_bar
 from doceditor import review_bar
 from plans import public
 from registry import artifact_record as AR
@@ -26,6 +28,7 @@ from registry import attention
 
 router = APIRouter(prefix="/api/attention", tags=["attention"])
 router.include_router(notifications_router)
+router.include_router(draft_ack_router)
 
 
 def _require_user(token: str) -> dict:
@@ -69,28 +72,6 @@ async def _authorize(artifact_id: str, user: dict) -> None:
         raise HTTPException(status_code=404, detail="artifact not found")
     if not accessible:
         raise HTTPException(status_code=403, detail="forbidden")
-
-
-def _review_bar(artifact_id: str, user_id: str) -> dict | None:
-    """The review bar's read for a document or image, or None for any other type."""
-    from doceditor.person_comment_projection import person_step_attention
-
-    db = get_db()
-    try:
-        row = AR.identity_row_for(artifact_id, db=db)
-        if row is None or row["type"] not in public.ASKABLE_TYPES:
-            return None
-        person_step = public.person_step_instructions(str(row["id"]), db=db)
-        attention = person_step and person_step_attention(db, person_step["node_id"], str(row["id"]), user_id)
-        if attention:
-            person_step = {**person_step, "comment_attention": attention}
-        return {
-            "artifact_id": artifact_id, "artifact_type": row["type"],
-            **review_bar.round_state(db, str(row["id"])),
-            **({"person_step": person_step} if person_step is not None else {}),
-        }
-    finally:
-        db.close()
 
 
 def _summarize(item: dict) -> dict:
