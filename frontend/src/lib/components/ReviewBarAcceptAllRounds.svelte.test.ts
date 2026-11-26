@@ -1,3 +1,4 @@
+import { createHash, webcrypto } from 'node:crypto';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -35,9 +36,44 @@ beforeEach(() => {
 	submittedAnswers.set({});
 });
 afterEach(() => {
+	vi.unstubAllGlobals();
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+});
+
+describe('ReviewBar approval hash', () => {
+	it('hashes the document after accepting the pending suggestion', async () => {
+		vi.stubGlobal('crypto', webcrypto);
+		let text = 'Before suggestion\n';
+		let finish!: () => void;
+		const onAcceptAll = vi.fn(() => new Promise<number>((resolve) => {
+			finish = () => { text = 'After suggestion\n'; resolve(1); };
+		}));
+		component = mount(ReviewBar, { target: host, props: {
+			artifactId: 'doc-1', pendingSuggestions: 1, onAcceptAll, documentText: () => text,
+		} });
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(onAcceptAll).toHaveBeenCalledOnce());
+		expect(api.answerReview).not.toHaveBeenCalled();
+		finish();
+		const expected = createHash('sha256').update('After suggestion\n').digest('hex');
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1'], expected));
+	});
+
+	it('sends no document hash when requesting changes', async () => {
+		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', documentText: () => 'Text\n' } });
+		await vi.waitFor(() => expect(button('Send back')).toBeTruthy());
+		button('Send back')!.click();
+		await vi.waitFor(() => expect(host.querySelector('textarea')).toBeTruthy());
+		const note = host.querySelector('textarea')!;
+		note.value = 'Please revise';
+		note.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		button('Send back')!.click();
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'changes_requested', 'Please revise', ['h1']));
+	});
 });
 
 describe('ReviewBar accepted count across rounds', () => {
