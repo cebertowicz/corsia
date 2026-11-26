@@ -126,7 +126,7 @@ describe('Activity list', () => {
 		});
 		render(); await settle();
 		expect(rows()[0].textContent).toContain('File missing');
-		expect(pane().textContent).toContain('This draft’s file is missing, so it can’t be sent.');
+		expect(pane().textContent).toContain('This draft’s file is missing or can’t be opened, so it can’t be sent.');
 		expect(buttonNamed('Send now')).toBeUndefined();
 		buttonNamed('Don’t send')!.click();
 		await vi.waitFor(() => expect(rows()).toHaveLength(0));
@@ -257,7 +257,7 @@ describe('Activity list', () => {
 		buttonNamed('Don’t send')!.click();
 		await vi.waitFor(() => expect(failedReads).toBeGreaterThan(0));
 		await settle();
-		expect(pane().textContent).toContain('This draft’s file is missing, so it can’t be sent.');
+		expect(pane().textContent).toContain('This draft’s file is missing or can’t be opened, so it can’t be sent.');
 		expect(rows()).toHaveLength(1);
 	});
 

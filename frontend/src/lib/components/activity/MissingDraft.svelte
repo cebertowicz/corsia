@@ -33,7 +33,7 @@
 {#if unconfirmed}
 	<p role="status">Couldn’t confirm the email left. Check your Sent mail. If it isn’t there, ask the agent for a new draft.</p>
 {:else}
-	<p role="status">This draft’s file is missing, so it can’t be sent.</p>
+	<p role="status">This draft’s file is missing or can’t be opened, so it can’t be sent.</p>
 {/if}
 <div class="actions">
 	{#if unconfirmed}<Button size="sm" variant="primary" loading={sending} disabled={offline} onclick={() => void acknowledge()}>Done</Button>
@@ -44,7 +44,7 @@
 {#if failure}<p class="failure" role="alert">{unconfirmed ? 'Couldn’t mark this done. Try again.' : 'Don’t send didn’t go through. Try again.'}</p>{/if}
 
 <style>
-	.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+	.actions { display: flex; flex-wrap: wrap; column-gap: 44px; row-gap: var(--space-4); margin-bottom: var(--space-3); }
 	p { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-relaxed); }
 	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.failure { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }
