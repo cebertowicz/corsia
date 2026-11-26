@@ -12,7 +12,7 @@
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
 	import { connectionState } from '$lib/stores/connection';
-	import { unreadCommentCount } from '$lib/docUnread';
+	import { unreadReplyCount } from '$lib/docUnread';
 	import type { HeldVerb } from '$lib/api/heldReplies';
 	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
 	import { emitProductEvent } from '$lib/product_events';
@@ -163,8 +163,8 @@
 	}
 
 	/**
-	 * Where the person is in this document's replies, counted on the pane's own unread set (what its jump button
-	 * counts). The total is fixed when the document opens and rises only as replies arrive.
+	 * Where the person is in this document's replies to their own comments — the set the row counted, never an
+	 * unrelated unread comment. The total is fixed when the document opens and rises only as replies arrive.
 	 */
 	const serverUnread = $derived(document?.unread ?? reviewOf(item)?.unread_replies ?? 0);
 	let total = $state(untrack(() => serverUnread));
@@ -177,7 +177,7 @@
 		});
 	});
 	const commentsReady = $derived(docArtifactId !== null && $commentLoads[docArtifactId]?.state === 'ready');
-	const liveUnread = $derived(docArtifactId && commentsReady ? unreadCommentCount($docComments[docArtifactId] ?? []) : null);
+	const liveUnread = $derived(docArtifactId && commentsReady ? unreadReplyCount($docComments[docArtifactId] ?? []) : null);
 	const position = $derived(replyPosition(total, liveUnread ?? total));
 	const repliesRead = $derived(allRead || liveUnread === 0);
 	const positionLabel = $derived(position.of === 1 ? '1 reply' : `${position.at} of ${position.of} replies`);
