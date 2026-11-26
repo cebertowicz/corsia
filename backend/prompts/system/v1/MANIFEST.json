@@ -124,12 +124,6 @@
       "sha256": "573be7b1036f53f05e60af73d9f7d547eafb3402052304f856a6d3f43fa696c3"
     },
     {
-      "bytes": 3541,
-      "kind": "skill",
-      "path": "skills/agent-experience/SKILL.md",
-      "sha256": "f4fd70fb0d41390fb0e9ea358060bd1bb04195c89aae6094f0ace85cae3019c7"
-    },
-    {
       "bytes": 5445,
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
@@ -268,10 +262,10 @@
       "sha256": "fae58854bddeb4591b32e51183983ec907186cb22f8477b3d42f9737ff56a638"
     },
     {
-      "bytes": 6131,
+      "bytes": 6044,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
-      "sha256": "44997ed729298a1150f842760d2827b3faf7a0f23a6968702df3b35009348523"
+      "sha256": "47fb50c83322fb0f9e64223a4d91e8f0b6a7c0f2d7c6cd961b012aa283a98542"
     },
     {
       "bytes": 3954,
