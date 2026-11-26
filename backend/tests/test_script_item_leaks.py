@@ -117,6 +117,10 @@ async def test_a_start_failure_that_cannot_be_checked_says_so_without_the_text(w
     _process(monkeypatch, ScriptRun(0, VALUE.encode(), b"", False))
     report = await script_runner._execute(world["schedule"])
     assert "its output was withheld" in (report.error or "") and VALUE not in repr(report)
+    _process(monkeypatch, error=RuntimeError(f"boom {VALUE}"))
+    monkeypatch.setattr(script_runner, "_drive_owner", lambda _thread: asyncio.sleep(0))
+    await script_runner.run_claimed(world["schedule"], "2026-01-01T00:10:00+00:00")
+    _nowhere(world)
 
 
 def test_over_cap_is_read_before_hiding_shrinks_the_output():

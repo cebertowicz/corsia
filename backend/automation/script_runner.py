@@ -198,9 +198,10 @@ async def run_claimed(
         logger.warning("script schedule {} was stopped by shutdown; its run is left for recovery", schedule.id)
         return
     except Exception as exc:  # noqa: BLE001 - a run's failure is its report
-        # The type only: an exception's text can carry a saved value the run used.
+        # The log gets the type only; the report keeps the text with every saved value hidden.
         logger.error("script schedule {} failed unexpectedly: {}", schedule.id, type(exc).__name__)
-        report = _error_report(schedule, f"the runner failed: {type(exc).__name__}")
+        approved = ((schedule.payload or {}).get("authentication") or {}).get("state") == "approved"
+        report = await _blanked_error(schedule, f"the runner failed: {exc}", approved)
     report = await _stamped(schedule, report)
     report = await script_event_lines.admit_events(
         schedule, report, rule_run.trace if rule_run else (), rule_run.decision_id if rule_run else None,
@@ -331,12 +332,12 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
 
 
 async def _blanked_error(schedule: Schedule, message: str, approved: bool) -> RunReport:
-    """An approved run's start failure, with every saved value hidden from its text."""
+    """An approved run's failure, with every saved value hidden from its text."""
     if approved:
         try:
             message = script_blanking.text(message, await run_off_db(script_blanking.saved_values))
         except script_blanking.Unchecked:
-            message = "could not start, and CORSIA couldn't check why for saved values"
+            message = message.split(":", 1)[0] + ", and CORSIA couldn't check why for saved values"
     return _error_report(schedule, message)
 
 
