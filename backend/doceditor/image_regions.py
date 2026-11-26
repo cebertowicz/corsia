@@ -44,7 +44,8 @@ _EPSILON = 1e-6
 # What a marked-up copy can fail with: a missing or unreadable file, a format
 # Pillow cannot decode, or an image past the decode budget.
 RENDER_ERRORS = (OSError, ValueError, Image.DecompressionBombError)
-_REFUSED = {"missing": "could not be found", "outside": "is outside this document's scope", "not_file": "is not a file"}
+# The composer shows these to the person: "Couldn’t" is the failure phrase, and the roots ``scope_bases`` reads are a project or workspace.
+_REFUSED = {"missing": "couldn’t be found", "outside": "isn’t in this project or workspace", "not_file": "isn’t a file"}
 
 
 def parse_region(value: Any) -> tuple[float, float, float, float]:

@@ -128,9 +128,12 @@ export type MapPos = (pos: number, assoc: -1 | 1) => number;
 
 /**
  * An open image follows its markdown through edits, as its comments do. Text inserted exactly at the image's start or
- * end lands outside it, so only text inserted inside the markdown stretches it.
+ * end lands outside it, so only text inserted inside the markdown stretches it. An edit that replaces the markdown
+ * (with text or none) leaves nothing to stand on: both ends go to the start of the replaced range, a collapsed range
+ * that is never posted, never a reversed one.
  */
 export function remapOccurrence<T extends ImageOccurrence>(image: T, mapPos: MapPos): T {
-	const from = mapPos(image.from, 1), to = mapPos(image.to, -1);
+	let from = mapPos(image.from, 1), to = mapPos(image.to, -1);
+	if (from > to) { from = mapPos(image.from, -1); to = mapPos(image.to, -1); }
 	return from === image.from && to === image.to ? image : { ...image, from, to };
 }

@@ -101,12 +101,12 @@ describe('image comments', () => {
 	});
 
 	it('names the server\'s reason when it refuses an image comment', async () => {
-		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"the image shots/a.png could not be found.","kind":"region_target"}', 'region_target'));
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"the image shots/a.png couldn’t be found.","kind":"region_target"}', 'region_target'));
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const { comments } = controller();
 		await comments.draw(BOX, rect);
 		await expect(comments.submit('Too dark')).rejects.toThrow('400');
-		expect(mocks.show).toHaveBeenCalledWith('Couldn’t post the comment: the image shots/a.png could not be found. Your draft is kept.', 'error');
+		expect(mocks.show).toHaveBeenCalledWith('Couldn’t post the comment: the image shots/a.png couldn’t be found. Your draft is kept.', 'error');
 		expect(comments.draftRegion).toEqual(BOX);
 	});
 

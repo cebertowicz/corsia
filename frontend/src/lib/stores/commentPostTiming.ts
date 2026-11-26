@@ -64,6 +64,7 @@ function failedOutcome(error: unknown): PostOutcome {
 	if (!wire) return 'failed';
 	let kind: unknown;
 	try { kind = JSON.parse(wire[2])?.kind; } catch { /* A body that is not JSON has no code. */ }
+	// {0,31} is _CODE_CHARS (32) in backend/api/comment_post_timing.py, where its basis is stated.
 	return typeof kind === 'string' && /^[a-z][a-z_]{0,31}$/.test(kind) ? `failed:${wire[1]}:${kind}` : `failed:${wire[1]}`;
 }
 

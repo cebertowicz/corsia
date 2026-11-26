@@ -76,6 +76,10 @@ describe('comments on images inside a document', () => {
 			const gone = through(8, '', 26);
 			expect(gone.from).toBe(gone.to);
 		});
+
+		it('collapses, never reverses, when an edit replaces text from above the image into its markdown with new text', () => {
+			expect(through(8, 'abc', 26)).toEqual({ from: 8, to: 8, src: 's' });
+		});
 	});
 });
 

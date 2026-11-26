@@ -25,6 +25,10 @@ _NUMBER = re.compile(rf"\d{{1,{_NUMBER_DIGITS}}}")
 _OUTCOMES = frozenset({"delivered", "failed", "timeout", "earlier"})
 # A refused post says how: ``failed:<status>`` or ``failed:<status>:<code>``, where code is the refusal's own short
 # machine name (``region_target``, ``selection_changed``), never its sentence, so no path or quote can ride along.
+# 32 characters: the longest kind a comment post can be refused with today is ``suggestion_empty_insertion``, 26 (the
+# others, from ``CommentActionError`` in comment_validation, image_regions, doc_images and comment_recipients, plus
+# ``selection_changed`` and ``not_commentable``, are 20 or fewer), so six characters of room remain. The browser's own
+# pattern in frontend/src/lib/stores/commentPostTiming.ts repeats this number.
 _CODE_CHARS = 32
 _FAILED = re.compile(rf"failed:\d{{3}}(?::[a-z][a-z_]{{0,{_CODE_CHARS - 1}}})?")
 _LONGEST_OUTCOME = len("failed:999:") + _CODE_CHARS
