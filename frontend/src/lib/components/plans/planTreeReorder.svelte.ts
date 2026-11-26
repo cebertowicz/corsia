@@ -1,4 +1,4 @@
-import { onDestroy, tick } from 'svelte';
+import { onDestroy, tick, untrack } from 'svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import { LONG_PRESS_MS } from '$lib/components/ui/rowMenu.svelte';
 import { captureFold, playFold, prefersReducedMotion } from './foldWave';
@@ -7,8 +7,11 @@ import { positionBeside } from './planReorder';
 import type { createTaskMenu } from './taskMenu.svelte';
 
 type Draft = { id: string; targetId: string; position: number; before: boolean };
-type Drag = { id: string; offsets: Record<string, number>; position: number; count: number };
-type Press = { node: OperatorNode; pointerId: number; x: number; y: number; scroll: HTMLElement | null; armed: boolean; scrolling: boolean; timer: ReturnType<typeof setTimeout> | null };
+type Drag = { id: string; liftedIds: string[]; offsets: Record<string, number>; position: number; count: number };
+/** `treeY` is where the press landed in the tree's own coordinates. */
+type Press = { node: OperatorNode; pointerId: number; x: number; y: number; treeY: number; scroll: HTMLElement | null; armed: boolean; scrolling: boolean; timer: ReturnType<typeof setTimeout> | null };
+/** Tops are in the tree's own coordinates, so scrolling or anything shifting above the tree leaves them true. */
+type Slot = { id: string; top: number; height: number; rows: { id: string; top: number; bottom: number }[] };
 /** Saves one move through the pane's user-action path; the server's refusal, or null once it landed. */
 type ApplyMove = (node: OperatorNode, position: number) => Promise<string | null> | void;
 
@@ -37,8 +40,13 @@ export function createPlanTreeReorder(options: Options) {
 	let error = $state<string | null>(null);
 	let moving = $state(false);
 	let suppressClick = false;
-	let scrollFrame = 0;
+	let dragFrame = 0;
+	let movePending = false;
+	let lastScrollTop = 0;
 	let dragCursorY = 0;
+	/** The press point's distance below the top of the lifted row's slot. */
+	let grab = 0;
+	let geometry: Slot[] | null = null;
 	let press: Press | null = null;
 	const slop = 10;
 
@@ -120,18 +128,28 @@ export function createPlanTreeReorder(options: Options) {
 		if (!refusal) announcement = `${node.title} moved to ${target + 1} of ${group.length}`;
 		return refusal;
 	}
-	function scrollWhileDragging() {
-		const scroller = press?.scroll;
-		if (!drag || !scroller) return;
-		const box = scroller.getBoundingClientRect();
-		const edge = parseFloat(getComputedStyle(scroller).getPropertyValue('--space-6')) || box.height / 20;
-		const previousTop = scroller.scrollTop;
-		if (dragCursorY < box.top + edge) scroller.scrollTop -= edge / 4;
-		if (dragCursorY > box.bottom - edge) scroller.scrollTop += edge / 4;
-		if (scroller.scrollTop !== previousTop && press) updateDrag(press.node, dragCursorY);
-		scrollFrame = requestAnimationFrame(scrollWhileDragging);
+	function scheduleDragFrame() {
+		if (!dragFrame) dragFrame = requestAnimationFrame(applyDragFrame);
 	}
-	onDestroy(() => { if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); });
+	/** One frame of a drag: scroll near the container's edges, then apply the latest coalesced move. */
+	function applyDragFrame() {
+		dragFrame = 0;
+		const current = press;
+		if (!geometry || !current) return;
+		const scroller = current.scroll;
+		if (scroller) {
+			const box = scroller.getBoundingClientRect();
+			const edge = parseFloat(getComputedStyle(scroller).getPropertyValue('--space-6')) || box.height / 20;
+			const previousTop = scroller.scrollTop;
+			if (dragCursorY < box.top + edge) scroller.scrollTop -= edge / 4;
+			if (dragCursorY > box.bottom - edge) scroller.scrollTop += edge / 4;
+			if (scroller.scrollTop !== previousTop || scroller.scrollTop !== lastScrollTop) movePending = true;
+			lastScrollTop = scroller.scrollTop;
+		}
+		if (movePending) { movePending = false; updateDrag(current.node, dragCursorY); }
+		if (scroller) scheduleDragFrame();
+	}
+	onDestroy(() => { if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(dragFrame); });
 	// Ordinary swipes use native scrolling; only a held reorder blocks it, so the same finger can drag
 	// a row without the browser cancelling it. WebKit decides at touchstart whether a touch's moves can
 	// be cancelled, so this listener lives on the tree from mount, not from the long press.
@@ -147,47 +165,67 @@ export function createPlanTreeReorder(options: Options) {
 		const node = options.nodes().find((candidate) => candidate.id === draft!.id);
 		if (!node || siblings(node).findIndex((candidate) => candidate.id === node.id) === draft.position) draft = null;
 	});
-	function updateDrag(node: OperatorNode, y: number) {
+	// A plan update during a drag can add, remove or fold rows: measure them again once they render.
+	$effect(() => {
+		options.nodes();
+		untrack(() => {
+			if (!geometry || !press) return;
+			geometry = measureDrag(press.node); movePending = true; scheduleDragFrame();
+		});
+	});
+	function treeTop(): number {
+		return options.element()?.getBoundingClientRect().top ?? 0;
+	}
+	function measureDrag(node: OperatorNode): Slot[] {
 		const group = peers(node);
 		const all = options.nodes();
 		const byId = new Map(all.map((item) => [item.id, item]));
-		const belongsTo = (candidate: OperatorNode, ancestor: string) => {
+		const members = new Map(group.map((item) => [item.id, [] as OperatorNode[]]));
+		for (const item of all) {
 			const seen = new Set<string>();
-			for (let current: OperatorNode | undefined = candidate; current && !seen.has(current.id); current = current.parent_id ? byId.get(current.parent_id) : undefined) {
-				if (current.id === ancestor) return true;
+			for (let current: OperatorNode | undefined = item; current && !seen.has(current.id); current = current.parent_id ? byId.get(current.parent_id) : undefined) {
+				const rows = members.get(current.id);
+				if (rows) { rows.push(item); break; }
 				seen.add(current.id);
 			}
-			return false;
-		};
-		const slots = group.flatMap((candidate) => {
-			const rows = all.filter((item) => belongsTo(item, candidate.id)).flatMap((item) => {
-				const element = options.element()?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(item.id)}"]`);
+		}
+		const elements = new Map([...options.element()?.querySelectorAll<HTMLElement>('[data-node-id]') ?? []].map((element) => [element.dataset.nodeId, element]));
+		const origin = treeTop();
+		return group.flatMap((candidate) => {
+			const rows = members.get(candidate.id)!.flatMap((item) => {
+				const element = elements.get(item.id);
 				if (!element) return [];
 				const box = element.getBoundingClientRect();
-				const top = box.top - new DOMMatrixReadOnly(getComputedStyle(element).transform).m42;
+				const top = box.top - new DOMMatrixReadOnly(getComputedStyle(element).transform).m42 - origin;
 				return [{ id: item.id, top, bottom: top + box.height }];
 			});
 			if (!rows.some((row) => row.id === candidate.id)) return [];
 			const top = Math.min(...rows.map((row) => row.top));
 			return [{ id: candidate.id, top, height: Math.max(...rows.map((row) => row.bottom)) - top, rows }];
 		}).sort((a, b) => a.top - b.top);
-		const nearest = slots.reduce<typeof slots[number] | null>((best, slot) => !best || Math.abs(y - (slot.top + slot.height / 2)) < Math.abs(y - (best.top + best.height / 2)) ? slot : best, null);
+	}
+	function updateDrag(node: OperatorNode, y: number) {
+		if (!geometry || !press) return;
+		const slots = geometry;
+		const slotY = y - treeTop();
+		const nearest = slots.reduce<typeof slots[number] | null>((best, slot) => !best || Math.abs(slotY - (slot.top + slot.height / 2)) < Math.abs(slotY - (best.top + best.height / 2)) ? slot : best, null);
 		const from = slots.findIndex((slot) => slot.id === node.id);
 		const to = slots.findIndex((slot) => slot.id === nearest?.id);
 		if (from < 0 || to < 0 || !nearest) return;
-		const before = y < nearest.top + nearest.height / 2;
+		const before = slotY < nearest.top + nearest.height / 2;
 		const position = positionBeside(siblings(node), node.id, nearest.id, before);
 		const visualPosition = from === to ? from : to - (from < to ? 1 : 0) + (before ? 0 : 1);
-		if (position === null || visualPosition === from) { draft = null; drag = { id: node.id, offsets: {}, position: from, count: slots.length }; return; }
-		draft = { id: node.id, targetId: nearest.id, position, before };
-		const offsets: Record<string, number> = {};
 		const source = slots[from];
-		const sourceOffset = visualPosition < from ? slots[visualPosition].top - source.top : slots[visualPosition].top + slots[visualPosition].height - source.top - source.height;
+		const liftedIds = source.rows.map((row) => row.id);
+		const offsets: Record<string, number> = {};
+		const sourceOffset = slotY - grab - source.top;
 		for (const row of source.rows) offsets[row.id] = sourceOffset;
+		if (position === null || visualPosition === from) { draft = null; drag = { id: node.id, liftedIds, offsets, position: from, count: slots.length }; return; }
+		draft = { id: node.id, targetId: nearest.id, position, before };
 		for (let i = Math.min(from, visualPosition); i <= Math.max(from, visualPosition); i++) {
 			if (i !== from) for (const row of slots[i].rows) offsets[row.id] = visualPosition < from ? source.height : -source.height;
 		}
-		drag = { id: node.id, offsets, position: visualPosition, count: slots.length };
+		drag = { id: node.id, liftedIds, offsets, position: visualPosition, count: slots.length };
 	}
 	function rowHandlers(node: OperatorNode) {
 		const menu = options.menu.rowHandlers(node);
@@ -203,7 +241,8 @@ export function createPlanTreeReorder(options: Options) {
 				const row = event.currentTarget as HTMLElement;
 				// A new press replaces the old one, so end the old one's hold first.
 				if (press?.timer) clearTimeout(press.timer);
-				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
+				cancelAnimationFrame(dragFrame); dragFrame = 0; movePending = false; geometry = null;
+				press = { node, pointerId: event.pointerId, x: event.clientX, y: event.clientY, treeY: event.clientY - treeTop(), scroll: scrollParent(row), armed: event.pointerType !== 'touch', scrolling: false, timer: null };
 				if (event.pointerType === 'touch') press.timer = setTimeout(() => { if (press?.pointerId === event.pointerId && !press.scrolling) press.armed = true; }, LONG_PRESS_MS);
 				(event.target as HTMLElement).setPointerCapture?.(event.pointerId);
 			},
@@ -216,20 +255,26 @@ export function createPlanTreeReorder(options: Options) {
 					if (distance > slop) { current.scrolling = true; suppressClick = true; if (current.timer) clearTimeout(current.timer); }
 					return;
 				}
-				if (distance <= slop && !drag) return;
+				if (distance <= slop && !geometry) return;
 				if (!eligible(node) || !options.enabled() || moving) { current.scrolling = true; return; }
-				if (!drag) { options.menu.close(); error = null; suppressClick = true; announcement = `Moving ${node.title}`; scrollFrame = requestAnimationFrame(scrollWhileDragging); }
+				if (!geometry) { options.menu.close(); error = null; suppressClick = true; announcement = `Moving ${node.title}`; geometry = measureDrag(node); grab = current.treeY - (geometry.find((slot) => slot.id === node.id)?.top ?? 0); lastScrollTop = current.scroll?.scrollTop ?? 0; }
 				dragCursorY = event.clientY;
-				updateDrag(node, event.clientY);
+				movePending = true;
+				scheduleDragFrame();
 			},
 			async onpointerup(event: PointerEvent) {
 				menu.onpointerup();
 				const current = press;
 				if (!current || current.pointerId !== event.pointerId) return;
 				if (current.timer) clearTimeout(current.timer);
-				press = null; cancelAnimationFrame(scrollFrame);
+				// Let the scheduled frame apply the last move before choosing the drop.
+				if (movePending) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+				if (press !== current) return;
+				press = null; geometry = null; cancelAnimationFrame(dragFrame); dragFrame = 0; movePending = false;
 				if (!drag) return;
 				const next = draft, count = drag.count, visualPosition = drag.position;
+				const element = options.element();
+				const snapshot = next && next.id !== next.targetId && element && !prefersReducedMotion() ? captureFold(element, []) : null;
 				drag = null;
 				if (!next || next.id === next.targetId) {
 					// The row gliding back is the visible answer; only a reader needs words.
@@ -238,9 +283,11 @@ export function createPlanTreeReorder(options: Options) {
 					return;
 				}
 				await tick();
+				const tree = options.element();
+				if (snapshot && tree) playFold(tree, snapshot);
 				if (!(await saveMove(current.node, next.position, false))) announcement = `${node.title} moved to ${visualPosition + 1} of ${count}`;
 			},
-			onpointercancel() { menu.onpointercancel(); if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(scrollFrame); press = null; drag = null; draft = null; },
+			onpointercancel() { menu.onpointercancel(); if (press?.timer) clearTimeout(press.timer); cancelAnimationFrame(dragFrame); dragFrame = 0; movePending = false; press = null; geometry = null; drag = null; draft = null; },
 		};
 	}
 	return {
