@@ -24,7 +24,7 @@ def child_summary(projected: rollup.PlanRollup | None, thread_id: str | None) ->
         "available": True,
         "plan_id": projected.plan["id"],
         "thread_id": thread_id,
-        "progress": dict(projected.progress),
+        "progress": {**projected.progress, "open_above": projected.open_above},
     }
 
 

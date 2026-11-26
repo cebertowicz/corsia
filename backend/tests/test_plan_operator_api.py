@@ -325,7 +325,7 @@ def test_thread_read_loads_child_details_only_on_demand(db, monkeypatch):
         "available": True,
         "plan_id": ids["child_plan"],
         "thread_id": "child",
-        "progress": {"done": 0, "total": 1, "open": 1, "liveness": "idle"},
+        "progress": {"done": 0, "total": 1, "open": 1, "open_above": 1, "liveness": "idle"},
     }
     assert "nodes" not in delegated["child"]
 
