@@ -1,4 +1,8 @@
-"""Remove old, unowned temporary browser profiles at backend startup."""
+"""Remove temporary browser profiles no live browser owns, at backend startup.
+
+A launch holds a shared lock on the profile root from creating its copy until its owner record is written,
+so the sweep's exclusive lock sees every copy either recorded or finished.
+"""
 from __future__ import annotations
 
 import fcntl
@@ -54,7 +58,7 @@ def _live_profiles(socket_root: Path) -> set[str]:
 
 
 def sweep(*, profile_root: Path | None = None, socket_root: Path | None = None) -> int:
-    """Remove only old directories absent from all live browser process records."""
+    """Remove ``session-*`` directories absent from every live browser owner record; return the count."""
     from host_access.browser_ports import SOCKET_ROOT
     root = profile_root or browser_launch.profile_root()
     try:
@@ -62,7 +66,7 @@ def sweep(*, profile_root: Path | None = None, socket_root: Path | None = None) 
             return 0
         fd = lock_profile_root(root, exclusive=True, nonblocking=True)
     except BlockingIOError:
-        log.info("temporary browser profiles removed: %d", 0)
+        log.info("temporary browser profile sweep skipped: a launch holds the profile root")
         return 0
     except (OSError, ValueError):
         log.warning("temporary browser profile sweep could not verify ownership")
@@ -75,6 +79,7 @@ def sweep(*, profile_root: Path | None = None, socket_root: Path | None = None) 
             log.warning("temporary browser profile sweep could not verify ownership")
             return 0
         removed = 0
+        failures: dict[str, int] = {}
         for folder in candidates:
             try:
                 info = folder.lstat()
@@ -82,8 +87,10 @@ def sweep(*, profile_root: Path | None = None, socket_root: Path | None = None) 
                     continue
                 shutil.rmtree(folder)
                 removed += 1
-            except OSError:
-                continue
+            except OSError as exc:
+                failures[type(exc).__name__] = failures.get(type(exc).__name__, 0) + 1
+        for kind, count in sorted(failures.items()):
+            log.warning("temporary browser profiles not removed: %d (%s)", count, kind)
         log.info("temporary browser profiles removed: %d", removed)
         return removed
     finally:

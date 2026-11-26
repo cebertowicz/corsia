@@ -200,3 +200,38 @@ def test_unreadable_record_holds_sweep(tmp_path):
     (owner / "bad.chrome").write_text("not-json")
     assert browser_copy_sweep.sweep(profile_root=root, socket_root=owner.parent) == 0
     assert stale.is_dir()
+
+
+def test_busy_lock_logs_a_skipped_sweep(tmp_path, caplog):
+    root = tmp_path / "profiles"
+    root.mkdir()
+    fd = browser_copy_sweep.lock_profile_root(root, exclusive=False)
+    try:
+        with caplog.at_level("INFO", logger=browser_copy_sweep.__name__):
+            assert browser_copy_sweep.sweep(profile_root=root, socket_root=tmp_path / "sockets") == 0
+    finally:
+        os.close(fd)
+    assert "sweep skipped" in caplog.text
+    assert "removed: 0" not in caplog.text
+
+
+def test_failed_removal_is_logged_by_count_and_type_and_the_sweep_goes_on(tmp_path, monkeypatch, caplog):
+    root = tmp_path / "profiles"
+    root.mkdir()
+    for name in ("session-a", "session-b", "session-c"):
+        (root / name).mkdir()
+    real_rmtree = shutil.rmtree
+
+    def rmtree(folder, *args, **kwargs):
+        if folder.name != "session-b":
+            raise PermissionError(f"denied {folder}")
+        real_rmtree(folder, *args, **kwargs)
+
+    rmtree.avoids_symlink_attacks = True
+    monkeypatch.setattr(browser_copy_sweep.shutil, "rmtree", rmtree)
+    with caplog.at_level("INFO", logger=browser_copy_sweep.__name__):
+        assert browser_copy_sweep.sweep(profile_root=root, socket_root=tmp_path / "sockets") == 1
+    assert not (root / "session-b").exists()
+    assert "not removed: 2 (PermissionError)" in caplog.text
+    assert "removed: 1" in caplog.text
+    assert str(root) not in caplog.text

@@ -13,7 +13,8 @@ async def test_pane_first_recovers_standing_site_before_frame(synthetic_browser,
     fake = synthetic_browser
     profile = str(browser_launch.profile_dir("a"))
     browser_grant_records.arm(profile, "https://example.com")
-    monkeypatch.setattr(browser_grant_records, "_armed", {})  # Restart loses in-memory grants.
+    monkeypatch.setattr(browser_grant_records, "_states", {})  # Restart loses in-memory state.
+    monkeypatch.setattr(browser_grant_records, "_grants", {})
     events = []
 
     async def clear(_endpoint, site):

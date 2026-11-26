@@ -77,12 +77,12 @@ async def _close_site_targets(cdp, targets: list, domain: str, origins: set[str]
                 raise RuntimeError("target close was not confirmed")
 
 
-async def clear(endpoint: str, site: str, *, recorded_origins: tuple[str, ...] = (),
-                settle_seconds: float = 0.25) -> None:
+async def clear(endpoint: str, site: str, *, recorded_origins: tuple[str, ...] = ()) -> None:
     """Close matching targets, delete cookies, clear known origins and verify cookies.
 
-    Confirmed means every named-origin clear succeeded and the cookie re-read is empty.
-    An unrelated response can still set a cookie after that re-read.
+    Confirmed means every named-origin clear succeeded and the cookie re-read is empty. Each delete and clear
+    is awaited before the re-read is sent on the same connection, so the re-read needs no wait. An unrelated
+    response can still set a cookie after that re-read.
     """
     domain = url_domain(site)
     if not domain:
@@ -117,8 +117,6 @@ async def clear(endpoint: str, site: str, *, recorded_origins: tuple[str, ...] =
                 await _call(cdp, "Network.deleteCookies", session=session, **params)
             for origin in sorted(origins):
                 await _call(cdp, "Storage.clearDataForOrigin", session=session, origin=origin, storageTypes="all")
-            # Allow queued browser work to settle before the verification read.
-            await asyncio.sleep(settle_seconds)
             remaining = (await _call(cdp, "Storage.getCookies")).get("cookies")
             if not isinstance(remaining, list) or any(cookie_matches(cookie, domain) for cookie in remaining):
                 raise RuntimeError("site cookies remain after clearing")

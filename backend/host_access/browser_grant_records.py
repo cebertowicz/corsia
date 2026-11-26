@@ -1,7 +1,30 @@
-"""Private site-only journal for browser fill grants and pending clears."""
+"""Durable site records for saved-login fill grants, and the agent fence while a site is cleared.
+
+A record is one site in ``<profile>.grant-sites.json``, with the origins on its domain seen while it was
+recorded; never a cookie, value or login. Each recorded (profile, domain) is in one ``SiteState``:
+
+| State   | Entered by | Left by | On failure |
+|---------|------------|---------|------------|
+| ARMED   | ``arm``: an approval goes active | ``end`` makes it PENDING | the ``arm`` write raises, so the approval is not granted |
+| PENDING | ``end``: an approval ends; or a record with no state in memory (a restart) | ``complete`` after a confirmed clear: the record is removed, or goes back to ARMED while another grant on the site is active | the record stays; the next launch of the profile clears it before serving |
+
+Owners: this module owns the states, the record file and the fence. ``browser_grant_effects`` calls
+``arm`` and ``end`` from the grant code. ``browser_grant_cleanup`` runs each clear and calls ``complete``
+and ``release``. ``browser_grant_copy`` filters copies and kept sign-ins against PENDING.
+
+The fence: every ``end`` raises it for (profile, domain), also when its record write fails. The clear that
+``end`` scheduled lowers it with ``release`` once the site is cleared or its browsers are confirmed closed.
+While it is up, agent commands on every browser holding the profile are refused. A clear whose browser
+can be neither closed nor terminated never releases it, so the refusal lasts until restart.
+
+Locks: ``_records_lock`` serializes the record file and the state dicts, is held across that small file's
+I/O, and is never taken on the event loop except by ``arm`` and ``end`` where the grant code calls them.
+``_fence_lock`` guards only the in-memory fence, so the event loop may take it.
+"""
 from __future__ import annotations
 
 import asyncio
+import enum
 import json
 import logging
 import threading
@@ -11,12 +34,21 @@ from urllib.parse import urlsplit
 from host_access.browser_domain import url_domain
 
 log = logging.getLogger(__name__)
-_lock = threading.RLock()
-# Active grants are deliberately process-only. On restart every journalled site is pending.
-_armed: dict[tuple[str, str], int] = {}
-_pending: set[tuple[str, str]] = set()
-_generation: dict[tuple[str, str], int] = {}
-_transitions: dict[tuple[str, str], int] = {}
+Key = tuple[str, str]
+
+
+class SiteState(enum.Enum):
+    ARMED = "armed"
+    PENDING = "pending"
+
+
+_records_lock = threading.RLock()
+_fence_lock = threading.Lock()
+# Process memory only: after a restart every recorded site has no state, which reads as PENDING.
+_states: dict[Key, SiteState] = {}
+_grants: dict[Key, int] = {}  # active grants on the site in this process
+_generation: dict[Key, int] = {}  # changes with each end, and with an origin recorded while PENDING
+_fences: dict[Key, int] = {}  # ends whose clear has not released the fence
 
 
 def _site(site: str) -> str:
@@ -27,6 +59,13 @@ def _site(site: str) -> str:
     if ":" in host:
         host = f"[{host}]"
     return f"{parts.scheme}://{host}" + (f":{parts.port}" if parts.port is not None else "")
+
+
+def _key(profile: str, site: str) -> tuple[str, Key]:
+    site = _site(site)
+    domain = url_domain(site)
+    assert domain is not None
+    return site, (profile, domain)
 
 
 def _path(profile: str) -> Path:
@@ -73,6 +112,10 @@ def _write(profile: str, sites: list[str], origins: list[str] | None = None) -> 
     _write_private_json(path, data)
 
 
+def _state(key: Key) -> SiteState:
+    return _states.get(key, SiteState.PENDING)
+
+
 def observe(profile: str, url: object) -> None:
     """Record a new matching origin without interrupting the navigation on failure."""
     from host_access.browser_site_clear import _origin
@@ -82,14 +125,13 @@ def observe(profile: str, url: object) -> None:
     if not domain or not (origin := _origin(url, domain)):
         return
     try:
-        with _lock:
+        with _records_lock:
             sites, origins = _data(profile)
             if not any(url_domain(site) == domain for site in sites) or origin in origins:
                 return
             _write(profile, sites, [*origins, origin])
-            key = (profile, domain)
-            if key in _pending or not _armed.get(key, 0):
-                _generation[key] = _generation.get(key, 0) + 1
+            if _state((profile, domain)) is SiteState.PENDING:
+                _generation[(profile, domain)] = _generation.get((profile, domain), 0) + 1
     except Exception as exc:
         log.warning("could not record origin for %s (%s)", domain, type(exc).__name__)
 
@@ -108,84 +150,93 @@ async def observe_thread(thread_id: str, url: object) -> None:
 
 
 def origins(profile: str, domain: str) -> list[str]:
-    with _lock:
+    with _records_lock:
         return [origin for origin in _data(profile)[1] if url_domain(origin) == domain]
 
 
 def arm(profile: str, site: str) -> None:
-    """Write the recovery record before a timed grant becomes active."""
-    site = _site(site)
-    domain = url_domain(site)
-    assert domain is not None
-    key = (profile, domain)
-    with _lock:
+    """Write the record before a grant becomes active: ARMED, or still PENDING if a clear is owed."""
+    site, key = _key(profile, site)
+    with _records_lock:
         sites = _read(profile)
-        if not _armed.get(key, 0) and any(url_domain(old) == domain for old in sites):
-            _pending.add(key)
         _write(profile, [*sites, site])
-        _armed[key] = _armed.get(key, 0) + 1
+        if not _grants.get(key, 0) and any(url_domain(old) == key[1] for old in sites):
+            _states[key] = SiteState.PENDING  # left by an earlier process or an unfinished clear
+        _states.setdefault(key, SiteState.ARMED)
+        _grants[key] = _grants.get(key, 0) + 1
 
 
 def end(profile: str, site: str) -> int:
-    """Fence the domain and make an end durable, including for a standing grant."""
-    site = _site(site)
-    domain = url_domain(site)
-    assert domain is not None
-    key = (profile, domain)
-    with _lock:
+    """Raise the fence and make the site PENDING before the grant end commits."""
+    site, key = _key(profile, site)
+    with _records_lock:
         try:
-            sites = _read(profile)
-            _write(profile, [*sites, site])
+            _write(profile, [*_read(profile), site])
         except Exception:
-            # A failed journal cannot admit more browser actions in this process.
-            _transitions[key] = _transitions.get(key, 0) + 1
+            _raise_fence(key)  # Without a durable record this process admits no more agent commands there.
             raise
-        if _armed.get(key, 0):
-            _armed[key] -= 1
-        _pending.add(key)
-        _transitions[key] = _transitions.get(key, 0) + 1
+        if _grants.get(key, 0):
+            _grants[key] -= 1
+        _states[key] = SiteState.PENDING
+        _raise_fence(key)
         _generation[key] = _generation.get(key, 0) + 1
         return _generation[key]
 
 
-def in_transition() -> bool:
-    with _lock:
-        return bool(_transitions)
+def _raise_fence(key: Key) -> None:
+    with _fence_lock:
+        _fences[key] = _fences.get(key, 0) + 1
 
 
-def started(profile: str, domain: str) -> None:
-    with _lock:
-        key = (profile, domain)
-        remaining = _transitions.get(key, 0) - 1
+def release(profile: str, domain: str) -> None:
+    """Lower one end's fence once its clear has finished or its browsers are confirmed closed."""
+    with _fence_lock:
+        remaining = _fences.get((profile, domain), 0) - 1
         if remaining > 0:
-            _transitions[key] = remaining
+            _fences[(profile, domain)] = remaining
         else:
-            _transitions.pop(key, None)
+            _fences.pop((profile, domain), None)
+
+
+def fenced(profile: str | None) -> bool:
+    """Whether agent commands on browsers holding this profile are refused; memory only."""
+    if profile is None:
+        return False
+    with _fence_lock:
+        return any(key[0] == profile for key in _fences)
 
 
 def pending(profile: str) -> dict[str, tuple[list[str], int]]:
-    """Return pending domains and their sites; after restart all journalled sites are pending."""
-    with _lock:
+    """Return PENDING domains with their sites and generation."""
+    with _records_lock:
         result: dict[str, tuple[list[str], int]] = {}
         for site in _read(profile):
             domain = url_domain(site)
             assert domain is not None
-            key = (profile, domain)
-            if key not in _pending and _armed.get(key, 0):
+            if _state((profile, domain)) is SiteState.ARMED:
                 continue
-            sites, _ = result.setdefault(domain, ([], _generation.get(key, 0)))
+            sites, _ = result.setdefault(domain, ([], _generation.get((profile, domain), 0)))
             sites.append(site)
         return result
 
 
+def snapshot(profile: str) -> tuple[set[str], int]:
+    """PENDING domains, and a version that changes with every end or origin recorded on the profile."""
+    with _records_lock:
+        version = sum(value for key, value in _generation.items() if key[0] == profile)
+        return set(pending(profile)), version
+
+
 def complete(profile: str, domain: str, generation: int) -> bool:
-    """Remove a cleared record only if no newer clear is pending."""
+    """After a confirmed clear, remove the record, or re-arm it while a grant is active; False if superseded."""
     key = (profile, domain)
-    with _lock:
+    with _records_lock:
         if _generation.get(key, 0) != generation:
             return False
-        if not _armed.get(key, 0):
-            _write(profile, [site for site in _read(profile) if url_domain(site) != domain])
-            _armed.pop(key, None)
-        _pending.discard(key)
+        if _grants.get(key, 0):
+            _states[key] = SiteState.ARMED
+            return True
+        _write(profile, [site for site in _read(profile) if url_domain(site) != domain])
+        _states.pop(key, None)
+        _grants.pop(key, None)
         return True

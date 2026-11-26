@@ -53,7 +53,7 @@ class FakeCdp:
 async def test_clear_site_and_keep_unrelated_cookie(monkeypatch):
     fake = FakeCdp()
     monkeypatch.setattr(browser_site_clear.browser_cdp, "CdpClient", lambda *_a, **_kw: fake)
-    await browser_site_clear.clear("ws://test", "https://login.example.com", settle_seconds=0)
+    await browser_site_clear.clear("ws://test", "https://login.example.com")
     assert [row["domain"] for row in fake.cookies] == [".other.com"]
     assert fake.workers == {"https://other.org"}
     calls = [(method, args.get("origin")) for method, args in fake.calls if method == "Storage.clearDataForOrigin"]
@@ -72,7 +72,7 @@ async def test_clear_site_and_keep_unrelated_cookie(monkeypatch):
 async def test_recorded_closed_origin_is_cleared(monkeypatch):
     fake = FakeCdp()
     monkeypatch.setattr(browser_site_clear.browser_cdp, "CdpClient", lambda *_a, **_kw: fake)
-    await browser_site_clear.clear("ws://test", "https://example.com", settle_seconds=0,
+    await browser_site_clear.clear("ws://test", "https://example.com",
                                    recorded_origins=("https://closed.example.com:8443",))
     assert ("Storage.clearDataForOrigin", {"origin": "https://closed.example.com:8443",
                                           "storageTypes": "all"}) in fake.calls
@@ -89,7 +89,7 @@ async def test_target_close_must_be_confirmed(monkeypatch):
     fake.close_success = False
     monkeypatch.setattr(browser_site_clear.browser_cdp, "CdpClient", lambda *_a, **_kw: fake)
     with pytest.raises(RuntimeError, match="target close"):
-        await browser_site_clear.clear("ws://test", "https://example.com", settle_seconds=0)
+        await browser_site_clear.clear("ws://test", "https://example.com")
     assert ("Target.closeTarget", {"targetId": "blank"}) in fake.calls
 
 
@@ -99,7 +99,7 @@ async def test_cookie_return_after_clear_is_failure(monkeypatch):
     fake.reappear = True
     monkeypatch.setattr(browser_site_clear.browser_cdp, "CdpClient", lambda *_a, **_kw: fake)
     with pytest.raises(RuntimeError, match="remain"):
-        await browser_site_clear.clear("ws://test", "https://example.com", settle_seconds=0)
+        await browser_site_clear.clear("ws://test", "https://example.com")
 
 
 @pytest.mark.asyncio
@@ -108,4 +108,4 @@ async def test_lost_connection_mid_clear_fails(monkeypatch):
     fake.fail_method = "Storage.clearDataForOrigin"
     monkeypatch.setattr(browser_site_clear.browser_cdp, "CdpClient", lambda *_a, **_kw: fake)
     with pytest.raises(ConnectionError):
-        await browser_site_clear.clear("ws://test", "https://example.com", settle_seconds=0)
+        await browser_site_clear.clear("ws://test", "https://example.com")

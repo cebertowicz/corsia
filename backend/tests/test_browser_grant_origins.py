@@ -10,10 +10,10 @@ from host_access import browser_grant_cleanup, browser_grant_records as records,
 
 @pytest.fixture(autouse=True)
 def clear_grants():
-    for state in (records._armed, records._pending, records._generation, records._transitions):
+    for state in (records._states, records._grants, records._generation, records._fences):
         state.clear()
     yield
-    for state in (records._armed, records._pending, records._generation, records._transitions):
+    for state in (records._states, records._grants, records._generation, records._fences):
         state.clear()
 
 
@@ -63,11 +63,11 @@ async def test_recovery_passes_origins_and_old_records_still_clear(tmp_path, mon
     profile = str(tmp_path / "profile")
     records.arm(profile, "https://example.com")
     records.observe(profile, "https://closed.example.com:8443/page")
-    records._armed.clear()
+    records._states.clear()  # A restart keeps the record and loses every in-memory state.
+    records._grants.clear()
     runtime = SimpleNamespace(record=SimpleNamespace(profile=profile), chrome=SimpleNamespace(endpoint="ws://test"))
     clear = AsyncMock()
     monkeypatch.setattr(browser_site_clear, "clear", clear)
-    monkeypatch.setattr(browser_grant_cleanup, "_drop_kept", lambda *_args: None)
     await browser_grant_cleanup.recover_launch(runtime)
     clear.assert_awaited_once_with("ws://test", "https://example.com", recorded_origins=("https://closed.example.com:8443",))
     records._path(profile).write_text(json.dumps({"sites": ["https://example.com"]}))

@@ -42,7 +42,7 @@ async def test_site_clear_removes_service_worker():
         browser_endpoint = await browser_session_commands.browser_endpoint(owner, name)
         async with browser_cdp.CdpClient(browser_endpoint) as browser:
             await browser.call("Target.createTarget", url="about:blank")
-        await browser_site_clear.clear(browser_endpoint, site, settle_seconds=0)
+        await browser_site_clear.clear(browser_endpoint, site)
         await owner.run(name, ("open", site), session="existing")
         endpoint = await owner.page_endpoint(name)
         async with browser_cdp.CdpClient(endpoint) as page:

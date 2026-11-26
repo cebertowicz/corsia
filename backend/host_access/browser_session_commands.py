@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_field_values, browser_identity as identity
-from host_access import browser_agent_verbs, browser_fill_marks, browser_grant_records, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_fill_marks, browser_grant_cleanup, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -158,16 +158,14 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if (saved_sign_in := bool(runtime.record.profile or runtime.record.copy_of)) or browser_saved_fills.saved_fill_session(thread_id, runtime.record.session):
         if _script_config(config) or not (trusted_navigation or _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(browser_agent_verbs.refusal(args) or (_SCRIPT_REFUSAL if saved_sign_in else browser_saved_fills.SAVED_FILL_SESSION_REFUSED))
-    if getattr(owner, "_pending_sites", ()) or browser_grant_records.in_transition():
-        raise BrowserSessionError("browser session admission is closed")
+    browser_grant_cleanup.require_unfenced(runtime, pane=pane)
     owner._queued_actions += 1
     try:
         await runtime.action_lock.acquire()
     finally:
         owner._queued_actions -= 1
     try:
-        if getattr(owner, "_pending_sites", ()) or browser_grant_records.in_transition():
-            raise BrowserSessionError("browser session admission is closed")
+        browser_grant_cleanup.require_unfenced(runtime, pane=pane)
         rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane, trusted_navigation)
         if (show_window or pane) and not rendered.startswith("Error:"):
             # A connected pane already shows the page, so only an agent's share reveals it.
@@ -324,6 +322,7 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     """Give the current shared-browser page to the person and arrange its observed completion."""
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
+    browser_grant_cleanup.require_unfenced(runtime)
     command = partial(_command, owner, runtime, None)
     endpoint = await browser_cdp.page_endpoint(command)
     await browser_control.declare_person_step(

@@ -10,7 +10,7 @@ import time
 from typing import Literal, Sequence, TypeAlias
 
 from host_access import (
-    browser_cli, browser_grant_records, browser_identity as identity, browser_orphan, browser_reporting,
+    browser_cli, browser_identity as identity, browser_orphan, browser_reporting,
     browser_session_commands, browser_session_launch as launch,
 )
 from host_access.browser_session_io import BrowserSessionIO
@@ -54,7 +54,6 @@ class BrowserSessionOwner(BrowserSessionIO):
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
         self._grant_cleanup_lock = asyncio.Lock()
-        self._pending_sites: set[tuple[str, str]] = set()
         self._sessions: dict[str, BrowserRuntime] = {}
         self._closed_leases: set[str] = set()
         self._restart_notices: dict[str, str] = {}
@@ -164,7 +163,7 @@ class BrowserSessionOwner(BrowserSessionIO):
         resolved = thread_id not in self._sessions
         profile, notice = await launch.resolve_profile(thread_id) if resolved else (None, None)
         async with self._owner_lock:
-            if self._shutting_down or lease_id in self._closed_leases or self._pending_sites or browser_grant_records.in_transition():
+            if self._shutting_down or lease_id in self._closed_leases:
                 raise BrowserSessionError("browser session admission is closed")
             runtime = self._sessions.get(thread_id)
             if runtime is None and session == "existing":
@@ -176,7 +175,8 @@ class BrowserSessionOwner(BrowserSessionIO):
                 notice = browser_session_commands.restart_notice(self._restart_notices, thread_id, notice)
                 runtime = BrowserRuntime(BrowserSessionRecord(
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
-                    profile=shared, copy_of=copy_of, profile_notice=notice, shared=bool(show_window)))
+                    profile=shared, copy_of=copy_of, site_profile=profile, profile_notice=notice,
+                    shared=bool(show_window)))
                 self._sessions[thread_id] = runtime
             elif session == "new":
                 raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
@@ -190,7 +190,6 @@ class BrowserSessionOwner(BrowserSessionIO):
     def _assert_admitted(self, runtime: BrowserRuntime, lease_id: str | None) -> None:
         record = runtime.record
         if (self._shutting_down or self._sessions.get(record.thread_id) is not runtime
-                or self._pending_sites or browser_grant_records.in_transition()
                 or lease_id in self._closed_leases or record.lease_id in self._closed_leases):
             raise BrowserSessionError("browser session admission is closed")
         if record.terminal_state != "running":

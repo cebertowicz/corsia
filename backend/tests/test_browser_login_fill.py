@@ -29,7 +29,7 @@ ENDPOINT = "ws://127.0.0.1:9/devtools/page/T1"
 
 class Owner:
     def __init__(self, declare: BaseException | None = None) -> None:
-        self.runtime = SimpleNamespace(action_lock=asyncio.Lock(), record=SimpleNamespace(session="s1"))
+        self.runtime = SimpleNamespace(action_lock=asyncio.Lock(), record=SimpleNamespace(session="s1", site_profile=None))
         self.declared: list[str] = []
         self.declare = declare
 

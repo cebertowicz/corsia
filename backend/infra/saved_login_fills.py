@@ -157,7 +157,7 @@ def _prune(now: float) -> list[_Approval]:
     expired = [item for item in _approvals.values() if not item.live(now)]
     for item in expired:
         from host_access.browser_grant_effects import end
-        end(item, lambda: _approvals.pop(item.id))
+        end(item, lambda: _approvals.pop(item.id), "expired")
     return expired
 
 
@@ -194,13 +194,13 @@ def _login_usable(login_id: str, user_id: str) -> bool:
     return login.status == saved_logins.STATUS_OK and login.saved_by == user_id
 
 
-def _remove(predicate) -> list[_Approval]:
+def _remove(predicate, cause: str) -> list[_Approval]:
     with _lock:
         ended = [item for item in _approvals.values() if predicate(item)]
         for item in ended:
             if item.state == ACTIVE:
                 from host_access.browser_grant_effects import end
-                end(item, lambda: _approvals.pop(item.id))
+                end(item, lambda: _approvals.pop(item.id), cause)
             else:
                 del _approvals[item.id]
     return ended
@@ -210,7 +210,7 @@ def end_for_login(login_id: str, *, deleted: bool) -> None:
     """End every request and grant for the login, standing ones included: ``fill_revoked`` on a delete,
     ``fill_expired`` when it goes out of date. The paths that make a login unusable call this as they do,
     so a re-save can't revive a grant."""
-    ended = _remove(lambda item: item.login_id == login_id)
+    ended = _remove(lambda item: item.login_id == login_id, "login_deleted" if deleted else "login_out_of_date")
     for item in ended:
         _emit("fill_revoked" if deleted else "fill_expired", item)
         logger.info("saved-login fill ended with its login: approval {}", item.id)
@@ -376,7 +376,7 @@ def _end(approval_id: str, user_id: str, state: str, revision: int, application_
         item = _current(approval_id, user_id, state, revision, application_hash)
         if item.state == ACTIVE:
             from host_access.browser_grant_effects import end
-            end(item, lambda: _approvals.pop(item.id))
+            end(item, lambda: _approvals.pop(item.id), verb)
         else:
             del _approvals[item.id]
     _emit(f"fill_{verb}", item)

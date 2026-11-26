@@ -8,24 +8,26 @@ from host_access import browser_grant_records as records
 
 @pytest.fixture(autouse=True)
 def clear_memory():
-    records._armed.clear()
-    records._pending.clear()
-    records._generation.clear()
-    records._transitions.clear()
+    for state in (records._states, records._grants, records._generation, records._fences):
+        state.clear()
     yield
-    records._armed.clear()
-    records._pending.clear()
-    records._generation.clear()
-    records._transitions.clear()
+    for state in (records._states, records._grants, records._generation, records._fences):
+        state.clear()
+
+
+def restart():
+    records._states.clear()
+    records._grants.clear()
 
 
 def test_timed_grant_is_armed_and_restart_makes_it_pending(tmp_path):
     profile = str(tmp_path / "profile")
     records.arm(profile, "https://login.example.com/path")
     assert records.pending(profile) == {}
+    assert records._states[(profile, "example.com")] is records.SiteState.ARMED
     content = json.loads(records._path(profile).read_text())
     assert content == {"sites": ["https://login.example.com"]}
-    records._armed.clear()
+    restart()
     assert "example.com" in records.pending(profile)
     assert records.complete(profile, "example.com", 0)
     assert not records._path(profile).exists()
