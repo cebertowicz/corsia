@@ -143,6 +143,25 @@ def test_approval_keeps_page_and_records_missing_image(integration_client):
         db.close()
 
 
+def test_an_approval_of_text_the_server_no_longer_holds_is_stale_and_records_nothing(integration_client):
+    from infra.database import get_db
+
+    artifact = _asked_document(f"rb-moved-{uuid.uuid4().hex[:6]}")
+    hold_ids = _review(integration_client, artifact)["hold_ids"]
+    shown = hashlib.sha256(b"the text the bar showed\n").hexdigest()
+
+    refused = _clear(integration_client, artifact, verdict="approved", doc_sha256=shown)
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "ask_stale"
+    assert _review(integration_client, artifact)["hold_ids"] == hold_ids
+    db = get_db()
+    try:
+        assert db.execute("SELECT COUNT(*) FROM artifact_approvals WHERE artifact_id=?", (artifact,)).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_a_second_answer_is_stale_and_clears_nothing(integration_client):
     artifact = _asked_document(f"rb-stale-{uuid.uuid4().hex[:6]}")
     assert _clear(integration_client, artifact, verdict="approved").status_code == 200
