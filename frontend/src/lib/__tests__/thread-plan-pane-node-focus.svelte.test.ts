@@ -28,7 +28,7 @@ let unregisterSurface: () => void = () => {};
 
 const childLink = (planId: string, threadId: string) => ({
 	available: true as const, plan_id: planId, thread_id: threadId,
-	progress: { done: 0, total: 1, open: 1, liveness: 'advancing' as const },
+	progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing' as const },
 });
 
 /** A root-level current step, a collapsed off-path branch (and one older failure the read does not list, see `OLD`), a subagent step, and a chain eight levels deep. */

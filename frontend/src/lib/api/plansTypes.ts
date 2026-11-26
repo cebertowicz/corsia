@@ -103,7 +103,7 @@ export interface OperatorChildSummary {
 	available: true;
 	plan_id: string;
 	thread_id: string;
-	progress: Omit<OperatorProgress, 'open_above'>;
+	progress: OperatorProgress;
 	/** What a waiting child plan waits for (EW4). Its state stays `progress.liveness`. */
 	wait?: OperatorWait | null;
 }

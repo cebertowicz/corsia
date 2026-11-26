@@ -192,7 +192,7 @@ describe('PlanDrawerControl attention-item click', () => {
 	it('returns from a leaf opened on a nested subagent-plan row to its owning step in a fresh drawer', async () => {
 		const child = (planId: string, threadId: string) => ({
 			available: true as const, plan_id: planId, thread_id: threadId,
-			progress: { done: 0, total: 1, open: 1, liveness: 'advancing' as const },
+			progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing' as const },
 		});
 		const threadPlan = envelope([operatorNode({ id: 'spawn', title: 'Spawned', state: 'active', child: child('p-child', 'ct') })]);
 		const childPlan = envelope([operatorNode({ id: 'sub', title: 'Nested step', child: child('p-grand', 'gt') })]);

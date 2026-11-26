@@ -161,6 +161,7 @@ def _child_plan(
             progress=asdict(state.progress),
             nodes=[],
             moving=state.moving,
+            open_above=state.open_above,
         )
     next_depth = None if child_depth is None else child_depth - 1
     return _rollup_plans(connection, [child], next_depth, memo)[0]

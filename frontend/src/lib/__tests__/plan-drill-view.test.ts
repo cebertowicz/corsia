@@ -146,7 +146,7 @@ describe('PlanDrillView', () => {
 			node({ id: 'root', title: 'Root', depth: 0 }),
 			node({
 				id: 'delegated', title: 'Delegated', parent_id: 'root', depth: 1,
-				child: { available: true, plan_id: 'p2', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, liveness: 'advancing' } },
+				child: { available: true, plan_id: 'p2', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: 'advancing' } },
 			}),
 		];
 		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes: withChild, rootId: 'root', onBack: () => {} }) });

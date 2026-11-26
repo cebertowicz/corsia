@@ -206,7 +206,7 @@ describe('PlanTree — same renderer contract', () => {
 			id: 'a', title: 'Delegated step', state: 'active',
 			child: {
 				available: true as const, plan_id: 'cp0', thread_id: 'child-thread',
-				progress: { done: 0, total: 0, open: 0, liveness: 'idle' as const },
+				progress: { done: 0, total: 0, open: 0, open_above: 0, liveness: 'idle' as const },
 			},
 		})];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
@@ -214,16 +214,27 @@ describe('PlanTree — same renderer contract', () => {
 		const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
 		expect(chip).toBeTruthy();
 		expect(chip.textContent).not.toContain('0/0');
-		expect(chip.getAttribute('aria-label')).toContain('no open subtasks');
+		expect(chip.getAttribute('aria-label')).toBe('idle subagent, no open subtasks');
 		expect(chip.getAttribute('aria-label')).not.toContain('0 of 0');
 	});
+
+	it.each([[2, '2 left', 'active subagent, 2 subtasks left'], [0, '', 'active subagent, 0 subtasks left']])(
+		'counts only %i child subtasks above Later', (above, text, label) => {
+			const child = { ...CHILD_AVAILABLE, progress: { ...CHILD_AVAILABLE.progress, total: 4, open: 4, open_above: above } };
+			component = mount(PlanTree, { target: host, props: withFolds({ nodes: [node({ id: 'a', title: 'Delegated', child })] }) });
+			flushSync();
+			const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
+			expect(chip.textContent?.trim()).toBe(text);
+			expect(chip.getAttribute('aria-label')).toBe(label);
+		},
+	);
 
 	it('does not announce a subagent awaiting review as idle', () => {
 		const nodes = [node({
 			id: 'a', title: 'Delegated step', state: 'active',
 			child: {
 				available: true as const, plan_id: 'cp1', thread_id: 'child-thread',
-				progress: { done: 1, total: 3, open: 2, liveness: 'needs-review' as const },
+				progress: { done: 1, total: 3, open: 2, open_above: 2, liveness: 'needs-review' as const },
 			},
 		})];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });

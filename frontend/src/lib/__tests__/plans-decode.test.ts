@@ -141,10 +141,13 @@ describe('decodeOperatorEnvelope', () => {
 	it('refuses a nested fact that is an object but not the fact a row reads', () => {
 		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', branch_progress: {} as never })]))).toBeNull();
 		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', child: {} as never })]))).toBeNull();
+		const child = { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, liveness: 'advancing' } };
+		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', child: child as never })]))).toBeNull();
+		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', child: { ...child, progress: { ...child.progress, open_above: '1' } } as never })]))).toBeNull();
 		expect(decodeOperatorEnvelope(envelope([operatorNode({ id: 'a', review: { kind: 'external' } as never })]))).toBeNull();
 		expect(decodeOperatorEnvelope(envelope([operatorNode({
 			id: 'a', branch_progress: { done: 1, total: 2 }, review: { kind: 'external', label: 'Awaiting', actor: { kind: 'external', id: 'x', label: 'X' } },
-			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, liveness: 'advancing' } },
+			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing' } },
 		})]))).not.toBeNull();
 	});
 });

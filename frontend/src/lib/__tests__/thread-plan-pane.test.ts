@@ -254,7 +254,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("a flat plan with finished work counts what is left, never 0 of N (#2190 review)", async () => {
-    const flat = envelope("t1", { done: 0, total: 1, open: 1, liveness: "advancing" });
+    const flat = envelope("t1", { done: 0, total: 1, open: 1, open_above: 1, liveness: "advancing" });
     flat.plans[0].folds = TWO_FINISHED;
     flat.plans[0].root_count = 3;
     mockFetch(200, flat, { ETag: '"r1"' });
@@ -796,7 +796,7 @@ describe("ThreadPlanPane", () => {
           available: true,
           plan_id: "cp1",
           thread_id: "child-thread",
-          progress: { done: 1, total: 2, open: 1, liveness: "advancing" },
+          progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing" },
         },
       }),
     ];
@@ -887,7 +887,7 @@ describe("ThreadPlanPane", () => {
           available: true,
           plan_id: "cp1",
           thread_id: "child-thread",
-          progress: { done: 1, total: 2, open: 1, liveness: "advancing" },
+          progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing" },
         },
       }),
     ];
@@ -989,7 +989,7 @@ function spawnEnvelope(threadId: string): OperatorEnvelope {
       available: true,
       plan_id: "cp1",
       thread_id: "child-thread",
-      progress: { done: 1, total: 2, open: 1, liveness: "advancing" },
+      progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing" },
     },
   })];
   return env;
