@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityQueueItem } from '$lib/api/activityQueue';
 import type { DecisionDetail } from '$lib/api/attentionQueue';
 import { decisionOf } from './activityItems';
-import { activityDocument, activityFrameItems, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
+import { activityDocument, activityFrameItems, activityItem, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
 
 const { mobile, mutate, emit, closeTab, listeners } = vi.hoisted(() => ({
 	mobile: { store: null as null | import('svelte/store').Writable<boolean> },
@@ -117,6 +117,80 @@ afterEach(() => {
 });
 
 describe('Activity list', () => {
+	it('shows a missing draft and lets the person discard a registered one', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			served = [];
+			return respond(200, { state: 'discarded' });
+		});
+		render(); await settle();
+		expect(rows()[0].textContent).toContain('File no longer exists');
+		expect(pane().textContent).toContain('File no longer exists');
+		expect(buttonNamed('Send now')).toBeUndefined();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(rows()).toHaveLength(0));
+	});
+
+	it('keeps a draft’s unread document open when its review settles', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unread_replies: 1 } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			served = [];
+			notes = [activityDocument('draft', { artifact_id: 'art-draft' })];
+			return respond(200, { state: 'discarded' });
+		});
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(pane().textContent).toContain('Couldn’t open this document.'));
+		expect(buttonNamed('Don’t send')).toBeUndefined();
+	});
+
+	it('advances after a draft without a review even when its document has unread replies', async () => {
+		const next = activityItem({ key: 'task:next', kind: 'task', title: 'Next task' });
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } }), next];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			served = [next];
+			notes = [activityDocument('draft', { artifact_id: 'art-draft' })];
+			return respond(200, { state: 'discarded' });
+		});
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(pane().textContent).toContain('Next task'));
+	});
+
+	it('keeps the settled draft open when its queue reread fails', async () => {
+		let failRead = false;
+		let failedReads = 0;
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			failRead = true;
+			return respond(200, { state: 'discarded' });
+		});
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation((input, init) => {
+			if (failRead && String(input).includes('/api/attention/queue')) {
+				failedReads += 1;
+				return Promise.resolve(respond(500, {}));
+			}
+			return base(input, init);
+		});
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(failedReads).toBeGreaterThan(0));
+		await settle();
+		expect(pane().textContent).toContain('File no longer exists.');
+		expect(rows()).toHaveLength(1);
+	});
+
+	it('offers no discard action for a missing draft without an identity', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Send: email draft',
+			open: null, detail: { artifact_id: null, missing: true } })];
+		render(); await settle();
+		expect(buttonNamed('Don’t send')).toBeUndefined();
+	});
 	it('shows every kind in the ranker’s order and opens the top item with why it is there', async () => {
 		render();
 		await settle();
@@ -1042,7 +1116,7 @@ describe('product events', () => {
 		notes = [activityDocument('first', {}, 1), activityDocument('second', {}, 2), activityDocument('third', {}, 3)];
 		alsoServe('/api/attention/notifications/read', (init) => {
 			const read = (JSON.parse(String(init?.body)).documents as { artifact_id: string }[]).map((doc) => doc.artifact_id);
-			notes = notes.filter((item) => !read.includes(item.open!.artifact_id));
+			notes = notes.filter((item) => !read.includes(item.open!.artifact_id ?? ''));
 			return respond(200, {});
 		});
 		render();
@@ -1159,7 +1233,7 @@ describe('a document row in Notifications', () => {
 				const body = JSON.parse(String(init?.body));
 				reads.push(body);
 				const read = (body.documents as { artifact_id: string }[]).map((doc) => doc.artifact_id);
-				notes = notes.filter((item) => !read.includes(item.open!.artifact_id));
+				notes = notes.filter((item) => !read.includes(item.open!.artifact_id ?? ''));
 				return respond(200, {});
 			}
 			return queue(input, init);

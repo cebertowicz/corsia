@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { setContext, untrack } from 'svelte';
 	import { REVIEW_ANSWERED, REVIEW_REPLIES } from '$lib/reviewBarState.svelte';
+	import { EMAIL_DRAFT_SETTLED } from '$lib/emailDraft';
+	import MissingDraft from './MissingDraft.svelte';
+	import UnopenableDocument from './UnopenableDocument.svelte';
 	import { openActivityDocument } from './activityDocumentOpen';
 	import { Button } from '$lib/components/ui';
 	import { keepInView } from '$lib/actions/keepInView';
@@ -50,6 +53,7 @@
 	// Every band here, the document's own review band included, names the agent asking at rest.
 	setContext(ASKER_AT_REST, true);
 	setContext(REVIEW_ANSWERED, () => void onActed());
+	setContext(EMAIL_DRAFT_SETTLED, () => { if (item.kind === 'draft') void onActed(); });
 
 	const decision = $derived(decisionOf(item));
 	const held = $derived(heldOf(item));
@@ -82,13 +86,16 @@
 	// ordinary close (which saves a pending edit and sends the open comment batch).
 	// Primitive inputs only: a re-read hands over new item objects, and the document must not reopen for that.
 	const docArtifactId = $derived(doc?.artifactId ?? null);
+	const docPath = $derived(doc?.path);
+	const missingDraft = $derived(item.kind === 'draft' && 'missing' in item.detail && item.detail.missing);
+	const missingArtifact = $derived(missingDraft && 'artifact_id' in item.detail ? item.detail.artifact_id : null);
 	// A document row lands on its newest unread reply. Fixed when the pane opens: an approved review that stays open as
 	// its document must not land again.
 	const landsOnReplies = untrack(() => item.kind === 'document');
 	const replyThread = untrack(() => doc?.commentId);
 	$effect(() => openActivityDocument(
 		workspaceKey, docArtifactId, documentThread, landsOnReplies, replyThread,
-		(value) => { lookup = value; },
+		(value) => { lookup = value; }, docPath,
 	));
 
 	/**
@@ -185,7 +192,7 @@
 		repliesRead ? 'All replies read.' : position.of === 1 ? '1 reply to your comment' : `${positionLabel} to your comments`,
 	);
 	// A review with unread replies says where the person is in them beside its ask.
-	setContext(REVIEW_REPLIES, () => (total > 0 && !repliesRead && item.kind === 'review' ? positionLabel : ''));
+	setContext(REVIEW_REPLIES, () => (total > 0 && !repliesRead && (item.kind === 'review' || item.kind === 'draft') ? positionLabel : ''));
 
 	/** The button whose press failed reads Try again; after a refusal or a final outcome, every button keeps its name. */
 	const labelFor = (action: PressAction, label: string) => (failure?.retry === action ? 'Try again' : label);
@@ -225,17 +232,7 @@
 	{#if lookupFailed}
 		<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
 			{#snippet body()}
-				<div class="unopenable" role="status">
-					<h1 class="dh">Couldn’t open this document.</h1>
-					<p class="dctx">
-						{lookup?.status === 'failed'
-							? 'Its chat’s files didn’t load.'
-							: 'It isn’t in the files of the chat it came from; it may have been moved or removed.'}
-					</p>
-					{#if sourceThread}
-						<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>Open {item.source.thread_label}’s chat</Button>
-					{/if}
-				</div>
+				<UnopenableDocument failed={lookup?.status === 'failed'} thread={sourceThread} threadLabel={item.source.thread_label} {onOpenChat} />
 			{/snippet}
 		</ActivityKindPanel>
 	{:else if lookup?.status !== 'found'}
@@ -336,6 +333,9 @@
 	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
+			{#if missingDraft}
+				<MissingDraft artifactId={missingArtifact} {offline} {onActed} />
+			{:else if item.kind === 'draft'}<p class="dctx" role="status">Couldn’t open this draft from Activity. Open its chat to find the file.</p>{/if}
 			{#if sourceThread}
 				<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>Open {item.source.thread_label}’s chat</Button>
 			{/if}
@@ -392,7 +392,6 @@
 		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary);
 		color: var(--text-primary); font: inherit; font-size: var(--text-subhead); resize: vertical;
 	}
-	.unopenable { padding-top: var(--space-4); }
 	.act-failure-row { flex: 1 0 100%; order: 10; text-align: right; }
 	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.act-failure { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }

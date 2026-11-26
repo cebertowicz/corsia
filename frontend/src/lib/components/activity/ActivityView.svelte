@@ -140,7 +140,8 @@
 				const doc = documentOf(lastOpen);
 				const matches = doc ? current.filter((item) => {
 					const candidate = documentOf(item);
-					return item.kind === lastOpen?.kind && candidate?.artifactId === doc.artifactId
+					return item.kind === lastOpen?.kind && !!candidate
+						&& (doc.artifactId ? candidate.artifactId === doc.artifactId : !!doc.path && candidate.path === doc.path)
 						&& candidate.commentId === doc.commentId && item.source.thread_id === lastOpen?.source.thread_id;
 				}) : [];
 				if (matches.length === 1) {
@@ -188,7 +189,9 @@
 	function advance(current: readonly ActivityQueueItem[], key: string) {
 		advancing = null;
 		kept = null;
-		const artifact = lastOpen?.kind === 'review' ? documentOf(lastOpen)?.artifactId : undefined;
+		const artifact = lastOpen?.kind === 'review' ? documentOf(lastOpen)?.artifactId
+			: lastOpen?.kind === 'draft' && 'unread_replies' in lastOpen.detail && lastOpen.detail.unread_replies
+				&& 'artifact_id' in lastOpen.detail ? lastOpen.detail.artifact_id : undefined;
 		const document = artifact ? store.queue?.notifications.items.find((item) => documentDetailOf(item)?.artifact_id === artifact) : undefined;
 		if (document) { openKey = document.key; return; }
 		const list = lastOpen ? tabOf(lastOpen) : tab;
@@ -203,6 +206,16 @@
 		const key = openKey;
 		const keep = refusedKeep;
 		refusedKeep = false;
+		// A send claim can remove the draft before its review settles. Read the final lists first,
+		// so an unread document that returns to Notifications remains open.
+		if (!keep && key && lastOpen?.kind === 'draft') {
+			await store.reload();
+			await tick();
+			if (instance !== paneInstance || openKey !== key || store.failure !== null) return;
+			const current = store.queue?.items ?? [];
+			if (!current.some((item) => item.key === key)) advance(current, key);
+			return;
+		}
 		if (!keep && key) {
 			advancing = key;
 			const queue = store.queue;

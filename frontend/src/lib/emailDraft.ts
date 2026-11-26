@@ -1,3 +1,6 @@
+/** Optional enclosing surface callback when a draft is conclusively settled. */
+export const EMAIL_DRAFT_SETTLED = Symbol('email-draft-settled');
+
 /** One email of the conversation a draft replies into. Read-only: it is never part of the draft's text. */
 export interface EmailMessage {
 	id: string;

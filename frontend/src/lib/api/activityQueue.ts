@@ -7,10 +7,10 @@ import type { AttentionRenderer, AttentionSource, DecisionDetail, HeldReplyDetai
  * comments, newest reply first, never ranked. Only Activity reads this view; the plan pane reads the default view,
  * whose rows and renderers are unchanged.
  */
-export type ActivityKind = 'review' | 'decision' | 'task' | 'document' | 'message';
+export type ActivityKind = 'review' | 'decision' | 'task' | 'document' | 'message' | 'draft';
 
 /** What the pane opens: a document (at a comment), or nothing (the kind's own panel). */
-export type ActivityOpen = { artifact_id: string; comment_id?: string } | null;
+export type ActivityOpen = { artifact_id: string; comment_id?: string } | { path: string; artifact_id: string | null } | null;
 
 export interface ActivityRank {
 	position: number;
@@ -59,7 +59,7 @@ export interface ActivityQueueItem {
 	/** Stable across reads; what the ranker writes. */
 	key: string;
 	external_id: string;
-	renderer: AttentionRenderer | 'review' | 'task' | 'document';
+	renderer: AttentionRenderer | 'review' | 'task' | 'document' | 'draft';
 	kind: ActivityKind;
 	title: string;
 	raised_at: string | null;
@@ -71,7 +71,8 @@ export interface ActivityQueueItem {
 		| HeldReplyDetail
 		| ActivityReviewDetail
 		| ActivityTaskDetail
-		| ActivityDocumentDetail;
+		| ActivityDocumentDetail
+		| { artifact_id: string | null; missing?: boolean; unread_replies?: number };
 }
 
 export interface ActivityQueue {

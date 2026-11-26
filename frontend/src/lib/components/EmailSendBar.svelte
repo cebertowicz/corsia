@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { getContext, onDestroy, untrack } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { discardEmailDraft, sendEmailDraft, type DraftActionResult } from '$lib/api/emailDrafts';
-	import type { ConversationFailure, EmailDraftState } from '$lib/emailDraft';
+	import { EMAIL_DRAFT_SETTLED, type ConversationFailure, type EmailDraftState } from '$lib/emailDraft';
 
 	let { artifactId, text, targetVersion = null, readAt = null, initialState = 'open', readOnly = false, connected = true, blocker = null, ended = $bindable(false), flush = async () => true, readState = async () => null, onReread = () => {}, onRefused = () => {} }: {
 		artifactId: string; text: () => string; targetVersion?: string | null; readAt?: string | null; initialState?: EmailDraftState;
@@ -13,6 +13,7 @@
 		readState?: () => Promise<EmailDraftState | null>;
 		onReread?: () => void; onRefused?: (reason: ConversationFailure) => void;
 	} = $props();
+	const onSettled = getContext<(() => void) | undefined>(EMAIL_DRAFT_SETTLED);
 	type Step = 'draft' | 'confirm' | 'sending' | 'sent' | 'failed' | 'declined' | 'unconfirmed';
 	const fromState = (state: EmailDraftState): Step => state === 'sent' ? 'sent' : state === 'discarded' ? 'declined' : state === 'sending' ? 'unconfirmed' : 'draft';
 	let step = $state<Step>(untrack(() => fromState(initialState)));
@@ -29,8 +30,11 @@
 	type Action = 'send' | 'discard';
 	function apply(result: DraftActionResult, action: Action) {
 		switch (result.state) {
-			case 'sent': notDeliveredTo = result.not_delivered_to ?? []; step = 'sent'; break;
-			case 'discarded': step = 'declined'; break;
+			case 'sent':
+				notDeliveredTo = result.not_delivered_to ?? []; step = 'sent';
+				if (!notDeliveredTo.length) onSettled?.();
+				break;
+			case 'discarded': step = 'declined'; onSettled?.(); break;
 			case 'sending': case 'unconfirmed': step = 'unconfirmed'; break;
 			case 'failed': step = 'failed'; break;
 			case 'changed': case 'newer':

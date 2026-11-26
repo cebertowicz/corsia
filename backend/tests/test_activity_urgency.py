@@ -31,6 +31,32 @@ def test_queue_orders_ranks_then_urgency_and_age(db, monkeypatch):
     assert [r['key'] for r in notifications] == ['document-old']
 
 
+def test_draft_coalesces_projected_review_and_keeps_unread_replies(db, monkeypatch):
+    from api import attention
+    from doceditor import activity_reply_rows
+    from infra import activity_draft_rows, activity_rank_scope
+
+    monkeypatch.setattr(attention, '_authorized_raised', lambda *a, **k: [])
+    monkeypatch.setattr(attention.public, 'annotate_attention', lambda *a, **k: [])
+    monkeypatch.setattr(attention, '_queue_for', lambda *a, **k: [])
+    draft = row('draft', 'draft-1', '2026-01-01')
+    draft['detail']['artifact_id'] = 'artifact-1'
+    review = row('review', 'review-1', '2026-01-01')
+    review['detail']['artifact_id'] = 'artifact-1'
+    document = row('document', 'document-1', '2026-01-01')
+    document['detail'].update(artifact_id='artifact-1', unread=2)
+    monkeypatch.setattr(activity_draft_rows, 'draft_rows', lambda *a, **k: [draft])
+    monkeypatch.setattr(attention.public, 'activity_plan_rows', lambda *a: [review])
+    monkeypatch.setattr(attention.public, 'dedupe_activity_comment_tasks', lambda _db, _user, projected, _replies: projected)
+    monkeypatch.setattr(activity_reply_rows, 'document_rows', lambda *a, **k: [document])
+    monkeypatch.setattr(activity_rank_scope, 'ranker_for', lambda *a: ('scope', None))
+
+    rows, notifications, _, _ = attention.activity_lists(db, 'user-1', view='activity')
+    assert [r['key'] for r in rows] == ['draft-1']
+    assert rows[0]['detail']['unread_replies'] == 2
+    assert notifications == []
+
+
 def row(renderer, key, raised_at):
     return {'renderer': renderer, 'kind': renderer, 'key': key, 'raised_at': raised_at,
             'source': {}, 'detail': {'artifact_id': key}}

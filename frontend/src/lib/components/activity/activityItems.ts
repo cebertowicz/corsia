@@ -15,6 +15,7 @@ export const KIND_LABEL: Record<ActivityKind, string> = {
 	task: 'Task',
 	document: 'Document',
 	message: 'Message',
+	draft: 'Draft',
 };
 
 /** Activity's two lists. A document with unread replies is a notification; everything else is a task. */
@@ -112,11 +113,10 @@ export function keepInPlace(
 	return [...items.slice(0, place), kept, ...items.slice(place)];
 }
 
-export function documentOf(item: ActivityQueueItem): { artifactId: string; commentId?: string } | null {
-	if (item.open && 'artifact_id' in item.open) {
-		return { artifactId: item.open.artifact_id, commentId: item.open.comment_id };
-	}
-	return null;
+export function documentOf(item: ActivityQueueItem): { artifactId: string | null; path?: string; commentId?: string } | null {
+	if (!item.open) return null;
+	if ('path' in item.open) return { artifactId: item.open.artifact_id, path: item.open.path };
+	return { artifactId: item.open.artifact_id, commentId: item.open.comment_id };
 }
 
 
@@ -127,7 +127,7 @@ export const heldOf = (item: ActivityQueueItem) =>
 export const taskOf = (item: ActivityQueueItem) =>
 	item.kind === 'task' ? (item.detail as ActivityTaskDetail) : null;
 export const reviewOf = (item: ActivityQueueItem) =>
-	item.kind === 'review' ? (item.detail as ActivityReviewDetail) : null;
+	item.kind === 'review' || item.kind === 'draft' ? (item.detail as ActivityReviewDetail) : null;
 export function documentDetailOf(item: ActivityQueueItem): ActivityDocumentDetail | null {
 	if (item.kind !== 'document') return null;
 	const detail = item.detail as Partial<ActivityDocumentDetail>;

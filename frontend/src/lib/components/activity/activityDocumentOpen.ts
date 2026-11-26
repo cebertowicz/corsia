@@ -8,12 +8,20 @@ export function openActivityDocument(
 	workspaceKey: string, artifactId: string | null, thread: string | null,
 	landOnReplies: boolean, commentId: string | undefined,
 	setLookup: (value: DocumentLookup | { status: 'resolving' } | null) => void,
+	path?: string,
 ): () => void {
 	async function closeAllBut(keep: string | null) {
 		const tabs = get(threadWorkspaces)[workspaceKey]?.tabs ?? [];
 		for (const tab of tabs) {
 			if (tab.instanceId !== keep) await requestArtifactTabClose(workspaceKey, tab, () => {});
 		}
+	}
+	if (!artifactId && path && thread) {
+		const title = path.split('/').pop() ?? path;
+		setLookup({ status: 'found', path, title });
+		openArtifactTab(workspaceKey, { path, title });
+		void closeAllBut(get(threadWorkspaces)[workspaceKey]?.activeTabId ?? null);
+		return () => {};
 	}
 	if (!artifactId) {
 		setLookup(null);

@@ -200,16 +200,17 @@ async def get_raised(user: dict = Depends(require_user), thread_id: str | None =
     return {"items": rows}
 
 
-def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None,
+                   draft_subjects: bool = True):
     """Compose and rank one authorized view's tasks; return uncapped rows, ranker and scope.
 
     Activity's Notifications list is never ranked, so the ranker and its wake see tasks only.
     """
-    rows, _, ranker, scope = activity_lists(db, user_id, project_id=project_id, view=view)
+    rows, _, ranker, scope = activity_lists(db, user_id, project_id=project_id, view=view, draft_subjects=draft_subjects)
     return rows, ranker, scope
 
 
-def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str | None = None, draft_subjects: bool = True):
     """Return (ranked tasks, notifications newest first, ranker, scope), both lists uncapped."""
     from collections import Counter
     from loguru import logger
@@ -225,15 +226,17 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     notifications: list[dict] = []
     if view == 'activity':
         from doceditor.activity_reply_rows import document_rows
+        from infra.activity_draft_rows import draft_rows, merge_draft_reviews
         projected = public.activity_plan_rows(db, user_id, annotated)
         documents = document_rows(db, user_id)
         rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
+        rows, draft_reviews = merge_draft_reviews(rows, draft_rows(db, user_id, subjects=draft_subjects))
         # A reviewed document's replies ride on its review row; Approve ends the review and
         # the next read lists the document in Notifications.
         unread = {d['detail']['artifact_id']: d['detail']['unread'] for d in documents}
         reviewed = set()
         for row in rows:
-            if row['kind'] == 'review' and row['detail']['artifact_id'] in unread:
+            if (row['kind'] == 'review' or (row['kind'] == 'draft' and row['detail']['artifact_id'] in draft_reviews)) and row['detail']['artifact_id'] in unread:
                 row['detail']['unread_replies'] = unread[row['detail']['artifact_id']]
                 reviewed.add(row['detail']['artifact_id'])
         notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed]

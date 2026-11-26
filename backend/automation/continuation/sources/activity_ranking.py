@@ -67,7 +67,9 @@ def _enqueue_if_due(read_db, db, user_id: str, project_id: str | None, thread_id
     if current is None:
         raise ValueError('invalid activity sweep timestamp')
     last, seen = _last_nudge(read_db, user_id, scope)
-    rows, ranker, _ = activity_queue(read_db, user_id, project_id=project_id, view='activity')
+    rows, ranker, _ = activity_queue(
+        read_db, user_id, project_id=project_id, view='activity', draft_subjects=False,
+    )
     unranked = sum(row['rank'] is None for row in rows)
     new_keys = sorted(row['key'] for row in rows if row['rank'] is None and row['key'] not in seen)
     new = len(new_keys)
