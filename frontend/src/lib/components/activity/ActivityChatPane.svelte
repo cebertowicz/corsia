@@ -117,7 +117,7 @@
 	.jump { position: absolute; bottom: var(--space-4); left: var(--space-3); z-index: 2; }
 	.bar { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: var(--text-subhead); }
 	.bar strong { color: var(--text-primary); } .who { display: flex; align-items: flex-start; gap: var(--space-2); } .who > div > div { margin-top: var(--space-1); }
-	.scroll { overflow-y: auto; padding: var(--space-5); font-size: var(--text-body); line-height: var(--lh-relaxed); }
+	.scroll { overflow-y: auto; padding: var(--space-5); padding-bottom: calc(var(--touch-target) + var(--space-4) + var(--space-3)); font-size: var(--text-body); line-height: var(--lh-relaxed); }
 	.conversation + .conversation { margin-top: var(--space-6); }
 	.meta { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-tertiary); }
 	.meta button { border: 0; padding: 0; background: none; color: var(--accent-text); font: inherit; cursor: pointer; white-space: nowrap; }
@@ -127,8 +127,8 @@
 	.message :global(.cm-comment-wrap) { background: var(--accent-subtle); color: inherit; border-bottom: var(--comment-rail-default) solid var(--accent); }
 	.thread { margin-top: var(--space-3); padding-left: var(--space-3); border-left: var(--comment-rail-default) solid var(--accent); }
 	.text { margin: var(--space-2) 0 var(--space-4); } .text:last-child { margin-bottom: 0; }
-	.text :global(p) { margin: 0 0 12px; } .text :global(p:last-child) { margin-bottom: 0; }
+	.text :global(p) { margin: 0 0 var(--space-3); } .text :global(p:last-child) { margin-bottom: 0; }
 	.agent { color: var(--accent-text); }
 	:global(.activity.phone) .bar { padding-inline: var(--space-3); }
-	:global(.activity.phone) .scroll { padding: var(--space-4) var(--space-3) var(--space-5); font-size: var(--text-input); }
+	:global(.activity.phone) .scroll { padding-top: var(--space-4); padding-inline: var(--space-3); font-size: var(--text-input); }
 </style>

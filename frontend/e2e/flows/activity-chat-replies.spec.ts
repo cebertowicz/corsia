@@ -134,6 +134,9 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
       await expect(pill).toBeVisible();
       await capture(page, info.outputPath('chat-bottom.png'));
       await expect(lastReply).toBeInViewport();
+      const replyBox = await lastReply.boundingBox();
+      const pillBox = await pill.boundingBox();
+      expect(replyBox && pillBox && replyBox.y + replyBox.height <= pillBox.y).toBe(true);
       return;
     }
     if (action === 'close') {
