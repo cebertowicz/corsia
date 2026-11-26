@@ -78,6 +78,7 @@ class Publication:
             return None
         data = json.loads(value)
         data["prior_mirror"] = base64.b64decode(data["prior_mirror"], validate=True)
+        data["accepted"] = tuple(data.get("accepted", ()))
         return cls(**data)
 
 
