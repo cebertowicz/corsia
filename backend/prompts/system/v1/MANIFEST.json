@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7646,
+      "bytes": 7738,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "0b86c460532fb6f490815eb705f914851e5013676ac57e1c3765e5f78396edab"
+      "sha256": "eb80dc64e3929e3a1e278b370b1e2812fb276e9a909baa65f86dd88ea68d904f"
     },
     {
       "bytes": 830,
@@ -32,18 +32,18 @@
       "sha256": "b9d954695769fc4c5345504855127d74908d3d6ed367807d39fe036a957540f3"
     },
     {
-      "bytes": 551,
+      "bytes": 615,
       "kind": "context",
       "path": "context/roles/conductor/00-operating-model.md",
       "role": "conductor",
-      "sha256": "46b7b8d7331884facc3a0c90f80978d055eb276064b97199cdb4560140b8d1f2"
+      "sha256": "ec7bf7d868f7f274a2f3cd5deb63ddc43c62e5a810fabc395f098153954e7796"
     },
     {
-      "bytes": 743,
+      "bytes": 807,
       "kind": "context",
       "path": "context/roles/corsia_agent/00-operating-model.md",
       "role": "corsia_agent",
-      "sha256": "20610fb67653e500fe8a0465fdd9893d8b07f4cd6260eef80b2bcff86651911f"
+      "sha256": "2e224d0c6263d9648b74769776ce70c8a70b422a9d10daf5cd552ad215cef2f5"
     },
     {
       "bytes": 729,
@@ -148,10 +148,10 @@
       "sha256": "4eeae76bcabd61d565e9ec0e4280af3123290b66380369e02584d321e01db40f"
     },
     {
-      "bytes": 3594,
+      "bytes": 3687,
       "kind": "skill",
       "path": "skills/asking-the-person/SKILL.md",
-      "sha256": "872154d6de4a245389bea20308710b54902bf20d3f76325849562120634df2f8"
+      "sha256": "badd5d88610e83edc6f1df50a5dac6ce39348281e937ed64439473a0f37d9898"
     },
     {
       "bytes": 19289,
