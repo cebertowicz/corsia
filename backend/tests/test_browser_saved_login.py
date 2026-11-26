@@ -19,6 +19,7 @@ from tools.browser_actions import BrowserFillTool
 THREAD = "thread-fill"
 PERSON = "person"
 REAL_MAY_FILL = saved_login_fills.may_fill
+REAL_PAGE_URL = choice._page_url
 
 
 @pytest.fixture
@@ -161,6 +162,40 @@ async def test_the_list_names_usernames_only_never_an_id_status_or_password(agen
     assert text == choice.NO_MATCH + choice.ON_PAGE.format(usernames=USER)
     assert agent.login_id not in text and "date" not in text
     _never_shown(agent, caplog, text)
+
+
+@pytest.mark.asyncio
+async def test_a_browser_that_never_answers_the_page_read_leaves_the_list_out_within_its_limit(monkeypatch):
+    """The page-address read is bounded by the browser call limit, so a hung browser costs seconds, not the turn."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from host_access import browser_cdp, processes
+
+    class Silent:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def call(self, _method):
+            await asyncio.Event().wait()
+
+    async def yes(_thread_id):
+        return True
+
+    async def endpoint(_thread_id):
+        return "ws://page.test/current"
+
+    sessions = SimpleNamespace(has_session=yes, page_endpoint=endpoint)
+    monkeypatch.setattr(processes, "PROCESS_OWNER", SimpleNamespace(browser_sessions=lambda: sessions))
+    monkeypatch.setattr(browser_cdp, "CdpClient", Silent)
+    monkeypatch.setattr(browser_cdp, "BROWSER_CALL_TIMEOUT", 0.05)
+    assert await asyncio.wait_for(REAL_PAGE_URL(THREAD), 2) is None
 
 
 def _never_shown(w, caplog, *texts: str) -> None:

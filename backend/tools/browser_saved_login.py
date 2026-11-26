@@ -67,7 +67,8 @@ async def _page_url(thread_id: str) -> str | None:
         return None
     try:
         async with browser_cdp.CdpClient(await owner.page_endpoint(thread_id)) as cdp:
-            info: Any = (await cdp.call("Target.getTargetInfo")).get("targetInfo")
+            info: Any = (await asyncio.wait_for(
+                cdp.call("Target.getTargetInfo"), browser_cdp.BROWSER_CALL_TIMEOUT)).get("targetInfo")
     except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException, TimeoutError):
         # The page closed or its browser went away mid-read: the list is left out, as with no browser.
         return None
