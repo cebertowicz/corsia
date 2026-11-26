@@ -81,17 +81,38 @@ def test_a_table_cell_resent_is_placed_on_its_own_row(integration_client, integr
     assert (row['from_off'], row['to_off']) == span(path.read_text(), 'Yes', 1)
 
 
-def test_an_empty_cell_resent_is_placed_on_its_own_cell(integration_client, integration_workspace):
-    text = LEAD + '| Plan | Owner |\n| --- | --- |\n| Alpha |   |\n| Beta | Sam |\n'
-    path = document(integration_workspace, 'resend-empty-cell.md', text)
+EMPTY_CELL = LEAD + '| Plan | Owner |\n| --- | --- |\n| Alpha |   |\n| Beta | Sam |\n'
+
+
+@pytest.mark.parametrize('shifted', [False, True], ids=['unchanged', 'table shifted'])
+def test_an_empty_cell_resent_is_placed_on_its_own_cell(integration_client, integration_workspace, shifted):
+    # An empty cell's quote is its own whitespace; its sides reach into the cells around it.
+    path = document(integration_workspace, f'resend-empty-cell-{shifted}.md', EMPTY_CELL)
     artifact = _register(integration_client, path)
-    start = text.index('|   |') + 1
-    passage = {'anchor_text': '   ', 'from_off': start, 'to_off': start + 3,
-               'anchor_prefix': text[start - 32:start], 'anchor_suffix': text[start + 3:start + 35]}
-    response = resend(integration_client, artifact, passage, 'resend-empty-cell')
+    passage = kept(EMPTY_CELL, '   ')
+    if shifted:
+        path.write_text('Added above the table, far enough away.\n' + EMPTY_CELL)
+    response = resend(integration_client, artifact, passage, f'resend-empty-cell-{shifted}')
     assert response.status_code == 200, response.text
-    row = _threads(integration_client, artifact)['resend-empty-cell']
-    assert (row['from_off'], row['to_off']) == (start, start + 3)
+    row = _threads(integration_client, artifact)[f'resend-empty-cell-{shifted}']
+    assert (row['from_off'], row['to_off']) == span(path.read_text(), '   ')
+
+
+def test_two_blank_cells_with_the_same_sides_equally_near_are_refused(integration_client, integration_workspace):
+    blank = '|   |   |\n'
+    text = LEAD + '| Plan | Note |\n| --- | --- |\n' + blank * 12 + '| End | z |\n'
+    first, second = span(text, '   ', 10), span(text, '   ', 12)
+    sides = [anchor_context(text, *cell, '   ') for cell in (first, second)]
+    assert sides[0] == sides[1]  # rows 6 and 7 of the blank rows: nothing in the text tells them apart
+    path = document(integration_workspace, 'resend-blank-rows.md', text)
+    artifact = _register(integration_client, path)
+    middle = (first[0] + second[0]) // 2
+    passage = {'anchor_text': '   ', 'from_off': middle, 'to_off': middle + 3,
+               'anchor_prefix': sides[0][0], 'anchor_suffix': sides[0][1]}
+    response = resend(integration_client, artifact, passage, 'resend-blank-rows')
+    assert response.status_code == 409, response.text
+    assert response.json()['kind'] == 'passage_gone'
+    assert _threads(integration_client, artifact) == {}
 
 
 @pytest.mark.parametrize('case', ['deleted', 'prefix edited', 'suffix edited', 'row deleted', 'tie'])
