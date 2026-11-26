@@ -5,10 +5,11 @@
 	import './DocViewer.css';
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
 	import { isMobile, isShortTouch, prefersReducedMotion } from '$lib/stores/viewport';
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
 	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, pickedComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
+	import { openResolvedView } from '$lib/docResolvedEntry';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
@@ -126,10 +127,6 @@
 	/** The comments drawer's selected view: resolved threads shown or hidden. The count is the surface's own. */
 	let resolvedOpen = $state(false), resolvedCount = $state(0);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
-	/** The row's Resolved control: opens the drawer on its Resolved view (set after the open, which resets it), switches an open one to it, or closes it when it is already there. */
-	const openResolved = async (opener: HTMLElement) => {
-		if (commentUI.state?.kind !== 'list') { history.close(); commentUI.openList(opener); await tick(); resolvedOpen = true; } else if (resolvedOpen) commentUI.openList(opener); else resolvedOpen = true;
-	};
 	const typingAvailable = () => docState === 'ready' && !readonly && !confirming && !openRefusal && suggestionBusyId === null;
 	// A primitive, for the reason targetKey is one: a revision refresh replaces the `target` object with the same id, and that must not end Edit.
 	const openingId = $derived(target?.instanceId ?? null);
@@ -280,7 +277,7 @@
 		touchReading={reading.touch} editing={reading.editing} canEdit={typingAvailable()} onEnterEdit={reading.enter} onDone={reading.finish}
 		commentTaskBar={reviewBarState}
 		ask={documentAsk}
-		commentsOpen={commentUI.state?.kind === 'list'} {resolvedCount} {resolvedOpen} onOpenResolved={openResolved}
+		commentsOpen={commentUI.state?.kind === 'list'} {resolvedCount} {resolvedOpen} onOpenResolved={(opener: HTMLElement) => openResolvedView({ listOpen: () => commentUI.state?.kind === 'list', openList: (el) => commentUI.openList(el), closeHistory: () => history.close(), resolvedOpen: () => resolvedOpen, setResolvedOpen: (open) => { resolvedOpen = open; } }, opener)}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		saveStatus={history.restoring ? 'saving' : save.status}
 		bind:this={feedbackStatus}
