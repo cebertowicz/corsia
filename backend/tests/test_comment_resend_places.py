@@ -7,9 +7,12 @@ from fastapi import FastAPI
 from api import doc_comments
 from auth_fixtures import OWNER_TOKEN
 from doceditor.quote_anchor import _u16, anchor_context
+from infra import app_loop
 from tests.test_document_live_file_tools import opened
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
-from test_doc_image_region_comments import _register, _threads, _url
+from test_doc_image_region_comments import _png_bytes, _register, _threads, _url
+from tests.test_doc_image_region_live import MARKDOWN as SHOT, _live_doc_with_image
+from tests.test_document_live_suggestions import typing
 
 LEAD = 'An opening paragraph long enough to fill a side.\n\n'
 TABLE = LEAD + '| Plan | Ready |\n| --- | --- |\n| Alpha | Yes |\n| Beta | Yes |\n| Gamma | No |\n'
@@ -184,3 +187,54 @@ async def test_an_open_document_with_no_capture_held_places_a_kept_draft_by_its_
     finally:
         await manager.close()
         app_loop.clear()
+
+
+CHART = '![Chart](img/chart.png)'
+
+
+def test_an_image_in_a_closed_document_resent_is_placed_on_its_own_copy_of_the_image(integration_client, integration_workspace):
+    folder = integration_workspace / 'resend-image'
+    (folder / 'img').mkdir(parents=True)
+    (folder / 'img' / 'chart.png').write_bytes(_png_bytes())
+    text = LEAD + f'Before the change:\n\n{CHART}\n\nAfter the change:\n\n{CHART}\n'
+    path = document(folder, 'notes.md', text)
+    artifact = _register(integration_client, path)
+    passage = kept(text, CHART, 1)
+    path.write_text('Added above the images, far enough away.\n' + text)
+    response = resend(integration_client, artifact, passage, 'resend-image', region={'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.1})
+    assert response.status_code == 200, response.text
+    row = _threads(integration_client, artifact)['resend-image']
+    assert (row['from_off'], row['to_off']) == span(path.read_text(), CHART, 1)
+    assert row['image_src'] == str(folder / 'img' / 'chart.png')
+    assert (row['region_x'], row['region_y'], row['region_w'], row['region_h']) == (0.1, 0.2, 0.3, 0.1)
+
+
+@pytest.mark.asyncio
+async def test_an_image_in_an_open_document_with_no_capture_held_is_placed_on_it_by_its_sides(ownership_scope, tmp_path, monkeypatch):
+    manager, entry, image = await _live_doc_with_image(ownership_scope, tmp_path, monkeypatch)
+    try:
+        typing(entry, 0, insert=LEAD)
+        passage = kept(entry.live.text, SHOT)
+        # Typed since the draft was kept, above its sides: every offset moves, its sides do not.
+        typing(entry, 0, insert='A new opening line typed since. ')
+        placed = await post_live(entry, {**passage, 'region': {'x': 0.2, 'y': 0.2}}, 'live-image')
+        assert placed.status_code == 200, placed.text
+        comment = placed.json()['comment']
+        assert comment['image_src'] == str(image)
+        assert (comment['from_off'], comment['to_off']) == span(entry.live.text, SHOT)
+        assert entry.live.range_text('live-image') == SHOT
+    finally:
+        await manager.close()
+        app_loop.clear()
+
+
+def test_an_image_resent_twice_under_one_id_with_its_area_only_is_stored_once(integration_client, integration_workspace):
+    path = integration_workspace / 'resend-twice.png'
+    path.write_bytes(_png_bytes())
+    artifact = _register(integration_client, path)
+    region = {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.1}
+    first = resend(integration_client, artifact, {}, 'image-twice', region=region)
+    again = resend(integration_client, artifact, {}, 'image-twice', region=region)
+    assert first.status_code == again.status_code == 200, (first.text, again.text)
+    assert first.json()['comment']['id'] == again.json()['comment']['id'] == 'image-twice'
+    assert list(_threads(integration_client, artifact)) == ['image-twice']
