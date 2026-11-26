@@ -127,6 +127,18 @@ def evaluate(old: str, new: str, old_span: tuple[int, int], new_span: tuple[int,
     new_start, new_end = new_index.line_at(c), new_index.line_at(d - 1)
     pairs = _line_pairs(old, new) if line_pairs is None else line_pairs
     kind, target = pairs.get(old_line, ('unclear', None))
+    if '\n' in old[a:b]:
+        end_kind, end_target = pairs.get(old_index.line_at(b - 1), ('unclear', None))
+        if (kind not in ('equal', 'paired') or target != new_start
+                or end_kind not in ('equal', 'paired') or end_target != new_end):
+            return False, False, 'line_' + kind
+        if old != new:
+            old_count, new_count = old.count(quote), new.count(quote)
+            if old_count != new_count and max(old_count, new_count) > 1 and min(old_count, new_count) > 0:
+                return False, True, 'duplicate_ambiguous'
+        before, after = _fragments(old, a, b)
+        current_before, current_after = _fragments(new, c, d)
+        return (new[c:d] == quote and before == current_before and after == current_after), False, 'context'
     if kind in ('delete', 'unclear') or target != new_start or new_start != new_end:
         return False, False, 'line_' + kind
     if kind == 'paired':
