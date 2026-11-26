@@ -119,7 +119,8 @@ export function approvalReady(lease: HostAccessItem | null): boolean {
 	if (lease?.kind === 'fill') {
 		return lease.state === 'awaiting_user' && casReady(lease)
 			// A login names its username; a saved item its label instead.
-			&& text(lease.agent) && text(lease.site) && (text(lease.username) || text(lease.item_label))
+			&& text(lease.agent) && text(lease.site)
+			&& (lease.fill_kind === 'item' ? text(lease.item_label) : lease.fill_kind === 'login' && text(lease.username))
 			// The server always offers the shortest choice; a request that doesn't is not approvable, and the
 			// drawer says so rather than dropping Approve with no word.
 			&& Number.isInteger(lease.max_duration_seconds) && lease.max_duration_seconds >= FILL_DURATIONS_SECONDS[0]
@@ -167,7 +168,7 @@ export function owner(lease: HostAccessItem): string {
 /** The pending chip's and drawer's accessible name. */
 export function pendingLabel(request: HostAccessItem): string {
 	if (request.kind === 'fill') {
-		return request.item_label ? 'Review a request to use a saved item' : 'Review a request to sign in with a saved login';
+		return request.fill_kind === 'item' ? 'Review a request to use a saved item' : 'Review a request to sign in with a saved login';
 	}
 	return request.kind === 'script'
 		? 'Review permission for this script to act as your agent and use the agents’ GitHub account'

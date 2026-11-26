@@ -24,7 +24,7 @@ from typing import Any
 import infra.saved_items as saved_items  # mypy resolves a new submodule only this way
 from infra import saved_login_fills, saved_logins
 from infra.key_store_values import KeyStoreError
-from infra.saved_fill_identity import FillApprovalError
+from infra.saved_fill_identity import FillApprovalError, own_thread
 from infra.saved_login_fills import ITEM
 
 _NOT_SECURE = "A saved item is filled only on a site whose address starts with https://."
@@ -42,7 +42,7 @@ def request_item_fill(thread_id: str, name: str, site: str, *, requested_seconds
     rules are :func:`infra.saved_login_fills.request_fill`'s: an agent never asks for a standing grant.
     """
     requested = None if requested_seconds is None else saved_login_fills._duration(requested_seconds)
-    clean_thread = saved_login_fills._own_thread(thread_id)
+    clean_thread = own_thread(thread_id)
     try:
         item = saved_items.get_item(name)
     except KeyStoreError as exc:

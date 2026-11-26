@@ -35,8 +35,8 @@
 	} = $props();
 
 	const fill = $derived(lease.kind === 'fill');
-	// A fill grant's kind is its name: a saved login, or a saved item (it has an item label).
-	const kindName = $derived(lease.kind === 'fill' && lease.item_label ? 'Saved item' : 'Saved login');
+	// A fill grant's kind is its name: a saved login, or a saved item.
+	const kindName = $derived(lease.kind === 'fill' && lease.fill_kind === 'item' ? 'Saved item' : 'Saved login');
 </script>
 
 <div class="active-chip">

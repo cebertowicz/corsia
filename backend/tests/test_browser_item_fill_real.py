@@ -3,20 +3,29 @@
 Runs only when CORSIA_TEST_CHROME names a Chrome or Chromium binary (as test_browser_frame_password_real.py). The
 fixture site is plain http on 127.0.0.1, so each test admits that one origin through the fill's single https check
 (browser_login_page.https_url), as the saved-login e2e does.
+
+The last test runs the whole agent path on the native browser (CORSIA_BROWSER_E2E=1, as test_browser_login_fill_e2e):
+an item filled and sent to a page that echoes it back, where a screenshot is refused, and a page without it, where one
+is taken. CI runs this file in browser-native.yml.
 """
 from __future__ import annotations
 
+import html
 import json
+import re
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
+from urllib.parse import parse_qs
 
 import pytest
 
-from host_access import browser_cdp, browser_login_page as page
+from host_access import browser_cdp, browser_item_fill, browser_login_page as page, browser_saved_fills
+from infra import key_store, saved_item_fills
 from tests.test_browser_frame_password_real import CHROME, _chrome, _until
+from tests.test_browser_login_fill_e2e import _admit_fixture, _agent, browser  # noqa: F401 - browser is a fixture
 
-pytestmark = pytest.mark.skipif(not CHROME, reason="set CORSIA_TEST_CHROME to a Chrome binary")
+pytestmark = [pytest.mark.integration, pytest.mark.skipif(not CHROME, reason="set CORSIA_TEST_CHROME to a Chrome binary")]
 
 VALUE = "4417 1234 5678 9113"
 PAGE = """<!doctype html><title>Portal</title>
@@ -125,3 +134,78 @@ async def test_a_form_that_moves_after_the_check_is_not_filled(portal):
         await _read(cdp, "document.forms[0].action = 'https://collect.example.net/p'; true")
         assert await page.fill_item(cdp, field, VALUE) == "changed"
         assert await _read(cdp, "document.getElementById('text').value") == ""
+
+
+NAME, LABEL = "member-number", "Member number"
+FORM = """<!doctype html><title>Member</title><form method=post action=/save>
+<input id=key type=text name=key><button>Save</button></form>"""
+PLAIN = "<!doctype html><title>Plain</title><main><p>Nothing saved here.</p></main>"
+
+
+@contextmanager
+def _echo_site():
+    """A form page, the page its POST lands on (which shows what was sent, as a settings page shows a key) and a
+    page that shows nothing saved."""
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, body: str) -> None:
+            data = body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
+            self._send(FORM if self.path.startswith("/form.html") else PLAIN)
+
+        def do_POST(self):  # noqa: N802
+            sent = parse_qs(self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()).get("key", [""])[0]
+            self._send(f"<!doctype html><title>Saved</title><main><p>Your member number: {html.escape(sent)}</p></main>")
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+async def _on(run, title: str) -> bool | None:
+    return True if title in await _agent(run, "get", "title") else None
+
+
+@pytest.mark.asyncio
+async def test_a_screenshot_of_a_page_that_shows_a_filled_item_is_refused_and_of_one_that_doesnt_is_taken(
+        browser, monkeypatch, tmp_path):  # noqa: F811 - the imported fixture
+    with _echo_site() as origin:
+        site_origin = _admit_fixture(monkeypatch, origin)
+        key_store.add_entry(NAME, LABEL, "", added_by_thread_id=None, added_by_name=None)
+        key_store.set_value(NAME, browser.sentinel)
+        monkeypatch.setattr(saved_item_fills, "granted_site", lambda _thread, _name: site_origin)
+        try:
+            await _agent(browser, "open", f"{origin}/form.html")
+            text = await browser_item_fill.fill_saved_item(browser.thread, NAME, "#key")
+            browser.outputs.append(text)
+            assert text == browser_item_fill.FILLED.format(label=LABEL, site=site_origin), text
+            # On the filled page an element is named by its snapshot ref; the button sends the form.
+            button = re.search(r'button "Save" \[ref=(e\d+)\]', await _agent(browser, "snapshot", "-i"))
+            assert button, browser.outputs[-1]
+            await _agent(browser, "click", f"@{button.group(1)}")
+            await _until(lambda: _on(browser, "Saved"))
+            shown = tmp_path / "shown.png"
+            refused = await _agent(browser, "screenshot", str(shown))
+            assert browser_saved_fills.SCREENSHOT_SHOWS_SAVED_VALUE in refused, refused
+            assert not shown.exists()
+            await _agent(browser, "open", f"{origin}/plain.html")
+            plain = tmp_path / "plain.png"
+            taken = await _agent(browser, "screenshot", str(plain))
+            assert not taken.startswith("Error"), taken
+            assert plain.exists() and plain.stat().st_size > 0
+        finally:
+            await browser.owner.shutdown()

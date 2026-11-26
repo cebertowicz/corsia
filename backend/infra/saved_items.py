@@ -60,16 +60,24 @@ def _added(name: str) -> bool:
             and not key_store.is_managed_name(name) and not key_store.is_login_entry_name(name))
 
 
-def list_items(*, db: sqlite3.Connection | None = None) -> list[SavedItem]:
-    """Every item an agent may ask to have filled, set or not, built-ins first. Never a value."""
-    conn = _db(db)
-    items = [
+def _entry_items(conn: sqlite3.Connection) -> list[SavedItem]:
+    """The built-in and added entries that are items, set or not; provider keys come from _provider_labels."""
+    return [
         SavedItem(entry["name"], entry["label"], bool(entry["is_set"]))
         for entry in key_store.list_entries(conn)
         if entry["name"] in key_store.BUILTINS or _added(entry["name"])
     ]
-    names = [f"{key_store.PROVIDER_PREFIX}{name}" for name in sorted(key_store.PROVIDER_NAMES)]
-    stored = set(key_store_values.resolve(conn, names))
+
+
+def _provider_entries() -> list[str]:
+    return [f"{key_store.PROVIDER_PREFIX}{name}" for name in sorted(key_store.PROVIDER_NAMES)]
+
+
+def list_items(*, db: sqlite3.Connection | None = None) -> list[SavedItem]:
+    """Every item an agent may ask to have filled, set or not, built-ins first. Never a value."""
+    conn = _db(db)
+    items = _entry_items(conn)
+    stored = set(key_store_values.resolve(conn, _provider_entries()))
     providers = _provider_labels(stored)
     items.extend(SavedItem(name, label, name in stored) for name, label in providers.items())
     return items
@@ -100,7 +108,13 @@ def item_value_for_fill(name: object, *, db: sqlite3.Connection | None = None) -
 
 
 def item_blanking_values(*, db: sqlite3.Connection | None = None) -> frozenset[str]:
-    """Every set item's value, for ``saved_logins.blanking_values`` to blank wherever the browser returns one."""
+    """Every set item's value, for ``saved_logins.blanking_values`` to blank wherever the browser returns one.
+
+    It runs on every agent browser command, so the provider keys are read once, together with the set entries'
+    values, keeping the provider keys list_items shows.
+    """
     conn = _db(db)
-    names = [item.name for item in list_items(db=conn) if item.is_set]
-    return frozenset(key_store_values.resolve(conn, names).values())
+    names = [item.name for item in _entry_items(conn) if item.is_set]
+    stored = key_store_values.resolve(conn, names + _provider_entries())
+    shown = set(names) | set(_provider_labels(set(stored)))
+    return frozenset(value for name, value in stored.items() if name in shown)

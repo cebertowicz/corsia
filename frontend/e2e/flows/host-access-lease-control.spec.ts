@@ -586,7 +586,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 	function fillRequest(threadId: string, n: number, overrides: Record<string, unknown> = {}) {
 		return {
 			id: `fill-e2e-${n}`, kind: 'fill', state: 'awaiting_user', thread_id: threadId, root_thread_id: threadId,
-			agent: 'Bookkeeper', site: LONG_SITE, domain: 'example.com', username: 'accounts-payable@example.com', item_label: null,
+			agent: 'Bookkeeper', site: LONG_SITE, domain: 'example.com', fill_kind: 'login', username: 'accounts-payable@example.com', item_label: null,
 			revision: 1, application_hash: `hash-fill-e2e-${n}`, decision_capability: `decision-fill-e2e-${n}`,
 			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: `2026-07-18T16:0${n}:00.000Z`, updated_at: `2026-07-18T16:0${n}:00.000Z`,

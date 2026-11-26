@@ -323,7 +323,7 @@ _SNAPSHOT_JSON = '{"success": true, "data": {"snapshot": "- textbox [ref=e2]: Ty
 
 def test_a_snapshot_with_a_filled_field_showing_keeps_only_hidden_values():
     from host_access.browser_cli import CommandResult, render_model_result
-    from host_access.browser_session_commands import hidden_snapshot
+    from host_access.browser_field_values import hidden_snapshot
 
     hidden = hidden_snapshot(CommandResult(0, _SNAPSHOT_JSON, "warning on stderr: Typed1"))
     assert render_model_result(hidden, redactions={}) == "- textbox [ref=e2]: [value hidden]\n- button \"Go\" [ref=e3]"

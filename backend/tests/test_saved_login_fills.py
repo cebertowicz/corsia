@@ -61,6 +61,7 @@ def test_a_request_names_the_agent_site_username_and_time_from_server_records(wo
     assert row["kind"] == "fill" and row["state"] == "awaiting_user"
     assert row["agent"] == "Bookkeeper"
     assert row["site"] == "https://example.com" and row["username"] == "me@example.com"
+    assert row["kind"] == "fill" and row["fill_kind"] == "login" and row["item_label"] is None
     assert row["created_at"] and row["expires_at"] is None and row["duration_seconds"] is None
     assert row["max_duration_seconds"] == 1800
     assert row["root_thread_id"] == AGENT_THREAD

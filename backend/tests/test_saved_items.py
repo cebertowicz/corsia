@@ -91,6 +91,7 @@ def test_a_request_carries_the_field_site_and_the_item_label_never_a_value(world
     row = saved_item_fills.request_item_fill(THREAD, "member-number", SITE + "/", requested_seconds=900)
     assert row["kind"] == "fill" and row["state"] == "awaiting_user"
     assert row["site"] == SITE and row["item_label"] == "Member number" and row["username"] == ""
+    assert row["kind"] == "fill" and row["fill_kind"] == "item"
     assert row["requested_duration_seconds"] == 900 and row["agent"] == "Bookkeeper"
     again = saved_item_fills.request_item_fill(THREAD, "member-number", "https://elsewhere.example")
     assert again["id"] == row["id"] and again["site"] == SITE  # one per thread and item, as it is
@@ -190,3 +191,59 @@ def test_a_legacy_provider_is_an_item_only_while_it_holds_a_key_as_settings_show
     assert "provider-openai" in names and "provider-groq" not in names
     key_store_providers.set_provider_key("groq", "groq-key-000001")
     assert "provider-groq" in {item.name for item in saved_items.list_items() if item.is_set}
+
+
+def test_blanking_reads_the_values_file_once_and_keeps_every_set_item(world, monkeypatch):
+    """It runs on every agent browser command, so provider keys are read once, with the set entries' values."""
+    from infra import key_store_providers
+
+    key_store_providers.set_provider_key("openai", "openai-key-000001")
+    expected = {world["sentinel"], "openai-key-000001"}
+    assert expected <= saved_items.item_blanking_values()
+    reads: list[list[str]] = []
+    real = key_store_values.resolve
+    monkeypatch.setattr(key_store_values, "resolve", lambda conn, names: reads.append(list(names)) or real(conn, names))
+    values = saved_items.item_blanking_values()
+    # Listing the entries reads which are set; the values, provider keys included, are then read once.
+    assert len(reads) == 2 and sum("provider-anthropic" in names for names in reads) == 1
+    monkeypatch.setattr(key_store_values, "resolve", real)
+    db = get_db()
+    try:
+        shown = [item.name for item in saved_items.list_items(db=db) if item.is_set]
+        assert values == set(key_store_values.resolve(db, shown).values())
+    finally:
+        db.close()
+
+
+def _history() -> list[tuple]:
+    db = get_db()
+    try:
+        return [tuple(row) for row in db.execute("SELECT login_id, item, result FROM saved_login_fill_audit ORDER BY id")]
+    finally:
+        db.close()
+
+
+def test_a_fill_history_row_names_exactly_one_login_or_one_item(world):
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="test") as conn:
+        saved_login_results.audit(conn, login_id="login-1", site=SITE, thread_id=THREAD, result="filled")
+    saved_login_results.item_fill_recorded(THREAD, "member-number", SITE, "filled")
+    assert _history() == [("login-1", None, "filled"), ("", "member-number", "filled")]
+    for both_or_neither in ({"login_id": "login-1", "item": "member-number"}, {}):
+        with pytest.raises(key_store_values.KeyStoreError):
+            with write_transaction(None, scope="test") as conn:
+                saved_login_results.audit(conn, site=SITE, thread_id=THREAD, result="filled", **both_or_neither)
+    assert len(_history()) == 2
+
+
+def test_a_read_by_a_login_id_never_meets_an_item_row(world):
+    """A login's history is read by its id, which is never empty; an item row's is, so no login's read matches one."""
+    saved_login_results.item_fill_recorded(THREAD, "member-number", SITE, "unknown")
+    login_id = saved_logins.save_login(site=SITE, username="me", password=uuid.uuid4().hex, saved_by=PERSON)
+    assert login_id
+    db = get_db()
+    try:
+        assert db.execute("SELECT COUNT(*) FROM saved_login_fill_audit WHERE login_id = ?", (login_id,)).fetchone()[0] == 0
+    finally:
+        db.close()

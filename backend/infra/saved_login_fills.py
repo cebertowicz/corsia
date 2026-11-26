@@ -195,7 +195,7 @@ def _public(item: _Approval) -> dict[str, Any]:
         #: The site's registrable domain from the Public Suffix List, so a shortened site always keeps it whole.
         "domain": url_domain(item.site),
         "username": item.username,
-        #: The saved item's label, which the panel shows instead of a username; None for a login.
+        "fill_kind": item.kind,
         "item_label": item.item_label,
         "revision": item.revision,
         "application_hash": item.application_hash,

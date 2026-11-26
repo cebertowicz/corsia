@@ -29,13 +29,13 @@
 <!-- The same head as the pending request (kind label over the agent's name) and the same §0.1
      rows: a section label over plain text. -->
 <div class="active-drawer">
-	<HostAccessDrawerHead label={lease.kind === 'fill' ? (lease.item_label ? 'Use a saved item' : 'Sign in with a saved login') : 'Temporary host access'} title={owner(lease)} {onClose} />
+	<HostAccessDrawerHead label={lease.kind === 'fill' ? (lease.fill_kind === 'item' ? 'Use a saved item' : 'Sign in with a saved login') : 'Temporary host access'} title={owner(lease)} {onClose} />
 	<div class="active-drawer-body">
 		{#if lease.kind === 'fill'}
-			<p>{lease.item_label ? 'CORSIA fills it in on this site for the agent. The agent never sees it.' : 'CORSIA fills in the password on this site for the agent. The agent never sees it.'}</p>
+			<p>{lease.fill_kind === 'item' ? 'CORSIA fills it in on this site for the agent. The agent never sees it.' : 'CORSIA fills in the password on this site for the agent. The agent never sees it.'}</p>
 			<dl>
 				<div class="wide"><dt class="section-label">Site</dt><dd>{lease.site}</dd></div>
-				{#if lease.item_label}
+				{#if lease.fill_kind === 'item'}
 					<div class="wide"><dt class="section-label">Saved item</dt><dd>{lease.item_label}</dd></div>
 				{:else}
 					<div class="wide"><dt class="section-label">Username</dt><dd>{lease.username}</dd></div>

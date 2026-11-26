@@ -15,7 +15,7 @@ afterEach(() => { for (const target of targets.splice(0)) target.remove(); });
 function fill(overrides: Partial<HostAccessFill> = {}): HostAccessFill {
 	return {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'agent', root_thread_id: 'agent',
-		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com', item_label: null,
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', fill_kind: 'login', username: 'me@example.com', item_label: null,
 		revision: 1, application_hash: 'a'.repeat(64), decision_capability: 'capability',
 		max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
@@ -339,7 +339,7 @@ it('posts until revoked, and no duration, when the person picks it', async () =>
 });
 
 it('shows a saved item by its label, with its own head and first line, and approves it the same way', async () => {
-	const item = fill({ username: '', item_label: 'GitHub webhook secret' });
+	const item = fill({ fill_kind: 'item', username: '', item_label: 'GitHub webhook secret' });
 	expect(approvalReady(item)).toBe(true);
 	expect(pendingLabel(item)).toBe('Review a request to use a saved item');
 	const { host, component, onApprove } = pending(item);
@@ -358,7 +358,7 @@ it('shows a saved item by its label, with its own head and first line, and appro
 });
 
 it('names a saved item on its pending chip, its live grant and the grant chip', async () => {
-	const item = fill({ username: '', item_label: 'GitHub webhook secret' });
+	const item = fill({ fill_kind: 'item', username: '', item_label: 'GitHub webhook secret' });
 	const chipHost = target();
 	const chip = mount(HostAccessPendingTrigger, { target: chipHost, props: {
 		request: item, stale: false, open: false, onclick: vi.fn(),
@@ -391,6 +391,15 @@ it('names a saved item on its pending chip, its live grant and the grant chip', 
 	await unmount(grant);
 });
 
-it('does not offer Approve for a fill that names neither a username nor an item', () => {
+it('does not offer Approve for a fill that lacks what its kind names', () => {
 	expect(approvalReady(fill({ username: '', item_label: null }))).toBe(false);
+	expect(approvalReady(fill({ fill_kind: 'item', username: '', item_label: null }))).toBe(false);
+	// The kind, not which name happens to be present, decides what is shown and checked.
+	expect(approvalReady(fill({ username: '', item_label: 'GitHub webhook secret' }))).toBe(false);
+	expect(approvalReady(fill({ fill_kind: 'item', username: 'me@example.com', item_label: null }))).toBe(false);
+});
+
+it('shows a login as a login even when an item label is present', () => {
+	const login = fill({ item_label: 'GitHub webhook secret' });
+	expect(pendingLabel(login)).toBe('Review a request to sign in with a saved login');
 });

@@ -84,15 +84,15 @@ FILLED_FIELD_SNAPSHOT_WITHHELD = (
     "Error: this snapshot was withheld. The person filled in a password field on this page, and "
     "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
 )
-# A saved-login fill's own lines for the filled page (the server filled the field, not the person).
+# A saved fill's own lines for the filled page (the server filled the field, not the person), login or item.
 SAVED_FILL_REFUSED = (
-    "A saved login was filled on this page, so until you open another page or reload this one, screenshots are "
-    "refused here and each element must be named by its @ref from a snapshot, not by a CSS selector. The rest of "
-    "this browser session still runs only the commands its saved-login limit allows, on every page."
+    "A saved login or saved item was filled on this page, so until you open another page or reload this one, "
+    "screenshots are refused here and each element must be named by its @ref from a snapshot, not by a CSS selector. "
+    "The rest of this browser session still runs only the commands allowed after a saved fill, on every page."
 )
 SAVED_FILL_SNAPSHOT_WITHHELD = (
-    "Error: this snapshot was withheld. A saved login was filled on this page, and the browser's output wasn't a "
-    "snapshot whose field values could be hidden. Run snapshot again."
+    "Error: this snapshot was withheld. A saved login or saved item was filled on this page, and the browser's "
+    "output wasn't a snapshot whose field values could be hidden. Run snapshot again."
 )
 # Once a password step ends on its own visit (done, declined, or its field hidden), any field on that visit may
 # display what the person typed: a text-type field, a show-password toggle, or one that swaps the field for a
@@ -159,7 +159,7 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
 @dataclass(frozen=True)
 class PageAccess:
     """What a command the guard let through must carry: its note, whether a snapshot hides field values, and
-    whether this is a document a saved login was filled in (its lines are then the SAVED_FILL ones)."""
+    whether this is a document a saved login or item was filled in (its lines are then the SAVED_FILL ones)."""
 
     note: str | None
     filled_field_visit: bool

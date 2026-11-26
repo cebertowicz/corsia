@@ -60,11 +60,11 @@
 </script>
 
 <div class="pending-drawer">
-	<HostAccessDrawerHead label={request.item_label ? 'Use a saved item' : 'Sign in with a saved login'} title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
+	<HostAccessDrawerHead label={request.fill_kind === 'item' ? 'Use a saved item' : 'Sign in with a saved login'} title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 	<div class="decision-body fill-body">
-		<p class="explainer">{request.item_label ? 'CORSIA fills it in on this site for the agent. The agent never sees it.' : 'CORSIA fills in the password on this site for the agent. The agent never sees it.'}</p>
+		<p class="explainer">{request.fill_kind === 'item' ? 'CORSIA fills it in on this site for the agent. The agent never sees it.' : 'CORSIA fills in the password on this site for the agent. The agent never sees it.'}</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
-		{#if request.item_label}
+		{#if request.fill_kind === 'item'}
 			<section><span class="section-label">Saved item</span><p>{request.item_label}</p></section>
 		{:else}
 			<section><span class="section-label">Username</span><p>{request.username}</p></section>
