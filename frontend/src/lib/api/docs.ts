@@ -86,16 +86,20 @@ export async function fetchRoots(projectId?: string | null): Promise<ScopeRoot[]
  *
  * Never registers the read to a thread and never emits a change notification,
  * so it is safe to call on a change nudge or when the window regains focus.
+ * With `within`, the answer and its body must arrive inside that many ms or the
+ * probe ends with `PostTimeoutError`.
  */
 export async function fetchRevision(
 	path: string,
 	projectId?: string | null,
 	artifactId?: string | null,
+	within?: number,
 ): Promise<DocRevision> {
 	const q = `?path=${encodeURIComponent(path)}`
 		+ (projectId ? `&project_id=${encodeURIComponent(projectId)}` : '')
 		+ (artifactId ? `&artifact_id=${encodeURIComponent(artifactId)}` : '');
-	return ok(await apiFetch(`/api/files/revision${q}`, { sessionInAddress: true }));
+	const init = { sessionInAddress: true };
+	return within ? readWithin(`/api/files/revision${q}`, init, within, ok) : ok(await apiFetch(`/api/files/revision${q}`, init));
 }
 
 export async function fetchContent(path: string, opts: { projectId?: string | null; threadId?: string | null; liveOpen?: boolean } = {}): Promise<DocContent> {
