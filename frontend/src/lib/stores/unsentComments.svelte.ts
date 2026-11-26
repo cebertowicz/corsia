@@ -6,6 +6,7 @@
 import { get } from 'svelte/store';
 import { user } from './auth';
 import { commentDraft } from './commentDraft';
+import { posting } from './commentPostTiming';
 import { connectionState } from './connection';
 import { keptCommentDrafts } from './keptCommentDrafts.svelte';
 import { toasts } from './toast';
@@ -69,7 +70,8 @@ function renewed(key: string): boolean {
 
 async function attempt(key: string, again = false): Promise<void> {
 	const draft = keptCommentDrafts.get(key);
-	if (!get(user) || !sendable(key, draft)) return;
+	// A press of it in its box is out now: that post is its try.
+	if (!get(user) || !sendable(key, draft) || posting(draft.clientId)) return;
 	lastTry.set(key, Date.now());
 	try {
 		const sent = await sendUnsent(key, draft);

@@ -10,6 +10,7 @@ import { EarlierVersionPosted, type DraftVersion, type PostFields } from './comm
 import { findPosted, postReconciled } from './commentReconcile';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapCommentRange } from '$lib/cm/comment-range';
+import { keptSides, type KeptPlace } from '$lib/keptPlace';
 
 export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
@@ -145,8 +146,9 @@ export function upsertTop(artifactId: string, row: ServerComment) {
 	});
 }
 
-export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], again = false): Promise<string> {
-	return postTop(artifactId, clientId ?? newClientId(), commentFields(anchor, from, to, text, author, liveCapture, taggedAgentIds, threadId, mentions), again);
+export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = [], again = false, place: KeptPlace | null = null): Promise<string> {
+	// A kept draft's passage goes with it, so the server places it by its sides when no capture is held for it.
+	return postTop(artifactId, clientId ?? newClientId(), { ...commentFields(anchor, from, to, text, author, liveCapture, taggedAgentIds, threadId, mentions), ...keptSides(place) }, again);
 }
 
 /** What `addComment` posts; a live retry looks for its stored comment with the same fields (`findPosted`). */

@@ -13,8 +13,10 @@ import { elementOnScreen as onScreen } from '$lib/elementOnScreen';
 import { onSignOut, user } from './auth';
 import { newClientId } from './documentWire';
 import type { KeptPlace } from '$lib/keptPlace';
-import { createDraftStorage, type DraftSend, type NotKept, type StoredDraft } from './keptCommentDraftsStorage';
+import { createDraftStorage, NOT_KEPT_MESSAGE, type DraftSend, type NotKept, type StoredDraft } from './keptCommentDraftsStorage';
 import { toasts } from './toast';
+
+export { NOT_KEPT_MESSAGE };
 
 export type MentionSelection = ReturnType<typeof createMentionSelection>;
 /**
@@ -78,12 +80,6 @@ function drop(key: string): void {
 	if (found?.draft?.toast) toasts.dismiss(found.draft.toast);
 	if (found) { found.draft = undefined; notKept(key, null); }
 }
-/** What the line under a box says when this device does not keep its draft: what happened, and what keeps the text. */
-export const NOT_KEPT_MESSAGE: Record<NotKept, string> = {
-	'too-long': 'Too long to keep on this device. Post it or copy it before you close CORSIA.',
-	full: 'This device has no room left to keep this draft. Post it or copy it before you close CORSIA.',
-	refused: 'Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.',
-};
 /**
  * Whether this device keeps the draft changed. Said in one place: the line under its box (which reads `notKept`), or, when
  * no box of it is on screen at that moment, a toast, which goes once the draft is kept again, leaves, or its box comes on screen.
@@ -216,6 +212,11 @@ export const keptCommentDrafts = {
 		if (!key) return;
 		if (body) kept.set(key, edited(kept.get(key), body, mentionSelection));
 		else kept.delete(key);
+	},
+	/** The post of the press under `clientId` can go with no box open (`send`, known once its document's id is): only while the draft holds that press's text. */
+	sends(key: string, clientId: string, body: string, send: DraftSend): void {
+		const prior = key ? kept.get(key) : undefined;
+		if (prior?.clientId === clientId && prior.body === body) kept.set(key, { ...prior, send });
 	},
 	/** The server refused the draft's post: it is never sent again without the person. */
 	unsend(key: string): void {

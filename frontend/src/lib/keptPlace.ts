@@ -34,6 +34,11 @@ export function placeOf(text: string, from: number, to: number, quote = text.sli
 	return { from, to, quote, prefix: before(text, from), suffix: after(text, to) };
 }
 
+/** The kept sides a post carries (`anchor_prefix`, `anchor_suffix`), so the server places it by them when no capture is held for it; none with no place. */
+export function keptSides(place: KeptPlace | null | undefined): { anchor_prefix?: string; anchor_suffix?: string } {
+	return place ? { anchor_prefix: place.prefix, anchor_suffix: place.suffix } : {};
+}
+
 /** Every start of `place.quote` in `text` with both kept sides, overlapping copies included, as the server counts them. */
 function matches(text: string, place: KeptPlace): number[] {
 	const hits: number[] = [];

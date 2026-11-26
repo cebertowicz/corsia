@@ -26,6 +26,9 @@ export function pressed(clientId: string): void {
 	running.set(clientId, { n: ++posts, a, pressed: performance.now() });
 }
 
+/** A press of Comment on the draft whose id is `clientId` is being posted now. */
+export function posting(clientId: string): boolean { return running.has(clientId); }
+
 /** Runs one awaited part of a running post and records how long it took, whether it resolved or failed. */
 export async function timed<T>(clientId: string | undefined, part: Part, run: () => Promise<T>): Promise<T> {
 	const started = performance.now();

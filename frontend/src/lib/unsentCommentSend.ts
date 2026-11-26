@@ -3,6 +3,7 @@
 import type { MentionOccurrence } from '$lib/components/comments/mentionSelection';
 import type { KeptCommentDraft } from '$lib/stores/keptCommentDrafts.svelte';
 import { commentFields, postTop } from '$lib/stores/docComments';
+import { keptSides } from '$lib/keptPlace';
 
 /** What a press of the draft sends: its text trimmed, and its tags counted from that text, as its box sends them. */
 export type PressedVersion = { text: string; taggedAgentIds: string[]; mentions: MentionOccurrence[] };
@@ -34,6 +35,6 @@ export async function sendUnsent(key: string, draft: KeptCommentDraft): Promise<
 	const version = pressedVersion(draft);
 	const fields = commentFields(place.quote, place.from, place.to, version.text, 'you', false, version.taggedAgentIds, send.threadId, version.mentions);
 	// An earlier press used this id: a stored comment under it is that press's, checked against this text (`checkVersion`).
-	await postTop(send.artifactId, clientId, { ...fields, anchor_prefix: place.prefix, anchor_suffix: place.suffix }, true);
+	await postTop(send.artifactId, clientId, { ...fields, ...keptSides(place) }, true);
 	return version;
 }

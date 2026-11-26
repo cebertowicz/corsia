@@ -177,7 +177,7 @@
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, target: () => target, draft: () => $commentDraft, session: () => liveSession,
 		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
-		ensureArtifactId: ensureEditorArtifactId,
+		ensureArtifactId: ensureEditorArtifactId, ready: () => docState === 'ready' && liveConnection === 'connected' && !!editorSurface, offerFor: (from, to) => editorSurface?.offerFor(from, to) ?? null,
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});

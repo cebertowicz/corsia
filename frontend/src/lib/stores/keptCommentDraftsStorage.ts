@@ -20,6 +20,12 @@ export const DRAFTS_MAX_CHARS = 2_000_000;
 export const DRAFT_MAX_CHARS = 200_000;
 /** Why a draft is not kept on this device: longer than one draft may be, the drafts' share is full, or storage refused it. */
 export type NotKept = 'too-long' | 'full' | 'refused';
+/** What the line under a box says when this device does not keep its draft: what happened, and what keeps the text. */
+export const NOT_KEPT_MESSAGE: Record<NotKept, string> = {
+	'too-long': 'Too long to keep on this device. Post it or copy it before you close CORSIA.',
+	full: 'This device has no room left to keep this draft. Post it or copy it before you close CORSIA.',
+	refused: 'Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.',
+};
 /** Written and removed in one go by a Sign out, so every other window of this origin hears whose drafts went. */
 export const SIGN_OUT_KEY = 'corsia:commentDraftSignOut:v1';
 
