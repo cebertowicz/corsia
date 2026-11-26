@@ -16,8 +16,6 @@ CORSIA is a free, open-source app that runs on your own computer. The agents run
 
 [![The Activity screen in the desktop app: the person works down a ranked list of tasks one at a time, asking three agents to review a page, accepting a suggested edit, sending an email, commenting on a design, picking a flight and marking a task done; then reads a reply on the Notifications tab and opens the Measurement screen](docs/readme/hero.gif)](docs/readme/measurement-dashboard.png)
 
-*Activity, then the Measurement screen. Click it for the whole Measurement page.*
-
 ## The problem
 
 One AI agent is easy to run. A team of agents can take on far more of your work, but a team brings two jobs that grow with every agent you add: organizing the agents, and supervising their work. Without help, both land on you.
