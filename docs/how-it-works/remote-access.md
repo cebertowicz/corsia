@@ -8,13 +8,14 @@ A source install configured for local use binds its main web and API server to l
 
 ## Devices
 
-In **Settings → System**, **Let other devices connect** starts a separate TLS listener and displays a pairing code. The listener announces the computer on the local network; when discovery is unavailable, the settings show addresses to type. The code expires, and **New code** issues another. Pairing pauses after too many codes that don't match. Connections are managed on the main computer; turning the switch off disconnects them. The pairing exchange confirms the listener's TLS identity. See [Network](../security/network.md) for the listener's ports and who it accepts.
+In **Settings → System**, **Let other devices connect** starts a separate TLS listener and displays a pairing code. The listener announces the computer on the local network; when discovery is unavailable, the settings show addresses to type. The code expires, and **New code** issues another. Pairing pauses after too many codes that don't match. Connections are managed on the main computer; turning the switch off disconnects them. The pairing exchange confirms the listener's TLS identity. The listener speaks HTTP/2, so a browser sends every request and live update over one connection and a slow read never holds a post in the browser's queue; a client without HTTP/2 uses HTTP/1.1. See [Network](../security/network.md) for the listener's ports and who it accepts.
 
 CORSIA does not operate a hosted relay.
 
 | Part | Path |
 |---|---|
 | Listener and access rules | `backend/infra/devices_listener.py` |
+| Its server (HTTP/2 and HTTP/1.1, and what turning it off ends) | `backend/infra/devices_server.py` |
 | Device settings and pairing routes | `backend/api/devices.py` |
 | Pairing exchange | `backend/core/device_pairing.py` |
 | Devices settings | `frontend/src/lib/components/SettingsDevicesView.svelte` |
