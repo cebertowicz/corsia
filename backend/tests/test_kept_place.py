@@ -116,7 +116,8 @@ def test_nothing_to_place_without_a_quote():
 
 def test_the_browser_takes_the_same_sides_as_the_server():
     # The browser's `placeOf` is checked against this same file (keptPlace.test.ts): one window, counted alike.
-    cases = json.loads((Path(__file__).parents[2] / 'frontend/src/lib/keptPlace.windows.json').read_text())
+    fixture = Path(__file__).resolve().parents[2] / 'frontend/src/lib/__tests__/fixtures/kept-place-windows.contract.json'
+    cases = json.loads(fixture.read_text())
     assert len(cases) >= 8
     for case in cases:
         sides = anchor_context(case['text'], case['from'], case['to'], case['quote'])
