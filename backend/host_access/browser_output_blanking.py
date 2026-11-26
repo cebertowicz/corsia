@@ -124,7 +124,8 @@ def encodings(value: str) -> set[str]:
     """Every written form of one saved value that is blanked: raw, URL-encoded, HTML-escaped, as a snapshot or
     page text shows its whitespace, and each of those JSON-encoded (get html and get text return theirs inside
     JSON). URLs and markup keep whitespace as written; only rendered text changes it."""
-    plain = {value} | _url_forms(value) | _html_forms(value) | _whitespace_forms(value)
+    whitespace = _whitespace_forms(value)
+    plain = whitespace | {form for text in whitespace for form in _url_forms(text) | _html_forms(text)}
     return {form for text in plain for form in {text} | _json_forms(text) if form}
 
 
