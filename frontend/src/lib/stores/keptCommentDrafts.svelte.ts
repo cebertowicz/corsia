@@ -74,10 +74,19 @@ const device = createDraftStorage({
 });
 const kept = {
 	get: (key: string) => cell(key).draft,
-	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; device.save(key); },
+	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; device.save(key); if (!draft.body) notKept(key, null); },
 	/** The draft goes, from this page and this device: what it held is posted, cancelled or cleared. */
 	delete: (key: string) => { drop(key); device.remove(key); },
 };
+/** A send can go on its own only if its complete draft was written to the device. */
+function keepPress(key: string, draft: KeptCommentDraft): void {
+	kept.set(key, draft);
+	if (cell(key).notKept && draft.send) {
+		const withoutSend = { ...draft };
+		delete withoutSend.send;
+		kept.set(key, withoutSend);
+	}
+}
 
 /** Whose drafts memory holds: they are kept on this device under that id. */
 let owner: string | null = null;
@@ -147,7 +156,7 @@ export { CHAT_REPLY_SCOPE, chatDraftKey, chatDraftOf, documentDraftKey, imageDra
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
-	/** The keys of every draft held now. */
+	/** The keys of every draft held now, including an empty body holding an id; callers check the body. */
 	keys(): string[] { return [...cells].filter(([, found]) => found.draft).map(([key]) => key); },
 	/** The keys of the drafts pressed and not yet posted, refused or edited since (`send`), whose post may go on its own. */
 	pressed(): string[] { return [...cells].filter(([, found]) => found.draft?.send).map(([key]) => key); },
@@ -170,19 +179,25 @@ export const keptCommentDrafts = {
 	keep(key: string, body: string, mentionSelection: MentionSelection, place?: KeptPlace | null, region?: ImageRegion | null): void {
 		if (!key) return;
 		const prior = kept.get(key);
-		if (body || prior?.error) kept.set(key, edited(prior, body, mentionSelection, { place, region }));
+		if (body || prior?.error || prior?.clientId) kept.set(key, edited(prior, body, mentionSelection, { place, region }));
 		else kept.delete(key);
 	},
-	/** A reply's field (`edited`). A reply has no Cancel: emptying its field clears it, reason and id included. */
+	/** A reply's field (`edited`): an emptied reply keeps the id of a press that may have posted. */
 	keepReply(key: string, body: string, mentionSelection: MentionSelection): void {
 		if (!key) return;
-		if (body) kept.set(key, edited(kept.get(key), body, mentionSelection));
-		else kept.delete(key);
+		const prior = kept.get(key);
+		if (body) kept.set(key, edited(prior, body, mentionSelection));
+		else if (prior?.clientId) {
+			const empty = edited(prior, body, mentionSelection);
+			if (empty.toast) toasts.dismiss(empty.toast);
+			delete empty.error; delete empty.toast;
+			kept.set(key, empty);
+		} else kept.delete(key);
 	},
 	/** The post of the press under `clientId` can go with no box open (`send`, known once its document's id is): only while the draft holds that press's text. */
 	sends(key: string, clientId: string, body: string, send: DraftSend): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (prior?.clientId === clientId && prior.body === body) kept.set(key, { ...prior, send });
+		if (prior?.clientId === clientId && prior.body === body) keepPress(key, { ...prior, send });
 	},
 	/** The server refused the draft's post: it is never sent again without the person. */
 	unsend(key: string): void {
@@ -233,16 +248,16 @@ export const keptCommentDrafts = {
 		// What the post needs with no box open is kept from this press, so the draft is sent again on its own if this one fails.
 		const sending = send ? { send } : {};
 		if (prior?.clientId) {
-			if (send && key) kept.set(key, { ...prior, ...sending });
+			if (send && key) keepPress(key, { ...prior, ...sending });
 			return { clientId: prior.clientId, again: true };
 		}
 		if (!prior && origin && origin.body === body && origin.tags === tagsOf(mentionSelection, body)) {
 			// Kept under that id, as a first press keeps its own, so a press after this one failing reuses it.
-			if (key) kept.set(key, { body, mentionSelection, clientId: origin.clientId, ...sending });
+			if (key) keepPress(key, { body, mentionSelection, clientId: origin.clientId, ...sending });
 			return { clientId: origin.clientId, again: true };
 		}
 		const clientId = newClientId();
-		if (key) kept.set(key, { ...prior, body, mentionSelection, clientId, ...sending });
+		if (key) keepPress(key, { ...prior, body, mentionSelection, clientId, ...sending });
 		return { clientId, again: false };
 	},
 	/** Cancel, or the server stored the comment. */
