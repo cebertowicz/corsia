@@ -6,16 +6,18 @@
 	 * the same frame as the document pane, its one tab as the first row and its control docked at the bottom edge,
 	 * where the document's review bar sits.
 	 */
-	let { label, body, band, notice }: {
+	let { label, body, band, notice, gutter = false }: {
 		label: string;
 		body: Snippet;
 		/** The docked control (a ReviewBarShell in docked mode), placed against the canvas's bottom edge. */
 		band?: Snippet;
 		notice?: Snippet;
+		/** Keeps a gutter beside the text for a mark that hangs in the margin (a decision's picked option). */
+		gutter?: boolean;
 	} = $props();
 </script>
 
-<div class="panel">
+<div class="panel" class:gutter>
 	<div class="panel-strip">
 		<div class="strip" role="tablist" aria-label={label}>
 			<span class="tab-wrap active" role="tab" aria-selected="true" tabindex="0">
@@ -67,5 +69,12 @@
 	.scroll { height: 100%; overflow-y: auto; scroll-padding-bottom: var(--control-clearance); }
 	/* The docked control covers the canvas bottom; the content keeps its last lines clear of it. */
 	.content { max-width: 40rem; margin: var(--space-6) auto 0; padding: 0 var(--space-2) var(--control-clearance); }
-	:global(.activity.phone) .canvas { --canvas-pad-inline: var(--space-3); }
+	/* The mark hangs in the margin left of the text edge: [inset][check][gap] = the gutter on both sides of the text. */
+	.panel.gutter { --row-inset: var(--space-3); --check-w: 16px; --check-gap: var(--space-2); --row-left: calc(var(--row-inset) + var(--check-w) + var(--check-gap)); --row-right: var(--row-left); }
+	.panel.gutter .content { max-width: calc(40rem + 2 * (var(--row-left) - var(--space-2))); padding-inline: var(--row-left); }
+	/* The phone's text edge is 24px: the canvas pad is 0 and the content carries the 24px; a picked tint runs edge to edge. */
+	:global(.activity.phone) .canvas { --canvas-pad-inline: 0px; }
+	:global(.activity.phone) .panel { --row-inset: var(--space-2); --row-right: var(--space-6); --check-w: 12px; --check-gap: var(--space-1); }
+	:global(.activity.phone) .content { padding-inline: var(--space-6); }
+	:global(.activity.phone) .panel.gutter .content { max-width: none; padding-inline: var(--space-6); }
 </style>

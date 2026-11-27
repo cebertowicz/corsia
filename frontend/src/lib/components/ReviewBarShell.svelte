@@ -1,6 +1,8 @@
 <script lang="ts" module>
 	/** Context key: a surface that sets it true keeps the asker's name on a docked card's resting line (Activity). */
 	export const ASKER_AT_REST = Symbol('askerAtRest');
+	/** Context keys: a function that opens the asker's chat from the asker's name (Activity); and who asked, for a bar of another component. */
+	export const ASKER_CHAT = Symbol('askerChat'), ASKER_WHO = Symbol('askerWho');
 </script>
 
 <script lang="ts">
@@ -10,6 +12,9 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { Avatar } from '$lib/components/ui';
 	import MiddleName from './MiddleName.svelte';
+	import './ReviewBarLinked.css';
+	import AskerLink from './AskerLink.svelte';
+	import DockedAskLinked from './DockedAskLinked.svelte';
 	import { agentColor } from '$lib/docPresence';
 
 	/**
@@ -42,10 +47,12 @@
 		capsuleClearance?: number;
 		receipt?: Receipt | null;
 		stale?: { label: string; text: string; sub: string };
-		actions: Snippet;
+		/** Without it the ask is only its line (the top line of a pane that answers elsewhere). */
+		actions?: Snippet;
 	} = $props();
 
 	const askerAtRest = getContext<boolean | undefined>(ASKER_AT_REST) === true;
+	const openChat = getContext<((threadId: string) => void) | undefined>(ASKER_CHAT);
 	const expandable = $derived(ask !== '');
 	let expanded = $state(false);
 	/** The docked card, opened by a tap on its question. A new ask starts it closed. */
@@ -120,17 +127,21 @@
 <!-- Docked to the document canvas's left, right and bottom edges. A review ask cuts one thing per line: at rest the question alone, then the answers; opened, the asker takes its own line above the full question. -->
 <div class="rb-dock-slot" bind:this={slotEl}>
 {#if view === 'ask' && who}
-	<section class="rb-dock" class:suppressed class:noting class:asker={askerAtRest} class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+	<section class="rb-dock" class:suppressed class:noting class:asker={askerAtRest} class:linked={!!openChat} class:open={cardOpen || noting} data-ask-card aria-label={askLabel} aria-busy={busy} bind:this={capsuleEl} in:swap={{ leaving: false }}>
+		{#if openChat}
+			<DockedAskLinked {who} {plus} {ask} {full} {lineLabel} {expandable} bind:cardOpen {openChat} />
+		{:else}
 		<button type="button" class="rb-dock-ask" title={full || ask} aria-expanded={cardOpen} aria-label={lineLabel || `${who.name}${plus ? ` +${plus}` : ''}: ${full || ask}`} onclick={() => (cardOpen = !cardOpen)}>
 			<span class="rb-dock-text"><span class="rb-dock-by"><strong class="rb-dock-who">{#if cardOpen}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus">+{plus}</span>{/if}</span><span class="rb-dock-sep" aria-hidden="true">·</span><span class="rb-dock-q">{full || ask}</span></span>
 		</button>
+		{/if}
 		{#if (cardOpen || noting) && others.length}
 			<ul class="rb-others">
 				{#each others as other (other.name)}<li><strong>{other.name}</strong>: {other.reason}</li>{/each}
 			</ul>
 		{/if}
 		<span class="rb-status" class:busy role="status">{status}</span>
-		{@render actions()}
+		{#if actions}{@render actions()}{/if}
 	</section>
 {:else if view === 'receipt' && receipt}
 	<section class="rb-dock receipt" class:changes={receipt.icon === 'changes'} data-ask-card aria-label={receipt.label} bind:this={capsuleEl} in:swap={{ leaving: false }}>
@@ -173,26 +184,36 @@
 		<span class="rb-head">
 			{#snippet lead()}
 				<span class="rb-lead">
-					<Avatar name={who.name} color={agentColor(who.id)} hidden />
-					<span class="rb-who"><strong><MiddleName name={who.name} /></strong>{#if plus}<span class="rb-plus" aria-hidden="true">+{plus}</span>{/if}:</span>
+					<Avatar name={who.name} color={agentColor(who.id || who.name)} hidden />
+					<span class="rb-who">{#if openChat}<AskerLink {who} {plus} cut colon {openChat} />{:else}<strong><MiddleName name={who.name} /></strong>{#if plus}<span class="rb-plus" aria-hidden="true">+{plus}</span>{/if}:{/if}</span>
 				</span>
 			{/snippet}
-			{#if expandable}
+			{#if expandable && openChat}
+				<span class="rb-line rb-line-linked" class:expanded>
+					<button type="button" class="rb-togline" aria-expanded={expanded} aria-label={lineLabel} title={ask} onclick={() => (expanded = !expanded)}></button>
+					{@render lead()}
+					<span class="rb-ask">{ask}</span>
+					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
+				</span>
+			{:else if expandable}
 				<button type="button" class="rb-line" aria-expanded={expanded} aria-label={lineLabel} title={ask} onclick={() => (expanded = !expanded)}>
 					{@render lead()}
 					<span class="rb-ask">{ask}</span>
 					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
 				</button>
+			{:else if openChat}
+				<span class="rb-line">{@render lead()}<span class="rb-ask fixed">{full}</span></span>
 			{:else}
 				<span class="rb-line">{@render lead()}</span>
 			{/if}
-			{#if expanded || !expandable}<p class="rb-ask-full">{full}</p>{/if}
+			{#if expanded || (!expandable && !openChat)}<p class="rb-ask-full">{full}</p>{/if}
 			{#if expanded && others.length}
 				<ul class="rb-others">
 					{#each others as other (other.name)}<li><strong>{other.name}</strong>: {other.reason}</li>{/each}
 				</ul>
 			{/if}
 		</span>
+		{#if actions}
 		<span class="rb-row2">
 			<div class="rb-capsule" class:suppressed class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
@@ -200,6 +221,7 @@
 				{@render actions()}
 			</div>
 		</span>
+		{/if}
 	</section>
 {/if}
 </div>
@@ -212,10 +234,10 @@
 	/* Hidden under a comment sheet, and while the Details panel would reach down over it (Details then carries the ask). */
 	.rb-dock.suppressed, :global(.ask-covered) .rb-dock, :global(.ask-covered) .review-bar.ask { visibility: hidden; pointer-events: none; }
 	.rb-dock :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; transition: none; }
-	.rb-dock-ask { position: relative; flex: 1 0 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-primary); font: inherit; font-size: var(--text-subhead); line-height: var(--lh-normal); text-align: left; cursor: pointer; }
+	:global(.rb-dock-ask) { position: relative; flex: 1 0 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-primary); font: inherit; font-size: var(--text-subhead); line-height: var(--lh-normal); text-align: left; cursor: pointer; }
 	/* At rest the question is one line; its tap area reaches up through the card's top padding and border and 8px down, so it is 44px without making the card taller. The answers sit above it, so they keep their own 44px. */
-	.rb-dock-ask::after { content: ''; position: absolute; inset: calc(-1 * var(--space-3) - 1px) 0 calc(-1 * var(--space-2)) 0; }
-	.rb-dock-ask:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	:global(.rb-dock-ask)::after { content: ''; position: absolute; inset: calc(-1 * var(--space-3) - 1px) 0 calc(-1 * var(--space-2)) 0; }
+	:global(.rb-dock-ask):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.rb-dock-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; overflow: hidden; overflow-wrap: break-word; }
 	.rb-dock.open .rb-dock-text { -webkit-line-clamp: unset; line-clamp: none; }
 	/* The name stays on one line, cut in the middle (MiddleName). */
@@ -237,7 +259,7 @@
 	/* Touch: 44px answers, and the question's tap area (8px below its line) keeps 8px clear of the answers' row. */
 	@media (any-pointer: coarse), (max-width: 48rem) {
 		.rb-dock :global(.btn) { min-height: var(--touch-target); }
-		.rb-dock .rb-dock-ask { margin-bottom: var(--space-3); }
+		.rb-dock :global(.rb-dock-ask) { margin-bottom: var(--space-3); }
 	}
 	.rb-dock.receipt, .rb-dock.stale { flex-wrap: nowrap; column-gap: var(--space-2); padding-top: var(--space-2); }
 	.rb-dock .rb-receipt { flex: 1 1 0; min-width: 0; color: var(--text-secondary); }
@@ -310,7 +332,7 @@
 	.rb-capsule :global(.rb-note), .rb-dock :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-input); line-height: var(--space-6); resize: none; overflow-y: auto; }
 	.rb-capsule :global(.rb-note::placeholder), .rb-dock :global(.rb-note::placeholder) { color: var(--text-tertiary); }
 	.rb-capsule :global(.rb-note:focus), .rb-dock :global(.rb-note:focus) { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
-	.rb-icon { width: var(--text-subhead); height: var(--text-subhead); flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+	:global(.rb-icon) { width: var(--text-subhead); height: var(--text-subhead); flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
 	.review-bar.receipt .rb-icon { color: var(--green-text); }
 	.review-bar.receipt.changes .rb-icon { color: var(--amber-text); }
 	.review-bar.receipt .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }

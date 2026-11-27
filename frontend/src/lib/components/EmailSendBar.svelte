@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { getContext, onDestroy, untrack } from 'svelte';
+	import { ASKER_CHAT, ASKER_WHO } from './ReviewBarShell.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { discardEmailDraft, sendEmailDraft, type DraftActionResult } from '$lib/api/emailDrafts';
 	import type { ConversationFailure, EmailDraftState } from '$lib/emailDraft';
@@ -21,6 +22,9 @@
 	// Don't send is on its way: the question stays on screen with its buttons held, never 'Sending…'.
 	let declining = $state(false);
 	const reasonId = $props.id();
+	// In Activity the agent that wrote the draft is a link to its chat, at the bar's start.
+	const openChat = getContext<((threadId: string) => void) | undefined>(ASKER_CHAT);
+	const asker = getContext<{ name: string; id: string } | undefined>(ASKER_WHO);
 	const canSend = $derived(connected && !blocker && !readOnly);
 	// From the click on, the text on screen is what is being sent: no edit may follow it.
 	$effect(() => { ended = step === 'sending' || step === 'sent' || step === 'declined' || step === 'unconfirmed'; });
@@ -73,6 +77,9 @@
 </script>
 
 <div class="email-send-bar" role="group" aria-label="Send this email">
+	{#if openChat && asker?.id && (step === 'draft' || step === 'failed')}
+		<button type="button" class="asker-chat" aria-label={`Open chat with ${asker.name}`} onclick={() => openChat(asker.id)}>{asker.name}</button>
+	{/if}
 	{#if readOnly && step === 'draft'}
 		<span class="bar-text" role="status">Read-only. This draft can’t be sent from here.</span>
 	{:else if step === 'draft'}
@@ -107,6 +114,11 @@
 	/* The left inset is the email header's own (EmailNotes), so the bar's text starts where From does. */
 	.email-send-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-1) var(--space-2); min-height: var(--space-7); padding: var(--space-1) var(--doc-phone-inset, var(--space-3)) var(--space-1) var(--doc-inset, 24px); border-bottom: 1px solid var(--border-subtle); }
 	.bar-text { flex: 1 1 12rem; min-width: 0; font-size: var(--text-footnote); line-height: var(--lh-normal); color: var(--text-secondary); overflow-wrap: anywhere; }
+	.asker-chat { flex: 0 1 auto; min-width: 0; margin-right: auto; padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-subhead); color: var(--accent-text); cursor: pointer; text-align: left; overflow-wrap: anywhere; border-radius: var(--radius-xs); }
+	.asker-chat:hover { text-decoration: underline; }
+	.asker-chat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* On a phone the bar spans the page and keeps the 24px text edge, so the name sits at that edge, left of From:, with the buttons on its line. */
+	:global(.activity.phone) .email-send-bar { margin-inline: calc(-1 * var(--canvas-pad-inline, 0px)); padding-inline: var(--space-6); }
 	.bar-text.failed { color: var(--red-text); }
 	.bar-actions { flex: 0 0 auto; display: inline-flex; gap: var(--space-2); }
 	.email-send-bar :global(.btn) { flex: 0 0 auto; }

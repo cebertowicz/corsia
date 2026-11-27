@@ -1,0 +1,13 @@
+/* The asker's name as a link to their chat (Activity): the desktop line (the toggle lies behind it) and the docked card's answers. Unscoped: the shell, the name link and the answers are separate components. */
+/* Desktop: the toggle lies behind the line; everything on the line lets the click through to it except the name. */
+.rb-line-linked { position: relative; }
+.rb-togline { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer; }
+.rb-togline:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rb-line-linked .rb-who, .rb-line-linked .rb-ask, .rb-line-linked .rb-chev, .rb-line-linked .avatar { position: relative; z-index: 1; pointer-events: none; }
+.review-bar.expanded .rb-line-linked .rb-who { flex: 1 1 0; }
+.rb-dock.linked { padding-top: 0; }
+.review-bar .rb-ask.fixed { flex: none; min-width: 0; }
+/* The answers span the card: the first (Won't do, Send back, Don't send) at the text edge, the primary at the right edge. */
+.rb-dock.linked .rb-actions { flex: 1 0 100%; margin-left: 0; justify-content: space-between; }
+.rb-dock.linked .rb-actions .btn:last-child { margin-left: auto; }
+.rb-dock.linked .rb-actions .btn.ghost:first-child:not(:last-child) { margin-left: calc(-1 * (var(--space-3) + 1px)); }

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, setContext, tick, untrack } from 'svelte';
+	import { ASKER_CHAT } from '$lib/components/ReviewBarShell.svelte';
 	import { get } from 'svelte/store';
 	import { isMobile } from '$lib/stores/viewport';
 	import { createActivityQueue } from '$lib/stores/activityQueue.svelte';
@@ -277,6 +278,7 @@
 		}
 	}
 
+	setContext(ASKER_CHAT, (threadId: string) => openChat(threadId));
 	function openChat(threadId: string) {
 		void onSelectThread(threadId);
 	}

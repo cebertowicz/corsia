@@ -35,7 +35,9 @@ def test_add_and_insert_link_an_owned_document_as_input(db):
 
     assert [link["role"] for link in artifact_links.list_for_node(added["id"], db=db)] == ["input"]
     assert service._node_row(db, added["id"])["assignee"] == "user"
-    assert public.person_step_instructions(document, db=db)["node_id"] == added["id"]
+    read = public.person_step_instructions(document, db=db)
+    assert read["node_id"] == added["id"]
+    assert read["node_description"] == DESCRIPTION
     plan_update(db, plan.id, "activate", {
         "node_id": added["id"], "expected_revision": added["revision"],
     }, actor=HUMAN)

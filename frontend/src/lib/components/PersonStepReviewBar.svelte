@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { getContext } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
-	import ReviewBarShell from './ReviewBarShell.svelte';
+	import ReviewBarShell, { ASKER_CHAT } from './ReviewBarShell.svelte';
 	import { token as authToken } from '$lib/stores/auth';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { PersonStepInstruction } from '$lib/api/reviewBar';
@@ -35,6 +36,11 @@
 	let failure = $state('');
 	const busy = $derived(action === 'sending');
 	const asks = $derived(personStep ? personStepAsk(personStep) : '');
+	// Where the asker is a chat link (Activity) the bar reads "Task for you"; the step's own ask opens only when it says more than the title.
+	const inActivity = getContext<unknown>(ASKER_CHAT) !== undefined;
+	const more = $derived((personStep?.node_description ?? '').trim() !== '' && (personStep?.node_description ?? '').trim() !== personStep?.node_title.trim());
+	const line = $derived(inActivity ? (more ? 'Task for you' : '') : '');
+	const full = $derived(!inActivity ? asks : more ? (personStep?.node_description ?? '').trim() : 'Task for you');
 
 	async function settle(operation: 'mark_done' | 'close_node') {
 		const step = personStep;
@@ -65,7 +71,7 @@
 <ReviewBarShell
 	view={receipt ? 'receipt' : 'ask'}
 	who={personStep ? { name: personStep.owner_name, id: personStep.owner_thread_id } : undefined}
-	full={asks} {docked}
+	ask={line} {full} {docked}
 	askLabel="Task for you" {busy} status={busy ? 'Recording your answer…' : failure} {suppressed} bind:capsuleClearance
 	receipt={receipt ? { icon: receipt === 'done' ? 'check' : 'dash', label: 'Task answered', segments: [receipt === 'done' ? 'Done' : 'Won’t do'] } : null}
 >
