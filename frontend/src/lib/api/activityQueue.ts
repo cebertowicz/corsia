@@ -40,6 +40,8 @@ export interface ActivityTaskDetail {
 	revision: number;
 	/** The step's instructions, when the step carries them. */
 	description?: string | null;
+	/** The thread whose shared browser opened this step, when it is a browser step. */
+	browser_thread_id?: string;
 }
 
 /**

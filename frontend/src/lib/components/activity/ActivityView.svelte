@@ -5,7 +5,8 @@
 	import { createActivityQueue } from '$lib/stores/activityQueue.svelte';
 	import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 	import { activityOpenRequest } from '$lib/stores/activityOpen';
-	import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
+	import { threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveTab } from '$lib/stores/artifactWorkspace';
+	import ArtifactTabSheet from '$lib/components/ArtifactTabSheet.svelte';
 	import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import { emitProductEvent } from '$lib/product_events';
@@ -45,6 +46,7 @@
 	let openKey = $state<string | null>(null);
 	/** Phone only: the item is on screen instead of the list. */
 	let phoneOpen = $state(false);
+	let phoneTabsOpen = $state(false);
 	/** The tab showing; the open item may belong to the other one. */
 	let tab = $state<ActivityTab>('tasks');
 	/** Each list's order as the person last saw it, so an item that leaves is followed by what came after it. */
@@ -92,6 +94,10 @@
 	const notifications = $derived(keepInPlace(store.queue?.notifications.items ?? [], keptIn('notifications'), seen.notifications));
 	const loading = $derived(store.status === 'loading');
 	const openItem = $derived([...tasks, ...notifications].find((item) => item.key === openKey) ?? null);
+	const workspace = $derived($threadWorkspaces[workspaceKey] ?? emptyWorkspace());
+	const activeTab = $derived(getActiveTab(workspace));
+	// The phone's tab sheet only makes sense over open tabs, as in a thread: closing the last one closes it.
+	$effect(() => { if (workspace.tabs.length === 0) phoneTabsOpen = false; });
 	/** The open item has left the server's lists and is kept where it was while the person stays on it. */
 	const openGone = $derived(!!kept && kept.key === openKey
 		&& ![...(store.queue?.items ?? []), ...(store.queue?.notifications.items ?? [])].some((item) => item.key === openKey));
@@ -284,8 +290,24 @@
 	// A phone shows one screen at a time; the header gives the open item its way back to the list it came from.
 	$effect(() => {
 		const showing = $isMobile && phoneOpen && openItem !== null;
+		const document = showing && openItem && documentOf(openItem);
+		const browserThread = openItem?.kind === 'task' && 'browser_thread_id' in openItem.detail ? openItem.detail.browser_thread_id : null;
+		const tabForItem = document && activeTab?.kind === 'document' && activeTab.artifactId === document.artifactId
+			? activeTab : browserThread && activeTab?.kind === 'browser' && activeTab.threadId === browserThread ? activeTab : null;
 		activityPhoneItem.set(showing
-			? { backLabel: tab === 'notifications' ? 'Notifications' : 'Your tasks', onBack: () => { phoneOpen = false; void tick().then(() => { if (listScroll) listScroll.scrollTop = scrolls[tab]; }); } }
+			? {
+				backLabel: tab === 'notifications' ? 'Notifications' : 'Your tasks',
+				tabsOpen: phoneTabsOpen,
+				onBack: () => {
+					if (phoneTabsOpen) { phoneTabsOpen = false; return; }
+					phoneOpen = false;
+					void tick().then(() => { if (listScroll) listScroll.scrollTop = scrolls[tab]; });
+				},
+				...(tabForItem ? { artifact: {
+					title: tabForItem.title, tabCount: workspace.tabs.length,
+					anyChanged: hasChangedTab(workspace), onTabs: () => { phoneTabsOpen = !phoneTabsOpen; },
+				} } : {}),
+			}
 			: null);
 	});
 
@@ -302,7 +324,7 @@
 	});
 </script>
 
-<div class="activity" class:phone={$isMobile} class:phone-item={$isMobile && phoneOpen && openItem}>
+<div class="activity" class:phone={$isMobile} class:phone-item={$isMobile && phoneOpen && openItem} class:phone-artifact={$isMobile && phoneOpen && !!$activityPhoneItem?.artifact}>
 	<section class="list-col" aria-label="Activity">
 		<div class="list-scroll" bind:this={listScroll}>
 			<ActivityList
@@ -336,13 +358,20 @@
 			{#key paneInstance}
 				{@const mountedInstance = paneInstance}
 				{@const mountedKey = openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
+				<ActivityItemPane item={openItem} {workspaceKey} phone={$isMobile} showBrowser={!$isMobile || phoneOpen} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
 			<div class="nothing">{EMPTY_LINE[tab]}</div>
 		{/if}
 	</section>
 </div>
+
+{#if $isMobile && phoneOpen && phoneTabsOpen}
+	<ArtifactTabSheet tabs={workspace.tabs} activeKey={workspace.activeTabId}
+		onSelect={(id) => setActiveTab(workspaceKey, id)}
+		onClose={(id) => { const tab = workspace.tabs.find((entry) => entry.instanceId === id); if (tab) void requestArtifactTabClose(workspaceKey, tab, () => { phoneTabsOpen = false; }); }}
+		onCloseSheet={() => { phoneTabsOpen = false; }} />
+{/if}
 
 <style>
 	.activity { flex: 1; min-height: 0; display: flex; overflow: hidden; }
@@ -365,6 +394,7 @@
 	.phone .list-col { width: 100%; border-right: 0; }
 	.phone .pane-col { display: none; }
 	.phone.phone-item .list-col { display: none; }
-	/* On a phone the app bar carries back, so the item's tab row sits below it rather than in it. */
+	/* Ordinary items start below the app bar; an artifact leaf provides its own header clearance. */
 	.phone.phone-item .pane-col { display: flex; margin-top: var(--header-bottom); }
+	.phone.phone-item.phone-artifact .pane-col { margin-top: 0; }
 </style>

@@ -17,4 +17,6 @@ export interface ArtifactLeafProps {
 	escapeCloses?: boolean;
 	onEscapeClose?: () => void;
 	onOpenLightbox?: (url: string) => void;
+	/** Activity falls back to the task if its browser has already ended. */
+	onNoBrowser?: () => void;
 }

@@ -35,7 +35,7 @@
 	import type { ArtifactLeafProps } from '$lib/artifactLeafProps';
 
 	let {
-		threadId, targetThreadId = null, notice, protectReplyLanding = false, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {},
+		threadId, targetThreadId = null, notice, protectReplyLanding = false, collapsible = true, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {}, onNoBrowser,
 	}: ArtifactLeafProps = $props();
 
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
@@ -261,7 +261,7 @@
 		{#if notice}{@render notice()}{/if}
 		<div class="leaf-body" class:document-canvas={!!target || !!linkTab} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
 			{#if activeTab?.kind === 'browser' && activeTab.threadId}
-				<BrowserLeaf threadId={activeTab.threadId} />
+				<BrowserLeaf threadId={activeTab.threadId} {onNoBrowser} />
 				{:else if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
