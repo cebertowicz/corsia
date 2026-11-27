@@ -69,7 +69,7 @@ The server posts `references/first-run-opening.md` as your first message, with `
    - `You can use workflows other people have proven, and share yours if you choose.`
 
    Then raise the one decision from `setup.setup_decisions` titled `Use and share improvements with the CORSIA community?` as **Raising a decision** in `references/first-run.md` says, with the `source_node_id` of the task it names if your plan has one, else your current plan task. Using the community's improvements needs no account.
-   - **The answer** is written to the profile for you when the decision is answered: **Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No. On "not now", post `Ask me any time.`, write no line, and agents share nothing and take nothing until it is answered.
+   - **The answer** is written to the profile for you when the decision is answered: **Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No. On "not now", post `Ask me any time.`, write no line, and agents share nothing and take nothing other users shared until it is answered.
    - **An answer given in chat instead of the card:** post `Choose it on the card, and it's saved to your profile.` Leave the card open and write nothing.
    - **Neither:** post `Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that.` and skip the rest of this step: no GitHub.
    - **Only use:** no GitHub question. Skip the rest of this step.

@@ -3,6 +3,8 @@
 // `COMMENT_TIMING_HEADER`; the parts known after it ride on this tab's next comment request, GET or POST. A post is
 // keyed by its draft's client id while it runs; the header never carries that id, only this tab's count of posts.
 
+import { CaptureFailed } from './captureFailed';
+
 export const COMMENT_TIMING_HEADER = 'X-Corsia-Comment-Timing';
 
 export type PostOutcome = 'delivered' | 'failed' | `failed:${string}` | 'timeout' | 'earlier';
@@ -25,6 +27,9 @@ export function pressed(clientId: string): void {
 	attempts.set(clientId, a);
 	running.set(clientId, { n: ++posts, a, pressed: performance.now() });
 }
+
+/** A press of Comment on the draft whose id is `clientId` is being posted now. */
+export function posting(clientId: string): boolean { return running.has(clientId); }
 
 /** Runs one awaited part of a running post and records how long it took, whether it resolved or failed. */
 export async function timed<T>(clientId: string | undefined, part: Part, run: () => Promise<T>): Promise<T> {
@@ -58,8 +63,10 @@ export function finished(clientId: string, outcome: PostOutcome): void {
 }
 
 /** What a refused post reports: `failed:<status>` and, when the refusal's body carries its own short code, `:<code>`.
+ * A live capture that ended without a place reports `failed:cap:<code>`, its way of ending (`CaptureCode`).
  * Never the refusal's sentence, so no path or quote reaches the log; a failure with no status (a lost connection) is plain `failed`. */
 function failedOutcome(error: unknown): PostOutcome {
+	if (error instanceof CaptureFailed) return `failed:cap:${error.code}`;
 	const wire = error instanceof Error ? /^(\d{3})\s*([\s\S]*)$/.exec(error.message) : null;
 	if (!wire) return 'failed';
 	let kind: unknown;

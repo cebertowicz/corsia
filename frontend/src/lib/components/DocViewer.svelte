@@ -27,7 +27,8 @@
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
 	import { bindViewerSession, reloadAfterLegacySave, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
-	import { createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
+	import { createThreadActions } from '$lib/threadActions';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
@@ -177,9 +178,8 @@
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, target: () => target, draft: () => $commentDraft, session: () => liveSession,
-		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
-		ensureArtifactId: ensureEditorArtifactId,
-		onStart: commentUI.openDraft, onClose: commentUI.close,
+		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft', onStart: commentUI.openDraft, onClose: commentUI.close,
+		ensureArtifactId: ensureEditorArtifactId, ready: () => docState === 'ready' && liveConnection === 'connected' && !!editorSurface, offerFor: (from, to) => editorSurface?.offerFor(from, to) ?? null,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
 	async function submitComment(text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) {

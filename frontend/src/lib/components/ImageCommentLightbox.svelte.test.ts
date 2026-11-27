@@ -24,12 +24,15 @@ vi.mock('$lib/stores/viewport', async () => {
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 import SnapshotOverlayHost from './SnapshotOverlayHost.test.svelte';
-import { RequestRefused } from '$lib/api/docs';
+import { postComment, RequestRefused } from '$lib/api/docs';
 import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/stores/tabViewState';
 import { docComments } from '$lib/stores/docComments';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { imageDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
+import { user } from '$lib/stores/auth';
+import { unsentComments } from '$lib/stores/unsentComments.svelte';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
 const row = (id: string, number: number, x: number) => ({
@@ -99,7 +102,7 @@ describe('ImageCommentLightbox', () => {
 		const post = vi.fn().mockRejectedValueOnce(new RequestRefused('409', 'diagram_changed')).mockResolvedValue('new-comment');
 		openTabDocumentImage('thread', 'tab', { ...snapshot, src: 'blob:old', diagramSource: 'old' });
 		component = mount(SnapshotOverlayHost, { target: host, props: { comments: {
-			artifactId: 'art-img', projectId: null, readOnly: false, post, refreshDiagram: vi.fn(async () => snapshot),
+			artifactId: 'art-img', projectId: null, readOnly: false, post, placeOf: () => null, refreshDiagram: vi.fn(async () => snapshot),
 		} } });
 		await settle();
 		const img = host.querySelector<HTMLImageElement>('.pad img')!;
@@ -132,7 +135,7 @@ describe('ImageCommentLightbox', () => {
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
-			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), placeOf: () => null, refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyJump: jump,
 		} });
 		await settle();
@@ -155,7 +158,7 @@ describe('ImageCommentLightbox', () => {
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
-			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), placeOf: () => null, refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyJump: vi.fn(),
 		} });
 		await settle();
@@ -601,5 +604,58 @@ describe('ImageCommentLightbox', () => {
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'here', move: true } });
 			expect(commentButton()!.getAttribute('aria-pressed')).toBe('true');
 		});
+	});
+});
+
+describe('a kept draft on the image comes back in its box on its area when the image opens', () => {
+	const REGION = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
+	const key = imageDraftKey('art-img');
+	const button = () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((el) => /Sending…|Comment|Posting…/.test(el.textContent ?? '') && el.classList.contains('submit'));
+	beforeEach(() => { vi.mocked(postComment).mockReset(); user.set({ id: 'person-1', name: 'person-1' } as never); });
+	afterEach(() => { user.set(null); });
+
+	it('resumes pressed replies for the opened image, leaving unpressed replies alone', async () => {
+		user.set(null);
+		const pressed = replyDraftKey(key, 'first'), typed = replyDraftKey(key, 'second');
+		const tags = createMentionSelection('reply');
+		keptCommentDrafts.keepReply(pressed, 'reply', tags);
+		keptCommentDrafts.claim(pressed, 'reply', tags, undefined, { artifactId: 'art-img', threadId: null });
+		keptCommentDrafts.keepReply(typed, 'reply', tags);
+		const open = vi.spyOn(unsentComments, 'open').mockImplementation(() => {});
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+		expect(open).toHaveBeenCalledWith(pressed);
+		expect(open).not.toHaveBeenCalledWith(typed);
+		expect(keptCommentDrafts.get(typed)?.body).toBe('reply');
+		keptCommentDrafts.forget(pressed);
+		keptCommentDrafts.forget(typed);
+		open.mockRestore();
+	});
+
+	it('pressed before a reload: it reads Sending… with its words, and posts on its area under its press’s id', async () => {
+		const selection = createMentionSelection('Label this arrow');
+		keptCommentDrafts.keep(key, 'Label this arrow', selection, undefined, REGION);
+		const press = keptCommentDrafts.claim(key, 'Label this arrow', selection, undefined, { artifactId: 'art-img', threadId: null, name: 'shot.png' });
+		let land!: () => void;
+		vi.mocked(postComment).mockImplementation((_artifact, fields) => new Promise((resolve) => {
+			land = () => resolve({ ...row(String(fields.client_id), 3, 0.1), id: String(fields.client_id), body: 'Label this arrow' } as never);
+		}));
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+		expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Label this arrow');
+		expect(button()?.textContent).toBe('Sending…');
+		expect(vi.mocked(postComment)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(postComment).mock.calls[0][0]).toBe('art-img');
+		expect(vi.mocked(postComment).mock.calls[0][1]).toMatchObject({ client_id: press.clientId, body: 'Label this arrow', region: REGION });
+		land();
+		await settle();
+		expect(keptCommentDrafts.get(key)).toBeUndefined();
+	});
+
+	it('typed but never pressed: it comes back with its words on its area and nothing is sent', async () => {
+		keptCommentDrafts.keep(key, 'Label this arrow', createMentionSelection('Label this arrow'), undefined, REGION);
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+		expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Label this arrow');
+		expect(button()?.textContent).toBe('Comment');
+		expect(vi.mocked(postComment)).not.toHaveBeenCalled();
+		expect(keptCommentDrafts.get(key)).toMatchObject({ body: 'Label this arrow', region: REGION });
 	});
 });

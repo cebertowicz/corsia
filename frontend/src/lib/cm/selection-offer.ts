@@ -1,4 +1,4 @@
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { openCellText, textlessCellSelection } from './widget-cell-comment';
 import { widgetCommentLabel } from './widget-cells';
 import { offerPlace } from './offer-place';
@@ -26,4 +26,17 @@ export function selectionOffer(
 		anchor: anchorFor(v, r.from, r.to),
 		label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
 	};
+}
+
+/** A kept draft's passage offered as the person's own selection of it would be: selected, and scrolled to the middle of the view. */
+export function passageOffer(v: EditorView, from: number, to: number, anchorFor: (v: EditorView, from: number, to: number) => () => DOMRect | null): SelectionOffer | null {
+	v.dispatch({ selection: { anchor: from, head: to }, effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+	return selectionOffer(v, anchorFor);
+}
+
+/** Where a kept draft with no place left opens: at the foot of what the reader sees, so the text they select from stays readable. */
+export function footOffer(v: EditorView): SelectionOffer {
+	const box = v.scrollDOM.getBoundingClientRect();
+	const top = Math.min(box.bottom, window.innerHeight) - 24, left = box.left + box.width / 2;
+	return { from: 0, to: 0, text: '', top, left, exact: true, anchor: () => new DOMRect(left, top, 0, 0) };
 }

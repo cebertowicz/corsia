@@ -31,6 +31,21 @@ USER_TASKS_DESCRIPTION = (
     "for choices. You may close or settle user tasks."
 )
 
+#: The plan decision tool's description.
+DECISION_DESCRIPTION = (
+    "Author structured plan decisions for the user, with 2-4 A/B/C/D "
+    "options; a delegated worker's parent reviews its decision before raise; "
+    "an agent with no parent calls parent_review, then raise, itself. "
+    "pick \"any\" is for independent items; tradeoffs get their own decision. "
+    "Decisions are for choices someone switching in cold could make from the "
+    "card alone. If the context has to explain background first (terms, figures "
+    "or side effects the options depend on), or they need to see something laid "
+    "out (a layout, a design, a draft), it is not a card: write a brief and put it "
+    "in front of them (plan_update block_node, owner_kind user, ask_artifact_id). "
+    "A step only the person's hands can take (sign in, pay) is never one, even "
+    "with a 'drop it' option; plan_update says where it goes."
+)
+
 #: The next steps after a thread cannot mutate another agent's plan.
 FOREIGN_PLAN_MUTATION = (
     "Only the CORSIA agent or a project conductor may add, insert or reorder top-level tasks "

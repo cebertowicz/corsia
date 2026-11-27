@@ -5,7 +5,8 @@ import { CAPTURE_FAILURE, SELECTION_LOST } from './commentSelection';
 import { EARLIER_VERSION_POSTED } from './docComments';
 import { POST_FAILED, TAG_REFUSALS } from '$lib/docViewerOperations';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
-import { DIAGRAM_CHANGED_MESSAGE } from '$lib/imageComments.svelte';
+import { DIAGRAM_CHANGED_MESSAGE } from '$lib/commentFailureMessage';
+import { CommentConnectionError } from '$lib/api/boundedRequest';
 
 const timeout = Object.assign(new Error('request timed out after 60000ms (may have committed server-side)'), { name: 'PostTimeoutError' });
 /** Every reason a document's or an image's comment box, or a reply's field, can show under it, as the source words it. */
@@ -18,7 +19,7 @@ const REASONS: [string, string][] = [
 	['live, selection lost', liveFailureMessage(new Error(SELECTION_LOST))],
 	['live, 409', liveFailureMessage(new Error('409 {"detail":"changed"}'))],
 	['live, timeout', liveFailureMessage(timeout)],
-	['live, lost connection', liveFailureMessage(new TypeError('Failed to fetch'))],
+	['live, lost connection', liveFailureMessage(new CommentConnectionError())],
 	['live, server error', liveFailureMessage(new Error('500 synthetic'))],
 	['live, refusal with a reason', liveFailureMessage(new Error('404 {"detail":"This document is no longer shared."}'))],
 	['live, refusal without one', liveFailureMessage(new Error('422 {"detail":[{"msg":"bad"}]}'))],
@@ -35,6 +36,10 @@ const STILL_ON_SCREEN: [string, string][] = [
 const SAYS_KEPT = /\bkept\b|still here|carry over/i;
 
 describe('the line under a box whose draft this device does not keep', () => {
+	it('a lost connection keeps the full post failure sentence', () => {
+		expect(liveFailureMessage(new CommentConnectionError())).toBe(POST_FAILED);
+		expect(liveFailureMessage(new TypeError('Failed to fetch'))).toBe(POST_FAILED);
+	});
 	it('takes the kept sentence out from the middle of a reason, with one space', () => {
 		expect(withoutDraftKept(POST_FAILED)).toBe('Couldn’t post the comment. Try again.');
 	});

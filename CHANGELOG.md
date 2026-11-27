@@ -9,6 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A comment on an image, or on any text, that the server refuses now says why in its box in a document that is not live, as it already did in a live one, and a refused image comment names the image by its folder and file name instead of a path on your computer.
+- A comment or reply you pressed Comment or Send on that didn't post now goes again on its own, reading Sending…, when you open its document, image or chat, when the connection comes back, or when you return to the app, and it is never posted twice. Its box opens on its own text; if that text is gone or could be more than one place, the box opens with no place, keeps your words and says why. Words you typed but never sent come back in place and are never sent for you.
 - A comment posted while the app is busy with other requests, as on a phone reaching CORSIA remotely, now waits up to a minute for its turn to be sent instead of failing after 12 seconds without being sent; a server that never answers now takes up to 3 minutes, not 30 seconds, to say it couldn’t confirm the comment.
 - A comment that fails to post is now logged with how it was refused (its status and short code, never its words), so a failed comment can be traced to its cause.
 - A host access request now shows its details as plain labelled sections, with Reject as a button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
@@ -43,6 +44,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
 - The Send button on comment replies is the app's standard button and is easier to tap on a phone.
+- The update progress bar no longer immediately moves into restart when a status check fails while agents are still finishing.
+- Three skills written for software work (product-thinking, engineering-standards and agent-experience) no longer come with CORSIA, so projects without software stop paying for them on every turn. A project that needs them installs them from the skill library, which offers CORSIA's own skills whether or not you turned on community improvements. An install that updates loses them until they are installed there.
 - Pressing Show earlier replies in a document's comment sheet on a phone no longer makes the sheet grow or the page scroll: the sheet keeps its height and the earlier replies scroll inside it.
 - Email drafts have Send now and Don’t send buttons: one click sends the draft exactly as you see it.
 - Agents send a saved email, invite or text draft themselves, without waiting for a reply from you in chat; a draft changed since it was saved still isn't sent.

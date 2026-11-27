@@ -9,9 +9,12 @@ import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { toasts } from '$lib/stores/toast';
-import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { documentDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
+import { unsentComments } from '$lib/stores/unsentComments.svelte';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
+import { placeOf } from '$lib/keptPlace';
+import { createViewerCommentDraft, UNPLACED } from './docViewerCommentDraft.svelte';
 
 vi.mock('$lib/stores/docComments', async (original) => ({
 	...await original<typeof import('$lib/stores/docComments')>(),
@@ -42,15 +45,15 @@ type Row = Pick<DocComment, 'placement' | 'orphaned'> | undefined;
 const targetOf = (path: string): DocViewerTarget => ({ instanceId: 'tab', path, name: path, projectId: 'p', threadId: null, artifactId: null });
 const keyOf = (path: string) => documentDraftKey(targetOf(path));
 
-function setup(inWidget: boolean, label?: string) {
+function setup(inWidget: boolean, label?: string, shown = 'alpha beta') {
 	let scope = $state('one'), live = $state.raw(session()), open = $state(false), drawn = $state(false);
-	let row = $state<Row>({ placement: 'placing' }), draft = $state.raw<CommentDraft | null>(null);
+	let row = $state<Row>({ placement: 'placing' }), draft = $state.raw<CommentDraft | null>(null), ready = $state(false);
 	const stop = commentDraft.subscribe((value) => { draft = value; });
 	let controller!: ReturnType<typeof createViewerCommentDraft>;
 	const teardown = $effect.root(() => {
 		controller = createViewerCommentDraft({
-			scope: () => commentDraftScope(targetOf(scope)), target: () => targetOf(scope), draft: () => draft, session: () => live, generation: () => 0, text: () => 'alpha beta',
-			isOpen: () => open, ensureArtifactId: async () => 'a', onStart: () => { open = true; },
+			scope: () => commentDraftScope(targetOf(scope)), target: () => targetOf(scope), draft: () => draft, session: () => live, generation: () => 0, text: () => shown,
+			isOpen: () => open, ensureArtifactId: async () => 'a', ready: () => ready, offerFor: (from, to) => ({ from, to, text: shown.slice(from, to), top: 0, left: 0 }), onStart: () => { open = true; },
 			onClose: () => { open = false; }, awaitsMark: () => awaitsFirstMark(row as DocComment | undefined, drawn),
 		});
 	});
@@ -64,8 +67,9 @@ function setup(inWidget: boolean, label?: string) {
 			// The viewer closes the sheet and drops the draft once the comment is posted.
 			open = false; commentDraft.set(null); flushSync();
 		},
-		set(next: { scope?: string; drawn?: boolean; row?: Row; replaceSession?: boolean }) {
+		set(next: { scope?: string; drawn?: boolean; row?: Row; replaceSession?: boolean; ready?: boolean }) {
 			if (next.scope !== undefined) { scope = next.scope; live = session(); }
+			if (next.ready !== undefined) ready = next.ready;
 			if (next.replaceSession) live = session();
 			if (next.drawn !== undefined) drawn = next.drawn;
 			if ('row' in next) row = next.row;
@@ -79,6 +83,20 @@ function setup(inWidget: boolean, label?: string) {
 
 let current: ReturnType<typeof setup> | undefined;
 afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); keptCommentDrafts.reset(); });
+
+it('posts a non-live first press without the kept sides the server would refuse', async () => {
+	current = setup(false, undefined, 'alpha beta');
+	current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+	current.controller.start();
+	commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+	// The server would reject stale kept sides; without them it uses the existing first-press path.
+	vi.mocked(addComment).mockImplementationOnce(async (...args) => {
+		if (args.length > 12) throw new Error('409 passage_gone');
+		return 'posted';
+	});
+	expect(await current.controller.submit('body')).toBe('posted');
+	expect(vi.mocked(addComment).mock.calls.at(-1)).toHaveLength(12);
+});
 
 describe('a posted widget comment keeps its pending mark', () => {
 	it('until its placed mark is drawn', async () => {
@@ -272,6 +290,8 @@ describe('a post that lands or fails after its composer closed and another opene
 		const [earlier, again] = vi.mocked(addComment).mock.calls;
 		expect(again[7]).toBe(earlier[7]);
 		expect(again[11]).toBe(true);
+		expect(earlier).toHaveLength(12);
+		expect(again).toHaveLength(12);
 	});
 
 	it('lands after its viewer closed, and the reopened press fails: the next press reuses the same id, so the server holds one comment', async () => {
@@ -301,6 +321,8 @@ describe('a post that lands or fails after its composer closed and another opene
 		const [earlier, failed, again] = vi.mocked(addComment).mock.calls;
 		expect(failed[7]).toBe(earlier[7]);
 		expect(again[7]).toBe(earlier[7]);
+		expect(failed).toHaveLength(12);
+		expect(again).toHaveLength(12);
 		expect(stored.size).toBe(1);
 		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
 	});
@@ -335,6 +357,10 @@ describe('a post that lands or fails after its composer closed and another opene
 	});
 });
 
+/** A passage that cannot be told apart: another copy of `alpha` has the same text after it, so the draft keeps no place. */
+const REPEATED = 'alpha, and the words that come after it. alpha, and the words that come after it.';
+
+// A draft with no place does not go on its own, so a failure that passes is told as before.
 describe('a failed post says why in one place, decided as it fails', () => {
 	const REASON = 'Couldn’t post the comment. Your draft is kept. Try again.';
 	const show = vi.spyOn(toasts, 'show');
@@ -356,7 +382,7 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		return () => end();
 	};
 	let log: ReturnType<typeof vi.spyOn>;
-	beforeEach(() => { show.mockReset(); show.mockImplementation(() => 'toast'); log = vi.spyOn(console, 'error').mockImplementation(() => {}); current = setup(false); });
+	beforeEach(() => { show.mockReset(); show.mockImplementation(() => 'toast'); log = vi.spyOn(console, 'error').mockImplementation(() => {}); current = setup(false, undefined, REPEATED); });
 	afterEach(() => { drop(); drop = () => {}; log.mockRestore(); show.mockReset(); });
 
 	it('in the open composer, with no toast, while the composer is on screen', async () => {
@@ -450,6 +476,112 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		expect(show).toHaveBeenCalledExactlyOnceWith(REASON, 'error');
 		expect(get(commentDraft)?.error).toBeUndefined();
 		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBe(REASON);
+	});
+});
+
+it('resumes pressed replies for the opened document, leaving unpressed replies alone', () => {
+	const pressed = replyDraftKey(keyOf('one'), 'root'), typed = replyDraftKey(keyOf('one'), 'other');
+	const tags = createMentionSelection('reply');
+	keptCommentDrafts.keepReply(pressed, 'reply', tags);
+	keptCommentDrafts.claim(pressed, 'reply', tags, undefined, { artifactId: 'a', threadId: null });
+	keptCommentDrafts.keepReply(typed, 'reply', tags);
+	const open = vi.spyOn(unsentComments, 'open').mockImplementation(() => {});
+	current = setup(false); current.set({ ready: true });
+	expect(open).toHaveBeenCalledWith(pressed);
+	expect(open).not.toHaveBeenCalledWith(typed);
+	expect(keptCommentDrafts.get(typed)?.body).toBe('reply');
+	open.mockRestore();
+});
+
+describe('a kept draft with a passage comes back in its box once its document is shown', () => {
+	const body = 'Say who reads it';
+	const keep = (shown: string) => {
+		const tags = createMentionSelection(body);
+		keptCommentDrafts.keep(keyOf('one'), body, tags, placeOf('alpha beta', 0, 5));
+		keptCommentDrafts.claim(keyOf('one'), body, tags, undefined, { artifactId: 'a', threadId: null });
+		current = setup(false, undefined, shown);
+	};
+
+	it('not before the document is shown with its live text', () => {
+		keep('alpha beta');
+		expect(current!.controller.draft).toBeNull();
+	});
+
+	it('on its passage, sending, when the passage is found as kept', () => {
+		keep('alpha beta');
+		current!.set({ ready: true });
+		expect(current!.controller.draft).toMatchObject({ body, from: 0, to: 5, text: 'alpha' });
+		expect(current!.controller.draft?.unplaced).toBeUndefined();
+		expect(unsentComments.sending(keyOf('one'))).toBe(true);
+	});
+
+	it('on no text, with why, and not sent, when its passage changed before it went', () => {
+		keep('gamma beta');
+		current!.set({ ready: true });
+		expect(current!.controller.draft).toMatchObject({ body, unplaced: true, error: UNPLACED });
+		expect(unsentComments.sending(keyOf('one'))).toBe(false);
+	});
+});
+
+describe('a pressed comment on a passage it can be told by', () => {
+	let log: ReturnType<typeof vi.spyOn>;
+	const show = vi.spyOn(toasts, 'show');
+	const key = keyOf('one');
+	const press = (failure: Error) => {
+		current!.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current!.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+		current!.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockRejectedValueOnce(failure);
+		return current!.controller.submit('Too terse');
+	};
+	beforeEach(() => { show.mockReset(); show.mockImplementation(() => 'toast'); log = vi.spyOn(console, 'error').mockImplementation(() => {}); current = setup(false); });
+	afterEach(() => { log.mockRestore(); show.mockReset(); });
+
+	it('reads "Sending…" when its post fails for a reason that passes: no reason, no toast, and it goes again on its own', async () => {
+		await expect(press(new Error('503 boom'))).rejects.toThrow('503');
+		expect(show).not.toHaveBeenCalled();
+		expect(keptCommentDrafts.get(key)?.error).toBeUndefined();
+		expect(current!.controller.draft?.error).toBeUndefined();
+		expect(unsentComments.sending(key)).toBe(true);
+	});
+
+	it('says nothing either when its box closed while it posted', async () => {
+		let end!: () => void;
+		const wait = new Promise<void>(resolve => { end = resolve; });
+		current!.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current!.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+		current!.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockImplementationOnce(async () => { await wait; throw new Error('504 timeout'); });
+		const posting = current!.controller.submit('Too terse');
+		await Promise.resolve();
+		current!.escape(); commentDraft.set(null); flushSync();
+		end();
+		await expect(posting).rejects.toThrow('504');
+		expect(show).not.toHaveBeenCalled();
+		expect(unsentComments.sending(key)).toBe(true);
+	});
+
+	it('is told why when the server refuses it, and then waits for the person', async () => {
+		await expect(press(new Error('400 {"detail":"the image shots/a.png couldn’t be found.","kind":"region_target"}'))).rejects.toThrow('400');
+		expect(current!.controller.draft?.error).toBe('Couldn’t post the comment: the image shots/a.png couldn’t be found. Your draft is kept.');
+		expect(unsentComments.sending(key)).toBe(false);
+	});
+});
+
+describe('a pressed comment on a passage it cannot be told by', () => {
+	it('shows the failure line when its post fails for a reason that passes, keeps Comment, and does not go on its own', async () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		current = setup(false, undefined, REPEATED);
+		current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+		current.controller.start(); commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+		current.controller.setBody('Too terse'); flushSync();
+		vi.mocked(addComment).mockRejectedValueOnce(new Error('500 boom'));
+		await expect(current.controller.submit('Too terse')).rejects.toThrow('500');
+		expect(current.controller.draft?.error).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+		expect(unsentComments.sending(keyOf('one'))).toBe(false);
+		// Comment stays pressable: the next press posts under the same draft.
+		expect(await current.controller.submit('Too terse')).toBe('posted');
+		log.mockRestore();
 	});
 });
 

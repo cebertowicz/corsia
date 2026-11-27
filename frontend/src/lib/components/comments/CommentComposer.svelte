@@ -10,10 +10,11 @@
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	import { keptCommentDrafts, showsDraft } from '$lib/stores/keptCommentDrafts.svelte';
 	import { failedLine as lineOf } from '$lib/stores/draftKept';
+	import { SENDING } from '$lib/stores/unsentComments.svelte';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection, shownKey = '' }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, sending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection, shownKey = '' }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -24,6 +25,8 @@
 		submitLabel?: string;
 		submittingLabel?: string;
 		pending?: boolean;
+		/** It was pressed and goes on its own (`unsentComments`): the button reads SENDING and is held, the field stays editable, and an edit stops it. Its own press reads `submittingLabel`. */
+		sending?: boolean;
 		error?: string;
 		/** False when no press can get past `error` (a deleted chat): the box drops its Retry and keeps Cancel and the text. */
 		retryable?: boolean;
@@ -60,7 +63,7 @@
 	});
 	async function submit() {
 		const value = text.trim();
-		if (!value || posting || pending || disabledReason || (error && !retryable)) return;
+		if (!value || posting || pending || sending || disabledReason || (error && !retryable)) return;
 		posting = true;
 		const offset = text.length - text.trimStart().length;
 		const mentions = (picker?.occurrences(text) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset }));
@@ -86,7 +89,7 @@
 	{#if goesTo}<RecipientLine {names} none="No agent gets this comment." notice={goesTo.state === 'loading' || goesTo.state === 'error' ? goesTo.state : null} {onRetry} />{/if}
 	<div class="actions">
 		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
-		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
+		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || sending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : sending ? SENDING : error ? 'Retry' : submitLabel}</button>{/if}
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
 	{#if failedLine}<p class="selection-reason failed" role="alert">{failedLine}</p>{/if}

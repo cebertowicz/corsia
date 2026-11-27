@@ -408,7 +408,12 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # uses it, so its instruction rides in that reviewer's hand-over brief, not in every turn.
 # plan_decision 3,100 -> 3,200: `options` says to name an option by its label in context, tradeoff
 # and rationale, because the person's screen shows labels only and agents wrote "A ... B ...".
-_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_200}
+# plan_decision 3,200 -> 3,650 (measured 3,627): the description says when a choice is not a
+# card (background the options depend on, or a layout to see); in an old-vs-new test on a small
+# local model, the old text sent both kinds of choice as cards and the new text sent them as
+# briefs. It also corrects "the parent tier reviews before raise", which was wrong for an agent
+# with no parent: that agent calls parent_review itself.
+_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_650}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

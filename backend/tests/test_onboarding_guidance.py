@@ -425,7 +425,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert "Use and share improvements with the CORSIA community?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "`Choose it on the card, and it's saved to your profile.` Leave the card open and write nothing." in step
-    assert "write no line, and agents share nothing and take nothing until it is answered" in step
+    assert "write no line, and agents share nothing and take nothing other users shared until it is answered" in step
     assert "Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that." in step
     assert "no GitHub" in step
     assert "**Only use:** no GitHub question." in step

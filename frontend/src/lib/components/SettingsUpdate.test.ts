@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsUpdate from './SettingsUpdate.svelte';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
+import { startUpdateScreen, stopUpdateScreen } from '$lib/update/screenStore';
 import {
 	resetUpdateStoreForTests,
 	updateFailureVerdict,
@@ -35,6 +36,7 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
+	stopUpdateScreen();
 	resetUpdateStoreForTests();
 	token.set(null);
 	vi.unstubAllGlobals();
@@ -95,6 +97,16 @@ describe('SettingsUpdate', () => {
 		expect(host.querySelector('.version-line .updating .spinner')).toBeTruthy();
 		expect(host.textContent).not.toContain('Updating to');
 		expect(host.querySelector('.offer')).toBeNull();
+	});
+
+	it('shows the held waiting step instead of claiming restart after a failed read', () => {
+		startUpdateScreen();
+		updateStatus.set(status({ operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining', hard_cap_remaining: 300 } }));
+		updateUnreachable.set(true);
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+		expect(host.querySelector('.updating')?.textContent).toContain('Waiting for agents to finish');
+		expect(host.querySelector('.updating')?.textContent).not.toContain('Restarting CORSIA');
 	});
 
 	it('does not repeat the installed version as a last update', () => {

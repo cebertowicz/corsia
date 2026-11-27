@@ -72,7 +72,10 @@ else:
     return 0
 }
 
-is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
+# The health check before update, restart and stop drains gets the window
+# decided for this fix, shorter than the 60-second drain cap.
+DRAIN_HEALTH_WINDOW_SECONDS=30
+is_backend_running() { curl -sf --max-time "${1:-3}" "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
 # A healthy backend must publish readiness within one minute of its last visible
 # progress. Before the port binds, progress is the service's own startup-progress
@@ -868,7 +871,7 @@ start_server() {
 stop_direct_backend() {
     local drain_attempted=false
     require_port_served_by_this_checkout || return 1
-    if [ "$FORCE" = "false" ] && is_backend_running; then
+    if [ "$FORCE" = "false" ] && is_backend_running "$DRAIN_HEALTH_WINDOW_SECONDS"; then
         # Same guarantee as the managed stop: the drain is bounded courtesy,
         # the stop is the promise, and the hold is kept across the gap.
         drain_attempted=true
@@ -926,7 +929,7 @@ bounce_server() {
         require_port_served_by_this_checkout || return 1
         # Refuse a bad setup while the old backend is still serving.
         resolve_bind_host > /dev/null || return 1
-        if [ "$FORCE" = "false" ] && is_backend_running; then
+        if [ "$FORCE" = "false" ] && is_backend_running "$DRAIN_HEALTH_WINDOW_SECONDS"; then
             drain_attempted=true
             DRAIN_FAILURE_ACTION=hold drain_and_wait "restart" \
                 || warn "Drain did not complete; restarting anyway"
@@ -1390,7 +1393,7 @@ restart_prepared() {
         require_port_served_by_this_checkout || return 1
     fi
     if [ "$FORCE" = "false" ]; then
-        if ! is_backend_running; then
+        if ! is_backend_running "$DRAIN_HEALTH_WINDOW_SECONDS"; then
             reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
             fail "$reason"
             return 1

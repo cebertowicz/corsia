@@ -168,6 +168,7 @@
 	export function editorView() { return editor?.editorView(); }
 	export function acceptSuggestion(text: string, eventId: string, ids: string[]) { return editor?.acceptSuggestion(text, eventId, ids) ?? false; }
 	export function clearInputSelection() { editor?.clearInputSelection(); }
+	export function offerFor(from: number, to: number) { return editor?.offerFor(from, to) ?? null; }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
