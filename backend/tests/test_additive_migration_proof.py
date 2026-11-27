@@ -182,7 +182,7 @@ def test_metadata_guarded_steps_only_issue_safe_actions():
             CREATE TABLE plan_nodes (plan_id TEXT, assignee TEXT, kind TEXT, state TEXT, archived_at TEXT);
             CREATE TABLE artifact_identities (metadata TEXT, state TEXT);
         """)
-        for version in (209, 210):
+        for version in _PINNED_BODIES:
             events = []
             db.set_authorizer(lambda *event: (events.append(event), sqlite3.SQLITE_OK)[1])
             try:
