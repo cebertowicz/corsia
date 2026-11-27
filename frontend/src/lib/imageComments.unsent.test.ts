@@ -45,8 +45,8 @@ for (const [kind, key, make, place] of surfaces) {
 	it(`${kind}: a press whose post fails and can be tried again says nothing and keeps its area, sending on its own`, async () => {
 		const comments = make(place);
 		await comments.draw(BOX, rect);
-		api.postComment.mockRejectedValueOnce(new Error('500 boom'));
-		await expect(comments.submit('Too dark')).rejects.toThrow('500');
+		api.postComment.mockRejectedValueOnce(new Error('503 boom'));
+		await expect(comments.submit('Too dark')).rejects.toThrow('503');
 		expect(toast.show).not.toHaveBeenCalled();
 		expect(comments.draft?.error).toBeUndefined();
 		const kept = keptCommentDrafts.get(key);

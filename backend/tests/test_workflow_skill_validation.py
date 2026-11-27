@@ -70,7 +70,7 @@ def test_packaged_declared_workflow_contract_survives_system_cut():
     assert decision.ok, decision.errors
     steps = decision.corsia["workflow"]["steps"]
     assert [step["id"] for step in steps] == [
-        "product-chain", "long-form", "brief", "decision",
+        "long-form", "brief", "decision",
     ]
     assert "Applying these steps" in decision.body
     for contract in (

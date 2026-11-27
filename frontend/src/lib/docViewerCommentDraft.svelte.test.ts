@@ -506,7 +506,7 @@ describe('a pressed comment on a passage it can be told by', () => {
 	afterEach(() => { log.mockRestore(); show.mockReset(); });
 
 	it('reads "Sending…" when its post fails for a reason that passes: no reason, no toast, and it goes again on its own', async () => {
-		await expect(press(new Error('500 boom'))).rejects.toThrow('500');
+		await expect(press(new Error('503 boom'))).rejects.toThrow('503');
 		expect(show).not.toHaveBeenCalled();
 		expect(keptCommentDrafts.get(key)?.error).toBeUndefined();
 		expect(current!.controller.draft?.error).toBeUndefined();

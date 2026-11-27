@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { LiveDocumentSession } from './liveDocumentSession';
-import { captureComment, selectComment, selectionRange, RESERVE_BUDGET_MS, SELECTION_LOST } from './commentSelection';
+import { ANSWER_ALLOWANCE_MS, captureComment, selectComment, selectionRange, RESERVE_BUDGET_MS, SELECTION_LOST } from './commentSelection';
+import { CaptureFailed, type CaptureCode } from './captureFailed';
 import { encodeUpdate, type DocumentFrame } from './documentWire';
 
 const documents: Y.Doc[] = [], sessions: LiveDocumentSession[] = [];
@@ -20,12 +21,26 @@ function opened() {
 	return { server, session, sent, selection: selectComment(session, 6, 10), asks, reserve,
 		released: () => sent.filter(frame => frame.type === 'doc_release'),
 		asked: (count: number) => vi.waitFor(() => expect(asks().length).toBe(count)),
+		/** On the clock (`onTheClock`): the asks out once pending steps run, with no time passing. */
+		askedNow: async (count: number) => { await vi.advanceTimersByTimeAsync(0); expect(asks().length).toBe(count); },
 		answer: (fields: Partial<DocumentFrame> = {}) => session.handle({ type: 'doc_positions', artifact_id: 'artifact', store_id: 'store',
 			request_id: String(asks().at(-1)!.request_id), seq: 1, reserved: true, ...fields }),
 		remote: (edit: (text: Y.Text) => void) => { const vector = Y.encodeStateVector(server); edit(server.getText('text'));
 			session.handle({ type: 'doc_update', artifact_id: 'artifact', store_id: 'store', update: encodeUpdate(Y.encodeStateAsUpdate(server, vector)) }); },
 	};
 }
+/**
+ * Fake time, with the software hash, so every step but a timer runs on microtasks and time moves only when the test
+ * moves it: an ask's allowance is then counted from the exact moment it was sent.
+ */
+function onTheClock() {
+	vi.useFakeTimers();
+	const real = globalThis.crypto;
+	vi.stubGlobal('crypto', { randomUUID: () => real.randomUUID() });
+}
+/** The capture failed the way `code` names, with the sentence its box shows. */
+const endedAs = (request: Promise<unknown>, code: CaptureCode, sentence: string) =>
+	expect(request).rejects.toSatisfy((error: unknown) => error instanceof CaptureFailed && error.code === code && error.message.includes(sentence));
 it('asks for the selection under a fresh client id with the browser\'s state, and takes only its own answer', async () => {
 	const value = opened(), received = vi.fn();
 	const request = captureComment(value.selection, 1, new AbortController().signal).then(received);
@@ -63,7 +78,7 @@ it('shows the document-changed message only once the time budget runs out, and h
 	const value = opened(), now = vi.spyOn(performance, 'now');
 	now.mockReturnValue(1000);
 	const request = captureComment(value.selection, 1, new AbortController().signal);
-	const refused = expect(request).rejects.toThrow('document changed');
+	const refused = endedAs(request, 'changed', 'document changed');
 	await value.asked(1);
 	now.mockReturnValue(1000 + RESERVE_BUDGET_MS - 1); value.answer({ reserved: false });
 	await value.asked(2);
@@ -125,7 +140,7 @@ it('succeeds under remote typing every 50 ms for 2 s once a round trip finds the
 }, 10_000);
 it('gives the range back when the server refuses the request or the capture is aborted after asking', async () => {
 	const value = opened(), abort = new AbortController();
-	const refused = expect(captureComment(value.selection, 1, new AbortController().signal)).rejects.toThrow('refused for test');
+	const refused = endedAs(captureComment(value.selection, 1, new AbortController().signal), 'refused', 'refused for test');
 	await value.asked(1);
 	value.session.handle({ type: 'doc_error', kind: 'refused', artifact_id: 'artifact', store_id: 'store', request_id: String(value.asks()[0].request_id), message: 'refused for test' });
 	await refused;
@@ -140,7 +155,7 @@ it('rejects and releases when the server reports a reservation store mismatch', 
 	await value.asked(1);
 	const ask = value.asks()[0];
 	value.session.handle({ type: 'doc_error', kind: 'store_mismatch', artifact_id: 'artifact', store_id: 'other', request_id: String(ask.request_id) });
-	await expect(request).rejects.toThrow('document changed');
+	await endedAs(request, 'store_mismatch', 'document changed');
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 });
 it('rejects and releases when the server reports the document is not open', async () => {
@@ -148,7 +163,7 @@ it('rejects and releases when the server reports the document is not open', asyn
 	await value.asked(1);
 	const ask = value.asks()[0];
 	value.session.handle({ type: 'doc_error', kind: 'not_open', artifact_id: 'artifact', request_id: String(ask.request_id) });
-	await expect(request).rejects.toThrow('document changed');
+	await endedAs(request, 'refused', 'document changed');
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 });
 it('is not settled by a refusal without a request id delivered before its own ask, such as an earlier release', async () => {
@@ -171,17 +186,102 @@ it.each([
 	await value.asked(1);
 	const ask = value.asks()[0];
 	value.session.handle({ type: 'doc_error', kind, artifact_id: 'artifact', store_id: 'store', request_id: String(ask.request_id), message });
-	await expect(request).rejects.toThrow(expected);
+	await endedAs(request, 'refused', expected);
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 });
-it('rejects and releases an unanswered reservation when its deadline expires', async () => {
-	vi.useFakeTimers();
+it('rejects with its id in use when the server already holds something under the comment\'s id', async () => {
 	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
-	const refused = expect(request).rejects.toThrow('Couldn’t attach your comment. Your draft is kept. Try again.');
 	await value.asked(1);
-	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
+	value.session.handle({ type: 'doc_error', kind: 'identity_in_use', artifact_id: 'artifact', store_id: 'store', request_id: String(value.asks()[0].request_id) });
+	await endedAs(request, 'identity', 'Couldn’t attach your comment.');
+});
+// A slow but working server: the ask for the range is already out when the time budget runs out, and the server answers
+// inside the allowance a comment's POST gives it. The budget bounds asking again, not waiting for an answer.
+it('waits past the time budget for an ask already out, and takes the slow answer', async () => {
+	onTheClock();
+	const value = opened(), settled = vi.fn();
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	request.then(settled, settled);
+	await value.askedNow(1);
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS + 1000);
+	expect(settled).not.toHaveBeenCalled();
+	value.answer();
+	await expect(request).resolves.toMatchObject({ quote: 'beta', clientId: value.reserve(0).client_id });
+	expect(value.asks()).toHaveLength(1);
+	expect(value.released()).toEqual([]);
+});
+it('rejects as unanswered and releases once an ask has had its whole allowance, and not before', async () => {
+	onTheClock();
+	const value = opened(), settled = vi.fn();
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	const refused = endedAs(request, 'unanswered', 'Couldn’t attach your comment. Your draft is kept. Try again.');
+	request.catch(settled);
+	await value.askedNow(1);
+	await vi.advanceTimersByTimeAsync(ANSWER_ALLOWANCE_MS - 1);
+	expect(settled).not.toHaveBeenCalled();
+	await vi.advanceTimersByTimeAsync(1);
 	await refused;
+	expect(value.asks()).toHaveLength(1);
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
+});
+it('gives an ask sent just inside the budget its own allowance, so the slowest unanswered capture ends near 13 s after the press', async () => {
+	onTheClock();
+	const value = opened(), settled = vi.fn();
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	const refused = endedAs(request, 'unanswered', 'Couldn’t attach your comment.');
+	request.catch(settled);
+	await value.askedNow(1);
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS - 100);
+	value.answer({ reserved: false });
+	// The refusal's catch-up wait, CATCH_UP_MS, then the second ask goes at 2950 ms.
+	await vi.advanceTimersByTimeAsync(50);
+	await value.askedNow(2);
+	await vi.advanceTimersByTimeAsync(ANSWER_ALLOWANCE_MS - 1);
+	expect(settled).not.toHaveBeenCalled();
+	await vi.advanceTimersByTimeAsync(1);
+	await refused;
+	expect(value.asks()).toHaveLength(2);
+	expect(RESERVE_BUDGET_MS + ANSWER_ALLOWANCE_MS).toBe(13_000);
+});
+it('still ends as changed when a slow answer refuses the range after the budget, without asking again', async () => {
+	onTheClock();
+	const value = opened();
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	const refused = endedAs(request, 'changed', 'document changed');
+	await value.askedNow(1);
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS + 500);
+	value.answer({ reserved: false });
+	await refused;
+	// A refused range was never held, so there is nothing to give back.
+	expect(value.asks()).toHaveLength(1);
+	expect(value.released()).toEqual([]);
+});
+it('ends at once when the connection goes while waiting past the budget for an answer', async () => {
+	onTheClock();
+	const value = opened();
+	const request = captureComment(value.selection, 1, new AbortController().signal);
+	const refused = endedAs(request, 'offline', 'offline');
+	await value.askedNow(1);
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS + 500);
+	value.session.disconnected();
+	await refused;
+});
+it('ends at once on Cancel while waiting past the budget for an answer, and gives the range back', async () => {
+	onTheClock();
+	const value = opened(), abort = new AbortController();
+	const request = captureComment(value.selection, 1, abort.signal);
+	const cancelled = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+	await value.askedNow(1);
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS + 500);
+	abort.abort();
+	await cancelled;
+	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
+});
+it('ends as a hash failure when the browser cannot check the selection', async () => {
+	const value = opened();
+	vi.spyOn(crypto.subtle, 'digest').mockRejectedValueOnce(new Error('digest unavailable'));
+	await endedAs(captureComment(value.selection, 1, new AbortController().signal), 'hash', 'digest unavailable');
+	expect(value.asks()).toHaveLength(0);
 });
 it.each(['remote', 'ack'] as const)('hashes again when %s moved the document during hashing and reserves the new state', async kind => {
 	const value = opened(), original = crypto.subtle.digest.bind(crypto.subtle);
@@ -205,7 +305,7 @@ it('refuses a local edit made during hashing as still settling', async () => {
 		await new Promise<void>(resolve => { release = resolve; }); return original(algorithm, data);
 	});
 	const request = captureComment(value.selection, 1, new AbortController().signal);
-	const refused = expect(request).rejects.toThrow('still settling');
+	const refused = endedAs(request, 'settling', 'still settling');
 	await vi.waitFor(() => expect(release).toBeTypeOf('function'));
 	value.session.text.insert(0, 'X ');
 	release(); await refused;
@@ -215,7 +315,7 @@ it.each(['dirty', 'disconnected', 'closed'] as const)('refuses %s without asking
 	const value = opened();
 	if (kind === 'dirty') value.session.text.insert(0, 'X ');
 	const request = captureComment(value.selection, 1, new AbortController().signal);
-	const refused = expect(request).rejects.toThrow(kind === 'dirty' ? 'still settling' : 'offline');
+	const refused = kind === 'dirty' ? endedAs(request, 'settling', 'still settling') : endedAs(request, 'offline', 'offline');
 	if (kind === 'disconnected') value.session.disconnected();
 	if (kind === 'closed') value.session.destroy();
 	await refused;
@@ -235,7 +335,7 @@ it('aborts during hashing, asks for nothing and ignores the released hash', asyn
 });
 it('rejects equal text with deleted and reinserted character identity without asking', async () => {
 	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
-	const refused = expect(request).rejects.toThrow(SELECTION_LOST);
+	const refused = endedAs(request, 'lost', SELECTION_LOST);
 	value.remote(text => { text.delete(6, 4); text.insert(6, 'beta'); });
 	await refused;
 	expect(value.asks()).toHaveLength(0);

@@ -4,8 +4,9 @@ import { CommentSendRefused } from '$lib/chatCommentAnchors';
 import { DocOpenError, ImageFileError } from '$lib/docOpenRefusal';
 import { EarlierVersionPosted } from '$lib/stores/commentVersion';
 import { notCommentableMessage, TAG_REFUSALS } from '$lib/docViewerOperations';
-import { postFailureMessage } from '$lib/commentFailureMessage';
+import { liveFailureMessage, postFailureMessage } from '$lib/commentFailureMessage';
 import { retryCommentConnection, retryCommentStatus } from '$lib/commentRetry';
+import { CaptureFailed } from '$lib/stores/captureFailed';
 
 /** A 409's `kind` when the draft's id names another document's or author's comment (backend CLIENT_ID_CLASH_KIND). */
 export const CLIENT_ID_CLASH_KIND = 'client_id_clash';
@@ -37,6 +38,9 @@ export function unsentRetryCode(error: unknown): string {
 export function unsentOutcome(error: unknown): UnsentOutcome {
 	if (error instanceof EarlierVersionPosted) return 'earlier';
 	if (error instanceof DocOpenError || error instanceof ImageFileError) return 'refused';
+	if (error instanceof CaptureFailed) {
+		return ['changed', 'offline', 'unanswered', 'settling', 'store_mismatch', 'identity'].includes(error.code) ? 'retry' : 'refused';
+	}
 	// A chat's post says itself whether it was refused, in the sentence its box shows.
 	if (error instanceof CommentSendRefused) return error.passes ? 'retry' : 'refused';
 	const status = statusOf(error);
@@ -54,6 +58,7 @@ export function unsentOutcome(error: unknown): UnsentOutcome {
  */
 export function unsentReason(error: unknown): string {
 	if (error instanceof EarlierVersionPosted || error instanceof CommentSendRefused) return error.message;
+	if (error instanceof CaptureFailed && (error.code === 'lost' || error.code === 'refused')) return liveFailureMessage(error);
 	const sentence = notCommentableMessage(error) ?? (error instanceof RequestRefused && error.kind ? TAG_REFUSALS[error.kind] : undefined);
 	if (sentence) return sentence;
 	if (statusOf(error) === 409) {

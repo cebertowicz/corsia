@@ -6,6 +6,7 @@ vi.mock('$lib/stores/docComments', async (importOriginal) => ({
 	addReply: vi.fn(),
 }));
 import { addReply } from '$lib/stores/docComments';
+import { CommentConnectionError } from '$lib/api/boundedRequest';
 import { createThreadActions } from './threadActions';
 import { toasts } from '$lib/stores/toast';
 import { documentDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
@@ -21,7 +22,7 @@ beforeEach(() => {
 afterEach(() => { keptCommentDrafts.reset(); unsentComments.reset(); vi.mocked(addReply).mockReset(); vi.restoreAllMocks(); });
 
 it('a failure that passes is not told: no reason, no toast, and the reply keeps going on its own under its press’s id', async () => {
-	const offline = new TypeError('Failed to fetch');
+	const offline = new CommentConnectionError();
 	vi.mocked(addReply).mockRejectedValueOnce(offline);
 	await expect(createThreadActions(() => 'artifact', vi.fn(), () => 'thread').reply('root', 'My reply', [], [], key)).rejects.toBe(offline);
 	expect(toasts.show).not.toHaveBeenCalled();

@@ -6,6 +6,8 @@ import { fetchComments, postComment, registerArtifact } from './docs';
 import { activeDocEditor, ensureEditorArtifactId } from '$lib/stores/activeDocEditor';
 import { postTop } from '$lib/stores/docComments';
 import { COMMENT_TIMING_HEADER, resetCommentPostTiming, timedPost } from '$lib/stores/commentPostTiming';
+import { CaptureFailed } from '$lib/stores/captureFailed';
+import { IdentityInUseError } from '$lib/stores/commentSelection';
 
 const never = () => new Promise<Response>(() => {});
 /** An answer whose headers arrive and whose body never ends. */
@@ -144,7 +146,11 @@ describe('the timing header', () => {
 		['a refusal with no code', new Error('404 {"detail":"Not found"}'), 'failed:404'],
 		['a body that is not JSON', new Error('502 <html>Bad gateway</html>'), 'failed:502'],
 		['a code that is a sentence', new Error('400 {"kind":"the image /Users/me/a.png couldn’t be found"}'), 'failed:400'],
-		['a lost connection', new TypeError('Failed to fetch'), 'failed']
+		['a lost connection', new TypeError('Failed to fetch'), 'failed'],
+		// A live capture that ended without a place says which way, never its sentence.
+		['a capture whose ask went unanswered', new CaptureFailed('unanswered', 'Couldn’t attach your comment. Try again.'), 'failed:cap:unanswered'],
+		['a capture on a document that kept moving', new CaptureFailed('changed', 'The document changed.'), 'failed:cap:changed'],
+		['a capture refused because its id is in use', new IdentityInUseError(), 'failed:cap:identity']
 	])('names how a post failed by its status and its code only: %s', async (_name, error, expected) => {
 		vi.useRealTimers();
 		await timedPost('draft-1', () => Promise.reject(error)).catch(() => {});

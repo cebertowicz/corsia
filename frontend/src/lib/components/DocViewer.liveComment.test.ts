@@ -12,7 +12,8 @@ import { clearDraft } from '$lib/stores/docSaveQueue';
 import { commentDraft, discardCommentDraft } from '$lib/stores/commentDraft';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { posting } from '$lib/stores/commentPostTiming';
-import { RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
+import { ANSWER_ALLOWANCE_MS, RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
+import { PostTimeoutError } from '$lib/api/boundedRequest';
 import { toasts } from '$lib/stores/toast';
 import { docComments } from '$lib/stores/docComments';
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn(), postComment: vi.fn() }));
@@ -335,7 +336,11 @@ it('keeps the draft and re-enables Comment without posting when a reservation re
 	submit.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
+	// The budget alone doesn't end an ask already out: a slow server still has its allowance to answer.
 	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
+	expect(submit.disabled).toBe(true);
+	expect(toasts.show).not.toHaveBeenCalled();
+	await vi.advanceTimersByTimeAsync(ANSWER_ALLOWANCE_MS - RESERVE_BUDGET_MS);
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
 	expect(toasts.show).toHaveBeenCalledWith('Couldn’t attach your comment. Your draft is kept. Try again.', 'error');
 	expect(submit.textContent).toBe('Retry');
@@ -449,8 +454,8 @@ it('keeps the body and enabled Comment after an HTTP refusal that a second captu
 // A comment on a passage it can be told by goes again on its own: a failure that passes says nothing, and its box reads
 // "Sending…" until the next open, connection or return to the app sends it. Only a refusal says why.
 it.each([
-	['a server error', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure')); return answer(ask); }],
-	['a timeout', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(postFailure('PostTimeoutError')); return answer(ask); }],
+	['a temporarily unavailable server', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new Error('503 synthetic comment failure')); return answer(ask); }],
+	['a timeout', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new PostTimeoutError(100)); return answer(ask); }],
 	['a 409 that names no kind, twice', async (ask: Record<string, any>) => {
 		api.postComment.mockRejectedValue(new Error('409 {"detail":"The document changed. Try Comment again; your draft is kept."}'));
 		await answer(ask);
@@ -474,6 +479,19 @@ it.each([
 	expect(document.querySelector('.composer [role="alert"]')).toBeNull();
 	expect(toasts.show).not.toHaveBeenCalled();
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
+});
+it.each([
+	['a server error', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure')); return answer(ask); }],
+])('a pressed comment after %s keeps its text and waits for the person', async (_name, fail) => {
+	await open(); await select(); await compose();
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.click();
+	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+	await fail(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+	await vi.waitFor(() => expect(submit.textContent).toBe('Retry'));
+	expect(submit.disabled).toBe(false);
+	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
+	expect(document.querySelector('.composer [role="alert"]')).not.toBeNull();
 });
 it('a pressed comment the server refuses says why in its box and waits for the person', async () => {
 	await open(); await select(); await compose();
