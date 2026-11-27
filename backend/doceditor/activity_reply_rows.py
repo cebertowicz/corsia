@@ -126,24 +126,29 @@ def _replies(db, user_id: str, scope: tuple[str, ...]) -> list:
       WHERE r.relationship_state IN ('owner-pinned','owner-active')
         AND r.artifact_id IN (SELECT value FROM json_each(?))
     ), unread AS (
-      SELECT root.id AS root_id, item.id AS reply_id, item.artifact_id,
-             item.created_at, item.author_thread_id,
-             (item.parent_id IS NOT NULL AND item.author_kind='agent'
-              AND item.artifact_id=root.artifact_id
-              AND EXISTS (SELECT 1 FROM threads author WHERE author.id=item.author_thread_id AND author.user_id=?)
-              -- The person commented in this thread: they wrote its root, or a reply under it.
-              -- Each side is an index lookup (the root's own row, idx_doc_comments_parent); one
-              -- EXISTS over the whole document re-scanned every comment in it for every reply.
-              AND (root.author_kind='user'
-                   OR EXISTS (SELECT 1 FROM doc_comments person WHERE person.parent_id=root.id
-                              AND person.author_kind='user' AND person.artifact_id=root.artifact_id))
-             ) AS qualifies
+      SELECT root.id AS root_id, root.artifact_id AS root_artifact,
+             root.author_kind AS root_author_kind, item.id AS reply_id,
+             item.parent_id, item.author_kind, item.artifact_id,
+             item.created_at, item.author_thread_id
       {unread_sql}
+    ), person_threads AS (
+      -- One row per thread avoids repeated person-reply lookups and join fan-out.
+      SELECT DISTINCT artifact_id, parent_id FROM doc_comments
+      WHERE author_kind='user' AND parent_id IS NOT NULL
+        AND artifact_id IN (SELECT value FROM json_each(?))
+    ), qualified AS (
+      SELECT u.*,
+             (u.parent_id IS NOT NULL AND u.author_kind='agent'
+              AND u.artifact_id=u.root_artifact
+              AND EXISTS (SELECT 1 FROM threads author WHERE author.id=u.author_thread_id AND author.user_id=?)
+              AND (u.root_author_kind='user' OR pt.parent_id IS NOT NULL)) AS qualifies
+      FROM unread u LEFT JOIN person_threads pt
+        ON pt.parent_id=u.root_id AND pt.artifact_id=u.root_artifact
     ), counted AS (
       SELECT u.*,
              FIRST_VALUE(u.reply_id) OVER (PARTITION BY u.artifact_id
                ORDER BY u.created_at DESC, u.reply_id DESC) AS latest_unread_id
-      FROM unread u
+      FROM qualified u
     )
     SELECT c.root_id, c.reply_id, c.artifact_id, c.created_at, c.author_thread_id, c.latest_unread_id,
            i.title AS artifact_title, i.path AS artifact_path, own.parent_thread_id AS owner_thread
@@ -153,7 +158,7 @@ def _replies(db, user_id: str, scope: tuple[str, ...]) -> list:
     WHERE c.qualifies AND own.parent_thread_id IS NOT NULL AND own.parent_thread_id<>''
     ORDER BY c.artifact_id, c.created_at DESC, c.reply_id DESC
     """
-    return db.execute(sql, (json.dumps(scope), user_id, *unread_params)).fetchall()
+    return db.execute(sql, (json.dumps(scope), *unread_params, json.dumps(scope), user_id)).fetchall()
 
 
 def document_rows(db, user_id: str) -> list[dict]:
