@@ -12,17 +12,14 @@ entitlements="$(cd "$(dirname "${BASH_SOURCE[0]}")/../src-tauri" && pwd -P)/Enti
 python_bin="$app/Contents/Resources/python/bin/python3"
 python_versioned_bin="$app/Contents/Resources/python/bin/python3.11"
 server_bin="$app/Contents/Resources/python/bin/CORSIA"
-helper_bin="$app/Contents/Resources/python/bin/CORSIA Helper"
-bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
 macho_list="$(mktemp)"
 trap 'rm -f "$macho_list"' EXIT
 # Written to a file first so a failed scan fails this script (set -e).
 "$(dirname "${BASH_SOURCE[0]}")/list-macho.sh" "$app/Contents" >"$macho_list"
 while IFS= read -r -d '' path; do
-  if [ "$path" = "$server_bin" ] || [ "$path" = "$helper_bin" ]; then
-    suffix=server
-    [ "$path" != "$helper_bin" ] || suffix=helper
-    codesign --force --options runtime --entitlements "$entitlements" --identifier "$bundle_identifier.$suffix" --timestamp=none --sign "$identity" "$path"
+  if [ "$path" = "$server_bin" ]; then
+    # The server keeps python3's signing identity, so privacy grants made to it survive the rename.
+    codesign --force --options runtime --entitlements "$entitlements" --identifier python3 --timestamp=none --sign "$identity" "$path"
   elif [ "$path" = "$python_bin" ] || [ "$path" = "$python_versioned_bin" ]; then
     codesign --force --options runtime --entitlements "$entitlements" --timestamp=none --sign "$identity" "$path"
   else

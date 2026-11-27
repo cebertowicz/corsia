@@ -185,8 +185,7 @@ readonly PYTHON="$BUNDLE_ROOT/python/bin/python3"
 [ -x "$PYTHON" ] || fail "standalone Python did not contain python/bin/python3"
 "$PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 11), sys.version'
 cp "$PYTHON" "$BUNDLE_ROOT/python/bin/CORSIA"
-cp "$PYTHON" "$BUNDLE_ROOT/python/bin/CORSIA Helper"
-[ -x "$BUNDLE_ROOT/python/bin/CORSIA" ] && [ -x "$BUNDLE_ROOT/python/bin/CORSIA Helper" ] || fail "named Python interpreters are not executable"
+[ -x "$BUNDLE_ROOT/python/bin/CORSIA" ] || fail "named Python interpreter is not executable"
 "$BUNDLE_ROOT/python/bin/CORSIA" -I -c 'import sys; assert sys.prefix.endswith("/python"), sys.prefix'
 
 fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"

@@ -11,7 +11,6 @@ readonly TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/corsia-bundle-smoke.XXXXXX")"
 success=false
 cleanup() {
   if [ -n "${BACKEND_PID:-}" ]; then kill "$BACKEND_PID" 2>/dev/null || true; wait "$BACKEND_PID" 2>/dev/null || true; fi
-  if [ -n "${HELPER_PID:-}" ]; then kill "$HELPER_PID" 2>/dev/null || true; wait "$HELPER_PID" 2>/dev/null || true; fi
   if "$success"; then rm -rf "$TEMP_ROOT"; else echo "smoke diagnostics: $TEMP_ROOT" >&2; fi
 }
 trap cleanup EXIT
@@ -47,20 +46,15 @@ ditto "$SOURCE_APP" "$APP"
 readonly RESOURCES="$APP/Contents/Resources"
 readonly PYTHON="$RESOURCES/python/bin/python3"
 readonly SERVER="$RESOURCES/python/bin/CORSIA"
-readonly HELPER="$RESOURCES/python/bin/CORSIA Helper"
 readonly PACKAGES="$RESOURCES/python/backend-packages"
-readonly BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
-for named_python in "$SERVER" "$HELPER"; do
-  [ -x "$named_python" ] || { echo "error: named interpreter is missing or not executable: $named_python" >&2; exit 1; }
-  suffix=server
-  [ "$named_python" != "$HELPER" ] || suffix=helper
-  codesign -d --verbose=2 "$named_python" 2>"$TEMP_ROOT/signature"
-  grep -Fx "Identifier=$BUNDLE_IDENTIFIER.$suffix" "$TEMP_ROOT/signature"
-  codesign -d --entitlements :- "$named_python" >"$TEMP_ROOT/entitlements.plist" 2>/dev/null
-  "$PYTHON" -I -c 'import plistlib, sys; assert plistlib.load(open(sys.argv[1], "rb")) == plistlib.load(open(sys.argv[2], "rb"))' \
-    "$TEMP_ROOT/entitlements.plist" "$ROOT/desktop/src-tauri/Entitlements.plist"
-  printf 'entitlements=%s verified\n' "$suffix"
-done
+[ -x "$SERVER" ] || { echo "error: named interpreter is missing or not executable: $SERVER" >&2; exit 1; }
+# The server keeps python3's signing identity, so privacy grants made to it survive the rename.
+codesign -d --verbose=2 "$SERVER" 2>"$TEMP_ROOT/signature"
+grep -Fx "Identifier=python3" "$TEMP_ROOT/signature"
+codesign -d --entitlements :- "$SERVER" >"$TEMP_ROOT/entitlements.plist" 2>/dev/null
+"$PYTHON" -I -c 'import plistlib, sys; assert plistlib.load(open(sys.argv[1], "rb")) == plistlib.load(open(sys.argv[2], "rb"))' \
+  "$TEMP_ROOT/entitlements.plist" "$ROOT/desktop/src-tauri/Entitlements.plist"
+printf 'entitlements=server verified\n'
 process_name() {
   "$PYTHON" -I -c 'import sys; sys.path.insert(0, sys.argv[2]); import psutil; print(psutil.Process(int(sys.argv[1])).name())' "$1" "$PACKAGES"
 }
@@ -186,14 +180,6 @@ grep -q '"status":"ok"' "$TEMP_ROOT/health.json"
 server_name="$(process_name "$BACKEND_PID")"
 printf 'server-process-name=%s\n' "$server_name"
 [ "$server_name" = CORSIA ] || { echo "error: unexpected server process name" >&2; exit 1; }
-"$HELPER" -I -c 'import time; time.sleep(60)' &
-HELPER_PID=$!
-helper_name="$(process_name "$HELPER_PID")"
-printf 'helper-process-name=%s\n' "$helper_name"
-[ "$helper_name" = 'CORSIA Helper' ] || { echo "error: unexpected helper process name" >&2; exit 1; }
-kill "$HELPER_PID"
-wait "$HELPER_PID" 2>/dev/null || true
-HELPER_PID=
 curl --fail --silent "http://127.0.0.1:$port/api/version" >"$TEMP_ROOT/version.json"
 # Both the service's PATH and every Git its backend ran (version reads it) lead
 # to the bundle, not the shims ahead of the system paths.
