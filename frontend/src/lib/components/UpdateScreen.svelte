@@ -36,7 +36,9 @@
 	let startActionEl: HTMLButtonElement | undefined = $state();
 	let screenEl: HTMLElement | undefined = $state();
 
-	const paused = $derived(view?.mode === 'progress' && view.step === 'waiting' && !view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null);
+	const paused = $derived(view && (view.mode === 'progress' || view.mode === 'longer') && view.step === 'waiting'
+		? view.paused ?? (!view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null)
+		: null);
 	const longer = $derived(view?.mode === 'longer');
 	// A wrong-version headline already says `not <target>`, so the From → To line would repeat it.
 	const headlineNamesTarget = $derived(view?.mode === 'failed' && !view.serviceDown && Boolean(view.toVersion) && Boolean(view.failure?.headline.includes(`, not ${view.toVersion}.`)));

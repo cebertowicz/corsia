@@ -25,6 +25,9 @@ export interface ScreenHandoff {
 	fromVersion: string | null;
 	toVersion: string | null;
 	usualSeconds: number | null;
+	/** Earliest point at which the last observed drain cap can have expired. */
+	drainDeadline?: number | null;
+	paused?: { safe: number; total: number } | null;
 	downAt: number | null;
 	seqChangedAt: number | null;
 	lastSeq: number | null;
@@ -94,14 +97,17 @@ export function parseHandoff(raw: unknown, now = Date.now()): ScreenHandoff | nu
 	const failure = parseFailure(raw.failure);
 	const route = safeReturnRoute(raw.route);
 	const { operationId, fromVersion, toVersion, usualSeconds, downAt, seqChangedAt, lastSeq, lastPid, theme } = raw;
+	const drainDeadline = raw.drainDeadline ?? null;
+	const paused = raw.paused ?? null;
+	if (paused !== null && (!isRecord(paused) || !whole(paused.safe) || !whole(paused.total) || paused.total === 0 || paused.safe > paused.total)) return null;
 	if (!model || failure === undefined || route === null) return null;
 	if (typeof operationId !== 'string' || !/^[\w-]{1,128}$/.test(operationId)) return null;
 	if (!version(fromVersion) || !version(toVersion)) return null;
 	if (usualSeconds !== null && !(typeof usualSeconds === 'number' && Number.isFinite(usualSeconds) && usualSeconds > 0 && usualSeconds <= 86_400)) return null;
-	if (!clock(downAt, now) || !clock(seqChangedAt, now)) return null;
+	if (!clock(downAt, now) || !clock(seqChangedAt, now) || !clock(drainDeadline, now)) return null;
 	if ((lastSeq !== null && !whole(lastSeq)) || (lastPid !== null && !whole(lastPid))) return null;
 	if (theme !== 'light' && theme !== 'dark') return null;
-	return { v: 1, operationId, model, fromVersion, toVersion, usualSeconds, downAt, seqChangedAt, lastSeq, lastPid, failure, theme, route };
+	return { v: 1, operationId, model, fromVersion, toVersion, usualSeconds, drainDeadline, ...(raw.paused === undefined ? {} : { paused: paused as ScreenHandoff['paused'] }), downAt, seqChangedAt, lastSeq, lastPid, failure, theme, route };
 }
 
 export function encodeHandoff(handoff: ScreenHandoff): string {
