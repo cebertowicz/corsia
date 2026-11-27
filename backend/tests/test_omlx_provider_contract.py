@@ -126,7 +126,11 @@ def test_omlx_get_settings_never_returns_key_values(monkeypatch):
     ("https_proxy", " proxyuser:proxypass@proxy.example:3128 ", "proxy.example:3128"),
     ("http_proxy", "http://proxyuser:proxy@pass@proxy.example:3128", None),
     ("http_proxy", "http://a@b:proxypass@proxy.example", None),
-    ("endpoint", "https://hf.example/models/name@rev", "https://hf.example/models/name@rev"),
+    ("http_proxy", "http://proxyuser:pa/proxypass@proxy.example:3128", None),
+    ("http_proxy", "http://proxyuser:pa?proxypass@proxy.example:3128", None),
+    ("https_proxy", "proxyuser:pa#proxypass@proxy.example:3128", None),
+    ("endpoint", "https://hf.example/models/name@rev", None),
+    ("endpoint", "https://hf.example/models/name", "https://hf.example/models/name"),
     ("no_proxy", "localhost,127.0.0.1", "localhost,127.0.0.1"),
 ])
 def test_omlx_settings_url_sign_in_is_removed_or_value_omitted(key, raw, shown):
@@ -136,6 +140,18 @@ def test_omlx_settings_url_sign_in_is_removed_or_value_omitted(key, raw, shown):
     else:
         assert out == {"network": {key: shown}}
     assert "proxypass" not in repr(out)
+
+
+def test_omlx_settings_drop_key_fields_by_last_word_but_keep_counts():
+    raw = {
+        "admin_key": "proxypass", "secret_key": "proxypass", "access_key": "proxypass",
+        "master_key": "proxypass", "api_keys": ["proxypass"], "tokens": {"a": "proxypass"},
+        "auth.key": "proxypass", "Secrets": "proxypass",
+        "max_tokens": 32768, "api_key_set": True, "key_count": 2, "token_limit": 10, "monkey": "ok",
+    }
+    out = omlx_settings.display_safe(raw)
+    assert "proxypass" not in repr(out)
+    assert out == {"max_tokens": 32768, "api_key_set": True, "key_count": 2, "token_limit": 10, "monkey": "ok"}
 
 
 def test_omlx_get_settings_without_key_returns_empty_readonly(monkeypatch):

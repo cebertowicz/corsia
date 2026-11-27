@@ -22,7 +22,20 @@ from llm.providers.omlx_endpoints import (
 
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 _AUTHORITY_END_RE = re.compile(r"[/?#]")
+# A field whose last word is one of these holds a key value whenever that value is text:
+# admin_key, access_key, api_keys, tokens. Counts such as max_tokens are numbers and stay.
+_KEY_WORD_RE = re.compile(
+    r"(?:^|[-_.])(?:keys?|tokens?|secrets?|passwords?|passwd|credentials?)$", re.IGNORECASE,
+)
 _OMIT = object()
+
+
+def _holds_key(name: object, item: object) -> bool:
+    """Whether a settings field carries a key, token or password value."""
+    if is_credential_name(name):
+        return True
+    text_like = not isinstance(item, (bool, int, float)) and item is not None
+    return text_like and bool(_KEY_WORD_RE.search(str(name)))
 
 
 def _sub_key_label(entry: object) -> dict[str, Any]:
@@ -48,7 +61,8 @@ def _without_userinfo(key: str | None, value: str) -> object:
     authority = rest[:end.start()] if end else rest
     signs = authority.count("@")
     if signs == 0:
-        return value
+        # An '@' past the host part may close a password holding an unencoded '/', '?' or '#'.
+        return _OMIT if "@" in rest else value
     if signs > 1:
         return _OMIT
     return prefix + authority.split("@", 1)[1] + rest[len(authority):]
@@ -64,10 +78,10 @@ def display_safe(value: Any, key: str | None = None) -> Any:
     if isinstance(value, dict):
         safe: dict[str, Any] = {}
         for name, item in value.items():
-            if is_credential_name(name) or str(name).casefold() == "key":
-                continue
             if name == "sub_keys" and isinstance(item, list):
                 safe[name] = [_sub_key_label(entry) for entry in item]
+                continue
+            if _holds_key(name, item):
                 continue
             shown = display_safe(item, str(name))
             if shown is not _OMIT:
