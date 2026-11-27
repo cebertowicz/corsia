@@ -624,7 +624,7 @@ service_stop() {
     fi
     require_owned_service_definition || return 1
     if [ "$FORCE" = "false" ] \
-        && { is_backend_running 30 || [ -n "$(backend_pids)" ]; }; then
+        && { is_backend_running "$DRAIN_HEALTH_WINDOW_SECONDS" || [ -n "$(backend_pids)" ]; }; then
         require_loaded_service_owns_port || return 1
         # Draining is a courtesy with a bound; stopping is the guarantee. An
         # incomplete drain used to abort here, which left the operator with a
@@ -708,7 +708,7 @@ service_restart() {
         return 1
     fi
     if [ "$FORCE" = "false" ] \
-        && { is_backend_running 30 || [ -n "$(backend_pids)" ]; }; then
+        && { is_backend_running "$DRAIN_HEALTH_WINDOW_SECONDS" || [ -n "$(backend_pids)" ]; }; then
         # Same guarantee as stop: the drain is bounded courtesy, the bounce is
         # the promise. Aborting here left the old generation serving with no way
         # to replace it. Teardown below is bounded and launchd-owned, and the

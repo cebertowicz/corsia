@@ -3437,7 +3437,8 @@ restart_prepared
     return result, trace.read_text().splitlines()
 
 
-def test_update_waits_for_slow_health_probe_before_drain(tmp_path: Path) -> None:
+@pytest.mark.parametrize("app_mode", [False, True])
+def test_update_waits_for_slow_health_probe_before_drain(tmp_path: Path, app_mode: bool) -> None:
     class SlowHealthHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             time.sleep(4)
@@ -3459,6 +3460,8 @@ def test_update_waits_for_slow_health_probe_before_drain(tmp_path: Path) -> None
             """
 fail() { printf 'FAIL:%s\\n' "$*" >> "$TRACE"; }
 warn() { :; }
+ok() { :; }
+source scripts/corsia.d/app_mode.sh
 source scripts/corsia.d/runtime.sh
 SELF_CHECKOUT="$CHECKOUT"
 BACKEND_PORT="$PORT"
@@ -3467,9 +3470,21 @@ service_installed() { return 1; }
 require_port_served_by_this_checkout() { return 0; }
 drain_and_wait() { printf 'drain\\n' >> "$TRACE"; }
 bounce_server() { printf 'bounce\\n' >> "$TRACE"; }
-restart_prepared
+if [ "$APP_MODE" = true ]; then
+    service_is_loaded() { return 0; }
+    require_owned_service_definition() { return 0; }
+    require_loaded_service_owns_port() { return 0; }
+    service_loaded_pid() { :; }
+    service_domain() { printf domain; }
+    service_label() { printf label; }
+    launchctl() { printf 'bounce\\n' >> "$TRACE"; }
+    app_mode_service_restart
+else
+    restart_prepared
+fi
 """,
-            env={"CHECKOUT": str(tmp_path), "PORT": str(server.server_port), "TRACE": str(trace)},
+            env={"CHECKOUT": str(tmp_path), "PORT": str(server.server_port),
+                 "TRACE": str(trace), "APP_MODE": str(app_mode).lower()},
         )
     finally:
         server.shutdown()
