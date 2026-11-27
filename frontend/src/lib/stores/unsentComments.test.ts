@@ -296,19 +296,27 @@ describe('how often it tries', () => {
 		expect(wire.posts.map((post) => post.artifactId)).toEqual(['artifact-1', 'artifact-2']);
 	});
 
-	it('a return to the app within 10 s of a draft’s last try does not try it again', async () => {
-		const page = await open(), { key } = pressed(page);
-		const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+	it('a return after a failed try starts exactly one new try under the same id', async () => {
+		const page = await open(), { key, press } = pressed(page);
 		wire.answer.push(offline, offline);
 		await returnToApp(page);
-		now.mockReturnValue(1_009_000);
-		await returnToApp(page);
-		expect(wire.posts).toHaveLength(1);
-		now.mockReturnValue(1_011_000);
 		await returnToApp(page);
 		expect(wire.posts).toHaveLength(2);
+		expect(wire.posts.map(post => post.body.client_id)).toEqual([press.clientId, press.clientId]);
 		expect(page.drafts.keptCommentDrafts.get(key)?.send).toEqual(SEND);
-		now.mockRestore();
+		expect(page.queue.unsentComments.started(key)).toBe(true);
+	});
+
+	it('a return during an in-flight try does not start another', async () => {
+		const page = await open(), { key } = pressed(page);
+		let release!: () => void;
+		wire.answer.push(async () => { await new Promise<void>(resolve => { release = resolve; }); return offline(); });
+		page.queue.unsentComments.open(key);
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(wire.posts).toHaveLength(1);
+		release();
+		await page.queue.unsentComments.settled();
+		expect(wire.posts).toHaveLength(1);
 	});
 });
 
@@ -522,6 +530,19 @@ describe('a pressed chat comment or reply goes on its own', () => {
 		// The box keeps its whole line, the text with it.
 		expect(chatCommentDrafts.root('thread-1', 'm1', CHAT)?.error).toBe('The text this comment quotes isn’t in the chat, so this comment couldn’t be sent. Your text stays here to copy.');
 		threads.set([]);
+	});
+
+	it.each([
+		['a permanent local error', false],
+		['a transient connection error', true],
+	] as const)('first press with %s shows the right state', async (_name, retry) => {
+		const page = await open(), { chatCommentDrafts, chatPress } = await import('$lib/chatCommentDrafts.svelte');
+		const { CommentConnectionError } = await import('$lib/api/boundedRequest');
+		chatCommentDrafts.setRoot('thread-1', 'm1', CHAT, 'Keep this');
+		await chatCommentDrafts.postRoot('thread-1', 'm1', CHAT, 'Keep this', async () => { throw retry ? new CommentConnectionError() : new Error('unexpected local failure'); }, chatPress(CHAT));
+		const key = chatCommentDrafts.rootKey('thread-1', 'm1', CHAT);
+		expect(page.queue.unsentComments.sending(key)).toBe(retry);
+		expect(chatCommentDrafts.root('thread-1', 'm1', CHAT)?.error).toBe(retry ? undefined : 'Couldn’t send this comment. Try again.');
 	});
 
 	it('an edit after a press whose post failed for a reason that passes: no trigger sends, and only the edited text posts, under a fresh id', async () => {

@@ -13,6 +13,7 @@ import { createMentionSelection } from '$lib/components/comments/mentionSelectio
 import { CHAT_REPLY_SCOPE, chatDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 import type { ChatSend } from '$lib/stores/keptCommentDraftsStorage';
 import { placeOf, type KeptPlace } from '$lib/keptPlace';
+import { unsentOutcome } from '$lib/unsentCommentOutcome';
 
 /** `final`: the failure is one no press can get past (its chat is deleted), so the box offers no Retry. */
 type Status = { posting?: boolean; error?: string; final?: boolean };
@@ -106,7 +107,7 @@ async function post(key: string, text: string, noun: 'comment' | 'reply', send: 
 		delete status[key];
 		return true;
 	} catch (failure) {
-		const passes = !(failure instanceof CommentSendRefused) || failure.passes;
+		const passes = unsentOutcome(failure) === 'retry';
 		if (passes && keptCommentDrafts.get(key)?.send) {
 			delete status[key];
 			return false;

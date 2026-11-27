@@ -151,8 +151,7 @@ def kept_place(text: str, quote: str, *, prefix: str, suffix: str) -> tuple[int,
             if _sides(text, start, start + len(quote)) == (prefix, suffix)]
     if len(hits) != 1:
         return None
-    from16 = _u16(text[:hits[0]])
-    return from16, from16 + _u16(quote)
+    return span16(text, hits[0], quote)
 
 
 def reanchor_edited(

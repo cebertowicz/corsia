@@ -122,12 +122,11 @@ it('keeps a refused draft for its passage while another chat is showing', async 
 	expect(chatCommentDrafts.root('thread', 'm1', anchor)).toMatchObject({ text: 'keep this', error: 'The selected text changed.' });
 });
 
-// A failure nobody named may pass, so the pressed comment reads "Sending…" and goes again on its own; it names no failure.
-it('keeps the text with a failure nobody named, and reads Sending… for it', async () => {
+// An unclassified application failure is refused, keeping the text and showing the existing generic sentence.
+it('keeps the text and shows the refusal for a failure nobody named', async () => {
 	user.set({ id: 'person-1', name: 'person-1' });
 	setup(() => Promise.reject(new Error('socket closed'))); await openBox(); await post();
-	expect(host.querySelector('[role="alert"]')).toBeNull();
-	expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING);
+	expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t send this comment. Try again.');
 	expect(chatCommentDrafts.root('thread', 'm1', anchor)?.text).toBe('Keep my comment');
 });
 

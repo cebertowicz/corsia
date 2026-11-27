@@ -4,7 +4,6 @@
 // There is no timer: a try that fails for a reason that passes waits for the next of those, and one refused stops for good.
 // One post goes at a time across the app, so these never take the page's own connections from it.
 import { get } from 'svelte/store';
-import { SERVER_SAVE_MS } from '$lib/api/boundedRequest';
 import { user } from './auth';
 import { commentDraft } from './commentDraft';
 import { posting } from './commentPostTiming';
@@ -20,15 +19,13 @@ import { CHAT_REPLY_SCOPE } from './commentDraftKeys';
 
 /** What a pressed comment's box, or a pressed reply's line, reads while it goes on its own. */
 export const SENDING = 'Sending…';
-/** A return to the app tries a draft again only this long after its last try, so quick tab switching does not resend it. */
-export const RETURN_THROTTLE_MS = SERVER_SAVE_MS;
 
 /** The draft being posted now, if any: one at a time. */
 let current: string | null = null;
 /** The drafts the triggers so far asked for, in order; a draft asked for twice before its try is tried once. */
 const waiting: string[] = [];
-/** When each draft was last tried, for the return-to-app throttle. */
-const lastTry = new Map<string, number>();
+/** Drafts tried on this page, even after their attempt has ended. */
+const tried = new Set<string>();
 let pumping: Promise<void> | null = null;
 
 /**
@@ -95,7 +92,7 @@ async function attempt(key: string, again = false): Promise<void> {
 	const draft = keptCommentDrafts.get(key);
 	// A press of it in its box is out now: that post is its try.
 	if (!get(user) || !sendable(key, draft) || posting(draft.clientId)) return;
-	lastTry.set(key, Date.now());
+	tried.add(key);
 	try {
 		const sent = await sendUnsent(key, draft);
 		posted(key, sent.text, sent.taggedAgentIds);
@@ -118,12 +115,10 @@ async function pump(): Promise<void> {
 	pumping = null;
 }
 
-/** Ask for a try of each of `keys` still pressed; with `throttled`, not of one tried in the last RETURN_THROTTLE_MS. */
-function ask(keys: string[], throttled = false): void {
-	const now = Date.now();
+/** Ask for a try of each of `keys` still pressed. */
+function ask(keys: string[]): void {
 	for (const key of keys) {
 		if (key === current || waiting.includes(key) || !sendable(key, keptCommentDrafts.get(key))) continue;
-		if (throttled && now - (lastTry.get(key) ?? -Infinity) < RETURN_THROTTLE_MS) continue;
 		waiting.push(key);
 	}
 	if (waiting.length && !pumping) pumping = pump();
@@ -136,7 +131,7 @@ connectionState.subscribe((state) => {
 	connected = now;
 });
 if (typeof window !== 'undefined') {
-	const returned = () => { if (document.visibilityState === 'visible') ask(keptCommentDrafts.pressed(), true); };
+	const returned = () => { if (document.visibilityState === 'visible') ask(keptCommentDrafts.pressed()); };
 	document.addEventListener('visibilitychange', returned);
 	window.addEventListener('focus', returned);
 }
@@ -147,9 +142,9 @@ export const unsentComments = {
 	/** Its box reads "Sending…": it was pressed, and goes on its own until it posts, is refused or is edited. */
 	sending(key: string): boolean { return sendable(key, keptCommentDrafts.get(key)); },
 	/** A try of it was asked for or made on this page: its post may be out, so only the server's answer settles it. */
-	started(key: string): boolean { return key === current || waiting.includes(key) || lastTry.has(key); },
+	started(key: string): boolean { return key === current || waiting.includes(key) || tried.has(key); },
 	/** Tests only: every try asked for so far has ended. */
 	async settled(): Promise<void> { while (pumping) await pumping; },
 	/** Tests only: a fresh page. */
-	reset(): void { waiting.length = 0; lastTry.clear(); current = null; pumping = null; connected = false; },
+	reset(): void { waiting.length = 0; tried.clear(); current = null; pumping = null; connected = false; },
 };
