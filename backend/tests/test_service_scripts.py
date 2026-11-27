@@ -3435,12 +3435,12 @@ restart_prepared
 
 
 def test_update_retries_timed_out_health_probe_before_drain(tmp_path: Path) -> None:
-    result, trace = _run_update_health_probe(tmp_path, "28,28,0")
+    result, trace = _run_update_health_probe(tmp_path, "28,0")
 
     assert result.returncode == 0, result.stderr
-    assert sum(line.startswith("probe:") for line in trace) == 3
+    assert sum(line.startswith("probe:") for line in trace) == 2
     assert "drain" in trace
-    assert trace.index("drain") > 2
+    assert trace.index("drain") > 1
 
 
 def test_update_refuses_connection_failure_without_retry(tmp_path: Path) -> None:
@@ -3452,58 +3452,30 @@ def test_update_refuses_connection_failure_without_retry(tmp_path: Path) -> None
     assert any("drain ownership cannot be proven" in line for line in trace)
 
 
-def test_health_retry_window_is_shared_across_checks(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("after_first", "expected"), [(104, ["3", "26"]), (130, ["3"]), (131, ["3"])]
+)
+def test_health_retry_last_probe_respects_remaining_window(
+    tmp_path: Path, after_first: int, expected: list[str]
+) -> None:
     clock = tmp_path / "clock"
     trace = tmp_path / "trace"
-    clock.write_text("0")
+    clock.write_text("100")
     result = _run_bash(
         """
 source scripts/corsia.d/runtime.sh
-runtime_epoch_seconds() { command cat "$CLOCK"; }
-is_backend_running() {
-    local timeout="${1:-3}" now count
-    now=$(command cat "$CLOCK")
-    printf '%s\\n' "$timeout" >> "$TRACE"
-    count=$(wc -l < "$TRACE")
-    if [ "$count" -eq 2 ]; then
-        printf '%s' "$((now + 1))" > "$CLOCK"
-        return 0
-    fi
-    printf '%s' "$((now + timeout))" > "$CLOCK"
-    return 28
-}
-backend_responds_for_drain || exit 1
-backend_responds_for_drain && exit 2
-backend_responds_for_drain && exit 3
-exit 0
-""",
-        env={"CLOCK": str(clock), "TRACE": str(trace)},
-    )
-    assert result.returncode == 0, result.stderr
-    assert trace.read_text().splitlines() == ["3", "10", "3", "10", "10", "3", "3"]
-    assert clock.read_text() == "33"
-
-
-def test_health_retry_last_probe_respects_remaining_window(tmp_path: Path) -> None:
-    clock = tmp_path / "clock"
-    trace = tmp_path / "trace"
-    clock.write_text("29")
-    result = _run_bash(
-        """
-source scripts/corsia.d/runtime.sh
-_corsia_health_retry_deadline=30
 runtime_epoch_seconds() { command cat "$CLOCK"; }
 is_backend_running() {
     printf '%s\\n' "$1" >> "$TRACE"
-    printf '30' > "$CLOCK"
+    printf '%s' "$AFTER_FIRST" > "$CLOCK"
     return 28
 }
 backend_responds_for_drain && exit 1
 """,
-        env={"CLOCK": str(clock), "TRACE": str(trace)},
+        env={"CLOCK": str(clock), "TRACE": str(trace), "AFTER_FIRST": str(after_first)},
     )
     assert result.returncode == 28, result.stderr
-    assert trace.read_text().splitlines() == ["1"]
+    assert trace.read_text().splitlines() == expected
 
 
 def test_failed_drain_still_completes_the_update(

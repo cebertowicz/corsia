@@ -74,35 +74,16 @@ else:
 
 is_backend_running() { curl -sf --max-time "${1:-3}" "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
-# Share the approved retry window across health checks in this command.
 backend_responds_for_drain() {
-    local BACKEND_HEALTH_RETRY_WINDOW_SECONDS=30 started now remaining timeout status
+    # The window was decided for this fix and is shorter than the 60-second drain cap.
+    local BACKEND_HEALTH_RETRY_WINDOW_SECONDS=30 started now remaining status
     started="$(runtime_epoch_seconds)"
-    timeout=3
-    if [ -n "${_corsia_health_retry_deadline:-}" ]; then
-        remaining=$((_corsia_health_retry_deadline - started))
-        if [ "$remaining" -gt 0 ] && [ "$remaining" -lt "$timeout" ]; then
-            timeout="$remaining"
-        fi
-    fi
-    if is_backend_running "$timeout"; then return 0; else status=$?; fi
+    if is_backend_running 3; then return 0; else status=$?; fi
     [ "$status" -eq 28 ] || return "$status"
-    # Share one deadline across checks in this command, starting at the first
-    # timed-out probe. A later check still gets its ordinary three-second probe.
-    if [ -z "${_corsia_health_retry_deadline:-}" ]; then
-        _corsia_health_retry_deadline=$((started + BACKEND_HEALTH_RETRY_WINDOW_SECONDS))
-    fi
-    while :; do
-        now="$(runtime_epoch_seconds)"
-        remaining=$((_corsia_health_retry_deadline - now))
-        [ "$remaining" -gt 0 ] || return 28
-        # A ten-second probe accommodates a busy event loop while leaving room
-        # for retries within the shared window and the existing drain cap.
-        timeout=10
-        [ "$remaining" -ge "$timeout" ] || timeout="$remaining"
-        if is_backend_running "$timeout"; then return 0; else status=$?; fi
-        [ "$status" -eq 28 ] || return "$status"
-    done
+    now="$(runtime_epoch_seconds)"
+    remaining=$((started + BACKEND_HEALTH_RETRY_WINDOW_SECONDS - now))
+    [ "$remaining" -gt 0 ] || return 28
+    is_backend_running "$remaining"
 }
 
 # A healthy backend must publish readiness within one minute of its last visible
