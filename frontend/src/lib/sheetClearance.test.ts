@@ -230,6 +230,16 @@ describe('holdSheetHeight', () => {
 		expect(held.style.getPropertyValue('--drawer-text-cap')).toBe('652px');
 	});
 
+	it('holds an opted-in sheet without a text cap, but not after the reader pulls it up', () => {
+		const panel = sheet(852, 443);
+		panel.setAttribute('data-keeps-height', '');
+		holdSheetHeight(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('443px');
+		liftSheetCap(panel);
+		holdSheetHeight(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+
 	it('leaves a sheet with no cap, and a sheet the reader pulled up, as they are', () => {
 		const bare = sheet(852, 443);
 		holdSheetHeight(bare);

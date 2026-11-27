@@ -133,6 +133,12 @@
 	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : surfaceState?.kind === 'thread' && cardMode() === 'sheet' ? draftSheet : null, surfaceState?.kind === 'draft' ? onRevealDraft : onRevealCard && ((opening) => onRevealCard(opening, draftSheet))));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
+	$effect(() => {
+		const panel = draftSheet;
+		if (!panel) return;
+		panel.toggleAttribute('data-keeps-height', isImage && sheet.state?.kind === 'thread');
+		return () => panel.removeAttribute('data-keeps-height');
+	});
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
 	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
@@ -223,7 +229,7 @@
 	function escapeColumn() { if (!margin) { closeDrawer(); return; } onRelease?.(); restoreFocus(); }
 	/** Agree keeps the thread sheet's height before adding its line, so the change scrolls inside it as when earlier replies are shown. */
 	function agree(id: string, agreed: boolean) {
-		const card = !isImage && sheet.state?.kind === 'thread' && agreed && draftSheet?.style.getPropertyValue('--drawer-text-cap') && !sheetRaised(draftSheet)
+		const card = sheet.state?.kind === 'thread' && agreed && (draftSheet?.style.getPropertyValue('--drawer-text-cap') || draftSheet?.hasAttribute('data-keeps-height')) && !sheetRaised(draftSheet)
 			? [...(draftSheet?.querySelectorAll<HTMLElement>('[data-thread-id]') ?? [])].find((item) => item.dataset.threadId === id)
 			: undefined;
 		const field = card?.querySelector<HTMLElement>('.ct-input');

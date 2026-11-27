@@ -19,7 +19,7 @@ const target = { instanceId: 'tab-1', path: 'notes.md', name: 'Notes', projectId
 const comment = { id: 'comment-1', anchor: 'some text', author: 'agent-1', authorKind: 'agent' as const, text: 'Is this ring confirmed?', at: 'now', resolved: false, replies: [], replyGoesTo: [{ id: 'agent-1', name: 'Reviewer' }] };
 const SHEET_HEIGHT = 410, CAP = 734;
 
-function openThreadSheet(onAgree = vi.fn()) {
+function openThreadSheet(onAgree = vi.fn(), image = false) {
 	host = document.body.appendChild(document.createElement('div'));
 	const onResolve = vi.fn();
 	component = mount(DocCommentSurface, {
@@ -27,6 +27,7 @@ function openThreadSheet(onAgree = vi.fn()) {
 		props: {
 			state: { kind: 'thread', id: comment.id }, anchor: document.createElement('button'), narrow: true, comments: [comment], focusedId: null, draft: null,
 			onClose: vi.fn(), restoreFocus: vi.fn(), onFocus: vi.fn(), onSubmit: vi.fn(), onReply: vi.fn(), onResolve, onAgree, target, artifactId: 'artifact-1',
+			image: image ? { src: 'image.png', colorOf: () => 'red' } : null,
 		},
 	});
 	flushSync();
@@ -50,6 +51,17 @@ describe('the thread sheet keeps its height when Agree is pressed', () => {
 		const { panel, onAgree } = openThreadSheet();
 		document.querySelector<HTMLButtonElement>('button[title="Agree"]')!.click();
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe(`${SHEET_HEIGHT}px`);
+		expect(onAgree).toHaveBeenCalledWith(comment.id, true);
+	});
+
+	it('holds an image thread and preserves its reply without a text cap', () => {
+		const arm = vi.spyOn(keepInView, 'preserveVisibleWhileGrowing').mockReturnValue(() => {});
+		const { panel, onAgree } = openThreadSheet(vi.fn(), true);
+		panel.style.removeProperty('--drawer-text-cap');
+		expect(panel.hasAttribute('data-keeps-height')).toBe(true);
+		document.querySelector<HTMLButtonElement>('button[title="Agree"]')!.click();
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe(`${SHEET_HEIGHT}px`);
+		expect(arm).toHaveBeenCalledOnce();
 		expect(onAgree).toHaveBeenCalledWith(comment.id, true);
 	});
 

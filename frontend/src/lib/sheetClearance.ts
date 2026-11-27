@@ -25,13 +25,12 @@ export function capSheetAboveText(panel: HTMLElement, text: { height: number; re
 const heightKept = new WeakMap<HTMLElement, number>();
 
 /**
- * The reader unfolded earlier replies in a capped sheet: it keeps the height it has and the longer list scrolls inside it, so neither the
- * sheet nor the page moves. Called in the press itself, before the list grows; the sheet's height transition is off for that frame so it
- * does not swell towards its cap and settle back. A sheet with no cap, or one the reader pulled up, is left as it is. Pulling the grabber
- * up lets go of the hold (`liftSheetCap`).
+ * A capped sheet, or a sheet explicitly marked to keep its height, holds its current height when content grows so the content scrolls
+ * inside it. Called in the press itself, before growth; its height transition is off for that frame to prevent swelling. Other uncapped
+ * sheets and sheets the reader pulled up are left as they are. Pulling the grabber up lets go of the hold (`liftSheetCap`).
  */
 export function holdSheetHeight(panel: HTMLElement | null): void {
-	if (!panel || raised.has(panel) || heightKept.has(panel) || !panel.style.getPropertyValue('--drawer-text-cap')) return;
+	if (!panel || raised.has(panel) || heightKept.has(panel) || (!panel.style.getPropertyValue('--drawer-text-cap') && !panel.hasAttribute('data-keeps-height'))) return;
 	const cap = panel.getBoundingClientRect().height - (Number.parseFloat(panel.style.getPropertyValue('--drawer-pull')) || 0);
 	heightKept.set(panel, cap);
 	panel.style.setProperty('--drawer-text-cap', `${cap}px`);
