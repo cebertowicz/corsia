@@ -96,6 +96,8 @@
 	const openItem = $derived([...tasks, ...notifications].find((item) => item.key === openKey) ?? null);
 	const workspace = $derived($threadWorkspaces[workspaceKey] ?? emptyWorkspace());
 	const activeTab = $derived(getActiveTab(workspace));
+	// The phone's tab sheet only makes sense over open tabs, as in a thread: closing the last one closes it.
+	$effect(() => { if (workspace.tabs.length === 0) phoneTabsOpen = false; });
 	/** The open item has left the server's lists and is kept where it was while the person stays on it. */
 	const openGone = $derived(!!kept && kept.key === openKey
 		&& ![...(store.queue?.items ?? []), ...(store.queue?.notifications.items ?? [])].some((item) => item.key === openKey));

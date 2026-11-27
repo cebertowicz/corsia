@@ -1,8 +1,7 @@
 """User-attention queue, review, and lifecycle HTTP endpoints.
 
-``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
-semantics remain covered by backend tests while #921 decides whether raised rows
-receive a typed surface or stop being raised.
+``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle semantics remain
+covered by backend tests while #921 decides whether raised rows receive a typed surface or stop being raised.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ from infra.db_async import run_in_db, run_read
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
 from api.attention_notifications import router as notifications_router
+from api.operator_annotations import mark_activity_browser_steps
 from doceditor import review_bar
 from plans import public
 from registry import artifact_record as AR
@@ -225,7 +225,7 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     notifications: list[dict] = []
     if view == 'activity':
         from doceditor.activity_reply_rows import document_rows
-        projected = public.activity_plan_rows(db, user_id, annotated)
+        projected = mark_activity_browser_steps(db, public.activity_plan_rows(db, user_id, annotated))
         documents = document_rows(db, user_id)
         rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
         # A reviewed document's replies ride on its review row; Approve ends the review and

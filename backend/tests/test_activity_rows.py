@@ -64,8 +64,26 @@ def test_person_task_descriptions_are_in_activity_rows(isolated_db):
         details = {row['detail']['node_id']: row['detail'] for row in projection.rows(db, 'owner-token', [])
                    if row['kind'] == 'task'}
         assert details[browser.id]['description'] == 'Enter your password.'
-        assert details[browser.id]['browser_thread_id'] == 'owner'
         assert details[ordinary.id]['description'] == 'Follow these instructions.'
+    finally:
+        db.close()
+
+
+def test_activity_rows_name_the_browser_of_a_shared_browser_step(isolated_db):
+    """The Activity queue read marks the step a shared browser opened, as the plan read does; nothing else."""
+    from api.attention import activity_lists
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        with write_transaction(db, scope='browser_rows') as conn:
+            plan = service.ensure_plan('thread', 'owner', db=conn)
+            browser = service.add_node(plan.id, kind='task', title='Browser step', acceptance_criteria='Done',
+                                       assignee='user', actor_id=None, provenance='browser.person_step', db=conn)
+            ordinary = service.add_node(plan.id, kind='task', title='Ordinary task', acceptance_criteria='Done',
+                                        assignee='user', actor_id=None, provenance='test', db=conn)
+        tasks, _, _, _ = activity_lists(db, 'owner-token', view='activity')
+        details = {row['detail']['node_id']: row['detail'] for row in tasks if row['kind'] == 'task'}
+        assert details[browser.id]['browser_thread_id'] == 'owner'
         assert 'browser_thread_id' not in details[ordinary.id]
     finally:
         db.close()

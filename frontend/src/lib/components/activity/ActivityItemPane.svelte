@@ -9,9 +9,11 @@
 	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
 	import ActivityDocumentUnavailable from './ActivityDocumentUnavailable.svelte';
+	import ActivityDocumentBar from './ActivityDocumentBar.svelte';
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
+	import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 	import { connectionState } from '$lib/stores/connection';
 	import { unreadReplyCount } from '$lib/docUnread';
 	import type { HeldVerb } from '$lib/api/heldReplies';
@@ -62,11 +64,10 @@
 	const sourceThread = $derived(item.source.thread_id);
 	const browserThread = untrack(() => task?.browser_thread_id ?? null);
 	let browserEnded = $state(false);
-	$effect(() => {
-		if (!browserThread || !showBrowser) return;
-		browserEnded = false;
-		openActivityBrowser(workspaceKey, browserThread);
-	});
+	$effect(() => { if (browserThread && showBrowser) { browserEnded = false; openActivityBrowser(workspaceKey, browserThread); } });
+	// The browser shows while its tab is open here; closing the tab (tab strip or phone sheet) returns to the task.
+	const browserShown = $derived(!!browserThread && showBrowser && !browserEnded
+		&& ($threadWorkspaces[workspaceKey]?.tabs ?? []).some((tab) => tab.kind === 'browser' && tab.threadId === browserThread));
 	// The open document keeps its original lookup context until the person moves on.
 	const documentThread = untrack(() => item.source.thread_id);
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
@@ -215,16 +216,10 @@
 {#snippet documentNotice()}
 	{@render itemNotice()}
 	{#if document}
-		<section class="doc-bar" aria-label="Replies to your comments" aria-busy={sending}>
-			<strong class="doc-who">{agentsLabel(document.agents)}</strong>
-			<div class="doc-line">
-				<span class="doc-at" role="status">{barLabel}</span>
-				<span class="doc-done">
-					{#if !repliesRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void markDocumentRead()}>{labelFor('done', 'Done')}</Button>{/if}
-				</span>
-			</div>
-			{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{/if}
-		</section>
+		<ActivityDocumentBar who={agentsLabel(document.agents)} label={barLabel} busy={sending}>
+			{#snippet action()}{#if !repliesRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void markDocumentRead()}>{labelFor('done', 'Done')}</Button>{/if}{/snippet}
+			{#snippet problem()}{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{/if}{/snippet}
+		</ActivityDocumentBar>
 	{/if}
 {/snippet}
 
@@ -234,8 +229,32 @@
 	{:else if held?.error}<!-- Why the last Send didn't go, shown here until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
 {/snippet}
 
-{#if browserThread && showBrowser && !browserEnded}
-	<div class="doc-pane"><ArtifactLeaf threadId={workspaceKey} collapsible={false} mode={phone ? 'compact' : 'expanded'} onNoBrowser={() => { browserEnded = true; }} /></div>
+<!-- The task's instructions and its Done: one set, whether the task shows alone or beside its browser. -->
+{#snippet taskInstructions(description: string)}
+	{@const steps = taskSteps(description)}
+	{#if steps.kind === 'text'}<p class="body pre">{steps.text}</p>
+	{:else}<svelte:element this={steps.kind === 'numbered' ? 'ol' : 'ul'} class="body steps" start={steps.kind === 'numbered' ? steps.start : undefined}>{#each steps.items as step, i (i)}<li>{step}</li>{/each}</svelte:element>{/if}
+{/snippet}
+
+{#snippet taskBand(docked: boolean)}
+	<ReviewBarShell view="ask" {who} full="A step only you can do" askLabel="Task for you" {docked} busy={sending}>
+		{#snippet actions()}
+			<div class="rb-actions">
+				<Button size="sm" variant="primary" loading={sending} onclick={() => void markTaskDone()}>{labelFor('done', 'Done')}</Button>
+			</div>
+			{@render failureLine()}
+		{/snippet}
+	</ReviewBarShell>
+{/snippet}
+
+<!-- Beside the browser, in the document's notice slot: the item's notices, then the task's instructions and band. -->
+{#snippet taskNotice()}
+	{@render itemNotice()}
+	{#if task}<section class="task-bar" aria-label="Your step">{#if task.description}{@render taskInstructions(task.description)}{/if}{@render taskBand(false)}</section>{/if}
+{/snippet}
+
+{#if browserShown}
+	<div class="doc-pane"><ArtifactLeaf threadId={workspaceKey} notice={taskNotice} collapsible={false} mode={phone ? 'compact' : 'expanded'} onNoBrowser={() => { browserEnded = true; }} /></div>
 {:else if doc}
 	{#if lookupFailed}
 		<ActivityDocumentUnavailable notice={noLonger || stale ? itemNotice : undefined} label={item.title} failed={lookup?.status === 'failed'} {sourceThread} threadLabel={item.source.thread_label} {onOpenChat} />
@@ -297,20 +316,10 @@
 	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Task">
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
-			{#if task.description}{@const steps = taskSteps(task.description)}
-				{#if steps.kind === 'text'}<p class="body pre">{steps.text}</p>
-				{:else}<svelte:element this={steps.kind === 'numbered' ? 'ol' : 'ul'} class="body steps" start={steps.kind === 'numbered' ? steps.start : undefined}>{#each steps.items as step, i (i)}<li>{step}</li>{/each}</svelte:element>{/if}
-			{/if}
+			{#if task.description}{@render taskInstructions(task.description)}{/if}
 		{/snippet}
 		{#snippet band()}
-			<ReviewBarShell view="ask" {who} full="A step only you can do" askLabel="Task for you" docked busy={sending}>
-				{#snippet actions()}
-					<div class="rb-actions">
-						<Button size="sm" variant="primary" loading={sending} onclick={() => void markTaskDone()}>{labelFor('done', 'Done')}</Button>
-					</div>
-					{@render failureLine()}
-				{/snippet}
-			</ReviewBarShell>
+			{@render taskBand(true)}
 		{/snippet}
 	</ActivityKindPanel>
 {:else if held}
@@ -350,19 +359,9 @@
 	/* The document bar is in the leaf's notice slot, just below its tab strip. */
 	/* The document's bar: who replied, then where the person is in the replies with Done on the same line. Done's
 	   place keeps its height once the replies are read, so the document does not jump. */
-	.doc-bar {
-		display: flex; flex-direction: column; gap: var(--space-1);
-		padding: var(--space-3) var(--space-5);
-		border-bottom: 1px solid var(--border-subtle);
-		background: var(--bg-primary); font-size: var(--text-footnote); color: var(--text-secondary);
-	}
-	.doc-who { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
-	.doc-line { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); }
-	.doc-at { flex: 1; min-width: 0; font-size: var(--text-subhead); }
-	.doc-done { flex: none; display: inline-flex; }
-	:global(.activity.phone) .doc-bar { padding-inline: var(--space-3); }
-	:global(.activity.phone) .doc-done :global(.btn) { min-height: var(--touch-target); }
-	:global(.activity.phone) .doc-line { min-height: var(--touch-target); }
+	.task-bar { padding: var(--space-3) var(--space-5) 0; background: var(--bg-primary); }
+	:global(.activity.phone) .task-bar { padding-inline: var(--space-3); }
+	.task-bar .body { margin: 0 0 var(--space-3); }
 	.dh { margin: 0 0 var(--space-3); font-size: var(--text-title3); line-height: 1.35; color: var(--text-primary); }
 	/* Every kind's body reads at the document body's size and spacing (cm/theme.ts: 15px = --text-body; --text-input on a phone). */
 	.dctx, .body, blockquote, .opt { font-size: var(--text-body); line-height: var(--lh-relaxed); }

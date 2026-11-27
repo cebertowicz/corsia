@@ -36,11 +36,12 @@ vi.mock('$lib/artifactTabClose', async (original) => {
 import ActivityView from './ActivityView.svelte';
 import shellSource from '$lib/components/ReviewBarShell.svelte?raw';
 import paneSource from './ActivityItemPane.svelte?raw';
+import documentBarSource from './ActivityDocumentBar.svelte?raw';
 import listSource from './ActivityList.svelte?raw';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 import { activityOpenRequest, openActivity } from '$lib/stores/activityOpen';
 import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
-import { consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
+import { closeArtifactTab, consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { connectionState } from '$lib/stores/connection';
 import { token, user } from '$lib/stores/auth';
 
@@ -122,7 +123,7 @@ describe('Activity browser steps', () => {
 		const browser: ActivityQueueItem = {
 			...ordinary,
 			key: 'task:browser', external_id: 'browser', title: 'Continue in browser',
-			detail: { plan_id: 'p', node_id: 'browser', revision: 1, browser_thread_id: 'browser-owner' },
+			detail: { plan_id: 'p', node_id: 'browser', revision: 1, description: 'Enter your password.', browser_thread_id: 'browser-owner' },
 		};
 		served = [ordinary, browser];
 		render();
@@ -132,6 +133,51 @@ describe('Activity browser steps', () => {
 		rows()[1].click();
 		await settle();
 		expect(get(threadWorkspaces)[key]?.tabs.some((tab) => tab.kind === 'browser' && tab.threadId === 'browser-owner')).toBe(true);
+	});
+
+	it('keeps the step’s instructions and Done beside its browser, and returns to the task when the tab closes', async () => {
+		const ordinary = served.find((item) => item.kind === 'task')!;
+		served = [{
+			...ordinary,
+			key: 'task:browser', external_id: 'browser', title: 'Continue in browser',
+			detail: { plan_id: 'p', node_id: 'browser', revision: 1, description: 'Enter your password.', browser_thread_id: 'browser-owner' },
+		}];
+		render();
+		await settle();
+		rows()[0].click();
+		await settle();
+		const key = activityWorkspaceKey('project-1');
+		const tab = get(threadWorkspaces)[key]!.tabs.find((entry) => entry.kind === 'browser')!;
+		expect(pane().textContent).toContain('Enter your password.');
+		expect(buttonNamed('Done')).toBeDefined();
+		closeArtifactTab(key, tab.instanceId);
+		await settle();
+		expect(get(threadWorkspaces)[key]?.tabs.some((entry) => entry.kind === 'browser')).not.toBe(true);
+		expect(pane().textContent).toContain('Enter your password.');
+		expect(buttonNamed('Done')).toBeDefined();
+	});
+
+	it('closes the phone’s open-items sheet when its last tab closes, as a thread does', async () => {
+		mobile.store!.set(true);
+		const ordinary = served.find((item) => item.kind === 'task')!;
+		served = [{
+			...ordinary,
+			key: 'task:browser', external_id: 'browser', title: 'Continue in browser',
+			detail: { plan_id: 'p', node_id: 'browser', revision: 1, description: 'Enter your password.', browser_thread_id: 'browser-owner' },
+		}];
+		render();
+		await settle();
+		rows()[0].click();
+		await settle();
+		const key = activityWorkspaceKey('project-1');
+		const tab = get(threadWorkspaces)[key]!.tabs.find((entry) => entry.kind === 'browser')!;
+		get(activityPhoneItem)!.artifact!.onTabs();
+		await settle();
+		expect(get(activityPhoneItem)!.tabsOpen).toBe(true);
+		closeArtifactTab(key, tab.instanceId);
+		await settle();
+		expect(get(activityPhoneItem)!.tabsOpen).toBe(false);
+		expect(pane().textContent).toContain('Enter your password.');
 	});
 });
 
@@ -1424,7 +1470,7 @@ describe('Activity on a phone', () => {
 	});
 
 	it('keeps an opened document’s Done at least 44 px high on a phone, on the bar’s own line', () => {
-		expect(paneSource).toContain(':global(.activity.phone) .doc-done :global(.btn) { min-height: var(--touch-target); }');
-		expect(paneSource).toMatch(/<div class="doc-line">\s*<span class="doc-at"[^>]*>\{barLabel\}<\/span>\s*<span class="doc-done">/);
+		expect(documentBarSource).toContain(':global(.activity.phone) .doc-done :global(.btn) { min-height: var(--touch-target); }');
+		expect(documentBarSource).toMatch(/<div class="doc-line">\s*<span class="doc-at"[^>]*>\{label\}<\/span>\s*<span class="doc-done">/);
 	});
 });
