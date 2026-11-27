@@ -1,13 +1,15 @@
 <script lang="ts">
-	import { setContext, untrack } from 'svelte';
+	import { getContext, setContext, untrack } from 'svelte';
 	import { REVIEW_ANSWERED, REVIEW_REPLIES } from '$lib/reviewBarState.svelte';
 	import { openActivityDocument } from './activityDocumentOpen';
 	import { Button } from '$lib/components/ui';
-	import { keepInView } from '$lib/actions/keepInView';
 	import ErrorReference from '$lib/components/ui/ErrorReference.svelte';
+	import { isMobile } from '$lib/stores/viewport';
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
-	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
+	import ReviewBarShell, { ASKER_AT_REST, ASKER_CHAT, ASKER_WHO } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
+	import AskerTop from './AskerTop.svelte';
+	import DecisionOptions from './DecisionOptions.svelte';
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
@@ -17,11 +19,11 @@
 	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
 	import { emitProductEvent } from '$lib/product_events';
 	import {
-		agentsLabel, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps,
+		ageLabel, agentsLabel, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps,
 		type DecisionDraft, type DocumentLookup,
 	} from './activityItems';
 	import {
-		answerPressed, decideHeldPress, markTaskDonePress, SUCCEEDED, type PressAction, type Pressed,
+		answerPressed, closeTaskPress, decideHeldPress, markTaskDonePress, SUCCEEDED, type PressAction, type Pressed,
 	} from './activityPress';
 
 	/**
@@ -49,6 +51,7 @@
 
 	// Every band here, the document's own review band included, names the agent asking at rest.
 	setContext(ASKER_AT_REST, true);
+	setContext(ASKER_WHO, { get name() { return item.source.thread_label; }, get id() { return item.source.thread_id ?? item.key; } });
 	setContext(REVIEW_ANSWERED, () => void onActed());
 
 	const decision = $derived(decisionOf(item));
@@ -63,7 +66,9 @@
 
 	let sending = $state(false);
 	const offline = $derived($connectionState !== 'connected');
-	let failure = $state<{ text: string; reference?: string; retry: PressAction | null; final: boolean } | null>(null);
+	let failure = $state<{ text: string; reference?: string; retry: PressAction | null; final: boolean; quiet?: boolean } | null>(null);
+	const desk = $derived(!$isMobile);
+	const openChat = getContext<((threadId: string) => void) | undefined>(ASKER_CHAT);
 	/** The decision answer's retry key: kept across Try again so a retry can't answer twice. */
 	let answerMutation: string | null = null;
 
@@ -71,7 +76,6 @@
 	let selected = $state<string | null>(untrack(() => draft?.selected ?? null));
 	let picked = $state<string[]>(untrack(() => [...(draft?.picked ?? [])]));
 	let other = $state(untrack(() => draft?.other ?? ''));
-	let fieldFocused = $state(false);
 	const rationaleOptionId = $derived(decision?.options.find((option) =>
 		Array.isArray(decision.recommendation) ? decision.recommendation.includes(option.id) : decision.recommendation === option.id,
 	)?.id ?? null);
@@ -114,7 +118,7 @@
 				return;
 			}
 			if (pressed.outcome === 'refused') {
-				if (pressed.text) failure = { text: pressed.text, retry: null, final: pressed.final ?? false };
+				if (pressed.text) failure = { text: pressed.text, retry: null, final: pressed.final ?? false, quiet: pressed.reason === 'gone' };
 				if (pressed.final) onKeep();
 			}
 			await onActed();
@@ -144,14 +148,10 @@
 		});
 	}
 
-	function togglePicked(id: string) {
-		picked = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
-		saveDraft();
-	}
-
 	const decide = (verb: HeldVerb) => verb === 'approve'
 		? press('send', 'send this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED))
 		: press('dont_send', 'decline this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED));
+	const wontDo = () => press('wont_do', 'mark this task won’t do', async () => (task ? closeTaskPress(task) : SUCCEEDED));
 	const markTaskDone = () => press('done', 'mark this task done', async () => (task ? markTaskDonePress(task) : SUCCEEDED));
 	/** Done marks the document read up to the latest reply its row showed; one that lands after stays unread. */
 	function markDocumentRead() {
@@ -191,6 +191,10 @@
 	const labelFor = (action: PressAction, label: string) => (failure?.retry === action ? 'Try again' : label);
 	/** An item the server has let go can't be acted on again. */
 	const settled = $derived(failure?.final ?? false);
+	const ago = $derived.by(() => {
+		const age = ageLabel(item.raised_at);
+		return age === 'yesterday' || age === 'just now' || age === '' ? age : `${age} ago`;
+	});
 	const lookupFailed = $derived(lookup?.status === 'missing' || lookup?.status === 'failed');
 </script>
 
@@ -215,9 +219,16 @@
 	{/if}
 {/snippet}
 
+{#snippet askerTop(status: string)}
+	{#if desk && openChat}<AskerTop {who} {status} {openChat} />{/if}
+{/snippet}
+{#snippet decisionNotice()}{@render itemNotice()}{@render askerTop('Waiting for your answer')}{/snippet}
+{#snippet taskNotice()}{@render itemNotice()}{@render askerTop('Task for you')}{/snippet}
+{#snippet heldNotice()}{@render itemNotice()}{@render askerTop('Waiting for you to send it')}{/snippet}
 {#snippet failureLine()}
 	<!-- One flex item, so the reference sits under its line on the band's wrapping row, not beside the buttons. -->
-	{#if failure}<div class="act-failure-row"><p class="act-failure" role="alert">{failure.text}</p>{#if failure.reference}<ErrorReference reference={failure.reference} />{/if}</div>
+	{#if failure?.quiet}<div class="act-failure-row"><p class="offline-notice" role="status">{failure.text}</p></div>
+	{:else if failure}<div class="act-failure-row"><p class="act-failure" role="alert">{failure.text}</p>{#if failure.reference}<ErrorReference reference={failure.reference} />{/if}</div>
 	{:else if held?.error}<!-- Why the last Send didn't go, shown here until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
 {/snippet}
 
@@ -246,90 +257,80 @@
 		</div>
 	{/if}
 {:else if decision}
-	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Decision">
+	{#snippet decisionActions()}
+		<div class="rb-actions">
+			<Button size="md" variant="primary" loading={sending} disabled={!answerReady || settled || offline} onclick={() => void answer(decision)}>{labelFor('answer', 'Answer')}</Button>
+		</div>
+		{@render failureLine()}
+		{#if offline}<p class="act-failure-row offline-notice" role="status">Answering is paused until this reconnects.</p>{/if}
+	{/snippet}
+	<ActivityKindPanel notice={desk && openChat ? decisionNotice : noLonger || stale ? itemNotice : undefined} label="Decision" gutter>
 		{#snippet body()}
 			<h1 class="dh">{decision.title}</h1>
-			{#if !decision.source.parent_reviewed}<p class="dctx">Raised directly — no parent review.</p>{/if}
+			{#if ago}<p class="ago">{ago}</p>{/if}
 			{#if decision.context}<p class="dctx">{decision.context}</p>{/if}
 			{#if decision.tradeoff}<p class="dctx">{decision.tradeoff}</p>{/if}
 			{#if !rationaleOptionId && decision.rationale}<dl class="decision-reason"><div><dt>Why</dt><dd>{decision.rationale}</dd></div></dl>{/if}
-			<fieldset class="options">
-				<legend class="sr-only">{isPickAny(decision) ? 'Choose any' : 'Choose one'}</legend>
-				{#each decision.options as option (option.id)}
-					{@const recommended = Array.isArray(decision.recommendation) ? decision.recommendation.includes(option.id) : decision.recommendation === option.id}
-					{@const rationaleId = option.id === rationaleOptionId && decision.rationale ? `decision-${decision.id}-${option.id}-rationale` : undefined}
-					<label class="opt">
-						{#if isPickAny(decision)}
-							<input type="checkbox" checked={picked.includes(option.id)} aria-describedby={rationaleId} onchange={() => togglePicked(option.id)} disabled={sending || offline} />
-						{:else}
-							<input type="radio" name="decision-{decision.id}" value={option.id} checked={selected === option.id} aria-describedby={rationaleId} onchange={() => { selected = option.id; saveDraft(); }} disabled={sending || offline} />
-						{/if}
-						<span><b>{option.label}</b>{#if recommended} <em>Recommended</em>{/if}{#if option.detail}<span class="opt-detail">{option.detail}</span>{/if}{#if rationaleId}<span class="option-rationale" id={rationaleId}><span>Why</span>{decision.rationale}</span>{/if}</span>
-					</label>
-				{/each}
-				{#if decision.other_enabled && !isPickAny(decision)}
-					<label class="opt">
-						<input type="radio" name="decision-{decision.id}" value={OTHER_OPTION_ID} checked={selected === OTHER_OPTION_ID} onchange={() => { selected = OTHER_OPTION_ID; saveDraft(); }} disabled={sending || offline} />
-						<span><b>Something else</b></span>
-					</label>
-				{/if}
-				{#if decision.other_enabled && (selected === OTHER_OPTION_ID || isPickAny(decision))}
-					<textarea class="other" rows="3" use:keepInView={{ enabled: fieldFocused }} onfocus={() => { fieldFocused = true; }} onblur={() => { fieldFocused = false; }} bind:value={other} oninput={(event) => { other = event.currentTarget.value; saveDraft(); }} disabled={sending || offline}
-						placeholder={isPickAny(decision) ? 'Add a note (optional)' : 'Say what you want instead'}
-						aria-label={isPickAny(decision) ? 'Note' : 'Your answer'}></textarea>
-				{/if}
-			</fieldset>
+			<DecisionOptions {decision} {rationaleOptionId} {sending} {offline} bind:selected bind:picked bind:other onChange={saveDraft} />
+			{#if desk}<div class="act-desk">{@render decisionActions()}</div>{/if}
 		{/snippet}
 		{#snippet band()}
-			<ReviewBarShell view="ask" {who} full="Waiting for your answer" askLabel="Decision" docked busy={sending}>
-				{#snippet actions()}
-					<div class="rb-actions">
-						<Button size="sm" variant="primary" loading={sending} disabled={!answerReady || settled || offline} onclick={() => void answer(decision)}>{labelFor('answer', 'Answer')}</Button>
-					</div>
-					{@render failureLine()}
-					{#if offline}<p class="act-failure-row offline-notice" role="status">Answering is paused until this reconnects.</p>{/if}
-				{/snippet}
-			</ReviewBarShell>
+			{#if !desk}
+				<ReviewBarShell view="ask" {who} full="Waiting for your answer" askLabel="Decision" docked busy={sending}>
+					{#snippet actions()}{@render decisionActions()}{/snippet}
+				</ReviewBarShell>
+			{/if}
 		{/snippet}
 	</ActivityKindPanel>
 {:else if task}
-	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Task">
+	{#snippet taskActions()}
+		<div class="rb-actions two">
+			<Button size="md" variant="ghost" disabled={sending || settled} onclick={() => void wontDo()}>{labelFor('wont_do', 'Won’t do')}</Button>
+			<Button size="md" variant="primary" loading={sending} disabled={settled} onclick={() => void markTaskDone()}>{labelFor('done', 'Done')}</Button>
+		</div>
+		{@render failureLine()}
+	{/snippet}
+	<ActivityKindPanel notice={desk && openChat ? taskNotice : noLonger || stale ? itemNotice : undefined} label="Task">
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
+			{#if ago}<p class="ago">{ago}</p>{/if}
 			{#if task.description}{@const steps = taskSteps(task.description)}
 				{#if steps.kind === 'text'}<p class="body pre">{steps.text}</p>
 				{:else}<svelte:element this={steps.kind === 'numbered' ? 'ol' : 'ul'} class="body steps" start={steps.kind === 'numbered' ? steps.start : undefined}>{#each steps.items as step, i (i)}<li>{step}</li>{/each}</svelte:element>{/if}
 			{/if}
+			{#if desk}<div class="act-desk">{@render taskActions()}</div>{/if}
 		{/snippet}
 		{#snippet band()}
-			<ReviewBarShell view="ask" {who} full="A step only you can do" askLabel="Task for you" docked busy={sending}>
-				{#snippet actions()}
-					<div class="rb-actions">
-						<Button size="sm" variant="primary" loading={sending} onclick={() => void markTaskDone()}>{labelFor('done', 'Done')}</Button>
-					</div>
-					{@render failureLine()}
-				{/snippet}
-			</ReviewBarShell>
+			{#if !desk}
+				<ReviewBarShell view="ask" {who} full="Task for you" askLabel="Task for you" docked busy={sending}>
+					{#snippet actions()}{@render taskActions()}{/snippet}
+				</ReviewBarShell>
+			{/if}
 		{/snippet}
 	</ActivityKindPanel>
 {:else if held}
-	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Message">
+	{#snippet heldActions()}
+		<div class="rb-actions two">
+			<Button size="md" variant="ghost" disabled={sending || settled || offline} onclick={() => void decide('decline')}>{labelFor('dont_send', 'Don’t send')}</Button>
+			<Button size="md" variant="primary" loading={sending} disabled={settled || offline} onclick={() => void decide('approve')}>{labelFor('send', 'Send')}</Button>
+		</div>
+		{@render failureLine()}
+		{#if offline}<p class="act-failure-row offline-notice" role="status">Sending and declining are paused until this reconnects.</p>{/if}
+	{/snippet}
+	<ActivityKindPanel notice={desk && openChat ? heldNotice : noLonger || stale ? itemNotice : undefined} label="Message">
 		{#snippet body()}
 			<h1 class="dh">{item.title}</h1>
+			{#if ago}<p class="ago">{ago}</p>{/if}
 			<p class="dctx">To: {held.provider ? `${held.recipient} on ${held.provider}` : held.recipient}</p>
 			<blockquote class="pre">{held.text}</blockquote>
+			{#if desk}<div class="act-desk">{@render heldActions()}</div>{/if}
 		{/snippet}
 		{#snippet band()}
-			<ReviewBarShell view="ask" {who} full="Waiting for your yes before it’s sent" askLabel="Message waiting for your yes" docked busy={sending}>
-				{#snippet actions()}
-					<div class="rb-actions">
-						<Button size="sm" variant="ghost" disabled={sending || settled || offline} onclick={() => void decide('decline')}>{labelFor('dont_send', 'Don’t send')}</Button>
-						<Button size="sm" variant="primary" loading={sending} disabled={settled || offline} onclick={() => void decide('approve')}>{labelFor('send', 'Send')}</Button>
-					</div>
-					{@render failureLine()}
-					{#if offline}<p class="act-failure-row offline-notice" role="status">Sending and declining are paused until this reconnects.</p>{/if}
-				{/snippet}
-			</ReviewBarShell>
+			{#if !desk}
+				<ReviewBarShell view="ask" {who} full="Waiting for you to send it" askLabel="Message waiting for your yes" docked busy={sending}>
+					{#snippet actions()}{@render heldActions()}{/snippet}
+				</ReviewBarShell>
+			{/if}
 		{/snippet}
 	</ActivityKindPanel>
 {:else}
@@ -364,8 +365,8 @@
 	:global(.activity.phone) .doc-line { min-height: var(--touch-target); }
 	.dh { margin: 0 0 var(--space-3); font-size: var(--text-title3); line-height: 1.35; color: var(--text-primary); }
 	/* Every kind's body reads at the document body's size and spacing (cm/theme.ts: 15px = --text-body; --text-input on a phone). */
-	.dctx, .body, blockquote, .opt { font-size: var(--text-body); line-height: var(--lh-relaxed); }
-	:global(.activity.phone) :is(.dctx, .body, blockquote, .opt) { font-size: var(--text-input); }
+	.dctx, .body, blockquote { font-size: var(--text-body); line-height: var(--lh-relaxed); }
+	:global(.activity.phone) :is(.dctx, .body, blockquote) { font-size: var(--text-input); }
 	.dctx { margin: 0 0 var(--space-3); color: var(--text-secondary); }
 	.body { margin: 0 0 var(--space-3); color: var(--text-primary); }
 	.steps { padding-left: var(--space-5); }
@@ -375,23 +376,22 @@
 		margin: var(--space-4) 0; padding: 0 0 0 var(--space-4); border-left: 1px solid var(--border-subtle);
 		color: var(--text-primary);
 	}
-	.options { margin: var(--space-3) 0 0; padding: 0; border: 0; }
-	.opt { display: flex; gap: var(--space-3); padding: var(--space-3) 0; cursor: pointer; }
-	.opt input { flex: none; margin: var(--space-px-2) 0 0; accent-color: var(--accent); }
-	.opt b { font-weight: var(--fw-semibold); color: var(--text-primary); }
-	.opt em { margin-left: var(--space-2); font-style: normal; color: var(--accent-text); font-size: var(--text-footnote); }
-	.opt-detail { display: block; margin-top: var(--space-1); color: var(--text-secondary); }
+	.ago { margin: calc(-1 * var(--space-2)) 0 var(--space-4); color: var(--text-secondary); font-size: var(--text-footnote); }
+	.act-desk { margin-top: var(--space-5); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+	:global(.activity.phone) .rb-actions :global(.btn) { min-height: var(--touch-target); }
+	:global(.activity.phone) .rb-actions.two { width: 100%; justify-content: space-between; margin-left: 0; }
+	:global(.activity.phone) .rb-actions.two :global(.btn.ghost) { margin-left: calc(-1 * var(--space-3)); }
+	.act-desk :global(.rb-actions) { gap: var(--space-7); }
+	.act-desk :global(.rb-actions .btn.ghost) { margin-left: calc(-1 * var(--space-3) - 1px); }
+	.act-desk .act-failure-row { text-align: left; order: 0; }
 	.option-rationale { display: flex; gap: var(--space-1); margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
 	.option-rationale span { flex: none; color: var(--text-tertiary); font-weight: var(--fw-semibold); }
 	.decision-reason { display: grid; gap: var(--space-2); margin: 0; }
 	.decision-reason div { padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); }
 	.decision-reason dt { margin-bottom: var(--space-1); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	.decision-reason dd { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
-	.other {
-		width: 100%; box-sizing: border-box; margin-top: var(--space-1); padding: var(--space-2);
-		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary);
-		color: var(--text-primary); font: inherit; font-size: var(--text-subhead); resize: vertical;
-	}
+	:global(.activity.phone .rb-dock) { padding-inline: calc(var(--space-6) - 1px); }
+	:global(.activity.phone .rb-dock .act-failure-row) { text-align: left; }
 	.unopenable { padding-top: var(--space-4); }
 	.act-failure-row { flex: 1 0 100%; order: 10; text-align: right; }
 	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }

@@ -53,7 +53,7 @@ def link_requested(node_id: str, params: dict, actor, *, db) -> None:
 def read_for_artifact(artifact_id: str, *, db) -> dict | None:
     """Return the one open person step whose input is this instructions document."""
     row = db.execute(
-        f"""SELECT n.id,n.title,n.revision,n.plan_id,p.owner_id,t.title AS owner_title
+        f"""SELECT n.id,n.title,n.description,n.revision,n.plan_id,p.owner_id,t.title AS owner_title
              FROM plan_node_artifact_links l
              CROSS JOIN plan_nodes n ON n.id=l.node_id
              CROSS JOIN plans p ON p.id=n.plan_id
@@ -70,7 +70,7 @@ def read_for_artifact(artifact_id: str, *, db) -> dict | None:
 
     return {
         "node_id": row["id"], "node_title": reader_titles(db, [row["id"]]).get(row["id"], row["title"]),
-        "node_revision": row["revision"],
+        "node_revision": row["revision"], "node_description": row["description"] or "",
         "plan_id": row["plan_id"], "owner_thread_id": row["owner_id"],
         "owner_name": row["owner_title"] or "An agent",
     }

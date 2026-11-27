@@ -12,6 +12,8 @@ export interface FeedbackCounts { comments: number; suggestions: number; edits: 
 export interface PersonStepInstruction {
 	node_id: string;
 	node_title: string;
+	/** What the step asks beyond its title; empty when it asks nothing more. */
+	node_description?: string;
 	node_revision: number;
 	plan_id: string;
 	owner_thread_id: string;

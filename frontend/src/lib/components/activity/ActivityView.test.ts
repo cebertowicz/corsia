@@ -76,6 +76,9 @@ const pane = () => host.querySelector<HTMLElement>('.pane-col')!;
 const buttonNamed = (name: string) =>
 	[...host.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name);
 const alert = () => pane().querySelector('[role="alert"]')?.textContent ?? null;
+/** The grey line for what the server let go of: said plainly, not as an alarm. */
+const keptNote = () => pane().querySelector('.act-failure-row [role="status"]')?.textContent ?? null;
+const STAYS = ' It stays open here until you pick another item.';
 
 /** Answers `match`ing requests from `handler`; everything else gets the queue stub's answer. */
 function alsoServe(match: string, handler: (init?: RequestInit) => Response | Promise<Response>) {
@@ -460,7 +463,8 @@ describe('what a press comes to, reported in Activity', () => {
 		await settle();
 
 		expect(body).toMatchObject({ option_id: 'ship', expected_revision: expect.any(Number), mutation_id: expect.any(String) });
-		expect(alert()).toBe(closed);
+		expect(alert()).toBeNull();
+		expect(keptNote()).toBe(closed + STAYS);
 		expect(buttonNamed('Try again')).toBeUndefined();
 		expect(buttonNamed('Answer')!.disabled).toBe(true);
 		expect(openRow()).toBe(rows()[1]);
@@ -477,7 +481,8 @@ describe('what a press comes to, reported in Activity', () => {
 		await settle();
 		buttonNamed('Answer')!.click();
 		await settle();
-		expect(alert()).toBe('That decision is closed.');
+		expect(alert()).toBeNull();
+		expect(keptNote()).toBe('That decision is closed.' + STAYS);
 		expect(buttonNamed('Answer')!.disabled).toBe(true);
 	});
 
@@ -540,7 +545,8 @@ describe('what a press comes to, reported in Activity', () => {
 		expect(writes).toHaveLength(1);
 		expect(JSON.parse(writes[0])).toMatchObject({ option_id: 'ship' });
 		expect(mutate).not.toHaveBeenCalled();
-		expect(alert()).toBe('This decision was answered in another chat.');
+		expect(alert()).toBeNull();
+		expect(keptNote()).toBe('This decision was answered in another chat.' + STAYS);
 		expect(openRow()).toBe(rows()[1]);
 		expect(pane().querySelector('h1')?.textContent).toBe(title);
 	});
@@ -563,7 +569,7 @@ describe('what a press comes to, reported in Activity', () => {
 		buttonNamed('Answer')!.click();
 		await settle();
 
-		expect(alert()).toBe('Couldn’t save your answer. Try again.');
+		expect(alert()).toBe('Couldn’t save your answer.');
 		expect(buttonNamed('Try again')!.disabled).toBe(false);
 		expect(openRow()).toBe(rows()[1]);
 
@@ -721,10 +727,10 @@ describe('answering a decision or a held message in Activity', () => {
 
 	beforeEach(() => { answers.length = 0; });
 
-	it('identifies a decision raised without parent review', async () => {
+	it('does not print a parent-review line for a decision raised directly', async () => {
 		const source = decisionOf(served[1])!.source;
 		await openDecision({ source: { ...source, parent_reviewed: false } });
-		expect(pane().textContent).toContain('Raised directly — no parent review.');
+		expect(pane().textContent).not.toContain('no parent review');
 	});
 
 	it('shows decision context and tradeoff before the choices', async () => {
@@ -739,8 +745,18 @@ describe('answering a decision or a held message in Activity', () => {
 	it('marks only the recommended option', async () => {
 		await openDecision();
 		expect(pane().textContent).not.toContain('Raised directly');
-		const marked = [...pane().querySelectorAll('label.opt')].filter((label) => label.querySelector('em')?.textContent === 'Recommended');
+		const marked = [...pane().querySelectorAll('label.choice')].filter((label) => label.querySelector('.rec')?.textContent === 'Recommended');
 		expect(marked.map((label) => label.querySelector('b')?.textContent)).toEqual(['Ship without their review']);
+	});
+
+	it('says what "Something else" is for, and opens its field in the row once picked', async () => {
+		await openDecision({ other_enabled: true });
+		const row = pane().querySelector('label.else')!;
+		expect(row.textContent).toContain('Select to write your own answer.');
+		expect(row.querySelector('textarea')).toBeNull();
+		row.querySelector<HTMLInputElement>('input')!.click();
+		await settle();
+		expect(pane().querySelector('label.else textarea.other')).not.toBeNull();
 	});
 
 	it('shows the recommendation reason under the recommended option and describes it', async () => {
@@ -756,7 +772,7 @@ describe('answering a decision or a held message in Activity', () => {
 	it('keeps four long pick-any labels in separate choices', async () => {
 		const long = 'A deliberately long option label that wraps in its row '.repeat(2).trim();
 		await openDecision({ pick: 'any', recommendation: ['A'], options: ['A', 'B', 'C', 'D'].map((id) => ({ id, label: `${id} ${long}`, detail: long })) });
-		const choices = [...pane().querySelectorAll('label.opt')];
+		const choices = [...pane().querySelectorAll('label.choice')];
 		expect(choices).toHaveLength(4);
 		expect(choices.map((choice) => choice.querySelector('b')?.textContent)).toEqual(['A', 'B', 'C', 'D'].map((id) => `${id} ${long}`));
 	});
@@ -768,7 +784,7 @@ describe('answering a decision or a held message in Activity', () => {
 		expect(reason.textContent).toContain('Choose both.');
 		expect(options[0].closest('label')!.contains(reason)).toBe(true);
 		expect(options[1].getAttribute('aria-describedby')).toBeNull();
-		expect(pane().querySelectorAll('.option-rationale')).toHaveLength(1);
+		expect(pane().querySelectorAll('.cwhy')).toHaveLength(1);
 		expect(pane().textContent!.match(/Choose both\./g)).toHaveLength(1);
 	});
 
@@ -1094,12 +1110,48 @@ describe('product events', () => {
 	});
 });
 
+describe('Activity on a wide screen: the asker on top, the buttons under the content', () => {
+	it('names the asker as a chat link above a decision, with Answer under the options and no dock', async () => {
+		render();
+		await settle();
+		rows()[1].click();
+		await settle();
+		const link = pane().querySelector<HTMLButtonElement>('.asker-top-link')!;
+		expect(link.getAttribute('aria-label')).toBe('Open chat with CORSIA Conductor');
+		expect(pane().querySelector('.asker-top-status')?.textContent).toBe('Waiting for your answer');
+		expect(pane().querySelector('.rb-dock')).toBeNull();
+		expect(pane().querySelector('.act-desk')?.textContent).toContain('Answer');
+	});
+
+	it('puts Won’t do beside Done on a task and sends the plan’s close', async () => {
+		mutate.mockResolvedValue({ status: 'success' });
+		render();
+		await settle();
+		rows()[4].click();
+		await settle();
+		expect(pane().querySelector('.asker-top-status')?.textContent).toBe('Task for you');
+		buttonNamed('Won’t do')!.click();
+		await settle();
+		expect(mutate).toHaveBeenCalledWith('plan-packaging', 'close_node', 'node-sign', 4, 'close_node:node-sign:4');
+	});
+
+	it('reads "Waiting for you to send it" above a held message', async () => {
+		render();
+		await settle();
+		rows()[5].click();
+		await settle();
+		expect(pane().querySelector('.asker-top-status')?.textContent).toBe('Waiting for you to send it');
+	});
+
+});
+
 describe('Activity’s bottom band at rest', () => {
 	it.each([
 		[1, 'CORSIA Conductor', 'Waiting for your answer'],
-		[4, 'Packaging & Onboarding', 'A step only you can do'],
-		[5, 'Ecosystem', 'Waiting for your yes before it’s sent'],
+		[4, 'Packaging & Onboarding', 'Task for you'],
+		[5, 'Ecosystem', 'Waiting for you to send it'],
 	])('row %i names %s before its status, without being opened', async (row, agent, status) => {
+		mobile.store!.set(true);
 		render();
 		await settle();
 		rows()[row].click();
@@ -1107,7 +1159,7 @@ describe('Activity’s bottom band at rest', () => {
 		const band = pane().querySelector<HTMLElement>('.rb-dock')!;
 		expect(band.classList.contains('open')).toBe(false);
 		expect(band.classList.contains('asker')).toBe(true);
-		expect(band.querySelector('.rb-dock-who')?.textContent).toBe(agent);
+		expect(band.querySelector('.asker-link')?.getAttribute('aria-label')).toBe(`Open chat with ${agent}`);
 		expect(band.querySelector('.rb-dock-q')?.textContent).toBe(status);
 	});
 
@@ -1139,13 +1191,13 @@ describe('item bodies', () => {
 
 	it('reads every kind’s body at the document’s body size and line spacing', () => {
 		// jsdom applies no component styles, so the rule is read from the source, as the band test above does.
-		const rule = paneSource.match(/\n\t\.dctx, \.body, blockquote, \.opt \{([^}]*)\}/);
+		const rule = paneSource.match(/\n\t\.dctx, \.body, blockquote \{([^}]*)\}/);
 		expect(rule?.[1]).toContain('font-size: var(--text-body)');
 		expect(rule?.[1]).toContain('line-height: var(--lh-relaxed)');
 		// On a phone the document's text is --text-input (cm/theme.ts), and so is every body here.
-		expect(paneSource).toContain(':global(.activity.phone) :is(.dctx, .body, blockquote, .opt) { font-size: var(--text-input); }');
+		expect(paneSource).toContain(':global(.activity.phone) :is(.dctx, .body, blockquote) { font-size: var(--text-input); }');
 		// No other rule in the pane sets a size on those bodies.
-		for (const selector of ['.dctx {', '.body {', 'blockquote {', '.opt {', '.opt-detail {']) {
+		for (const selector of ['.dctx {', '.body {', 'blockquote {']) {
 			const start = paneSource.indexOf(`\t${selector}`);
 			expect(start, selector).toBeGreaterThan(-1);
 			const block = paneSource.slice(start, paneSource.indexOf('}', start));

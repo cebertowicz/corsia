@@ -5,7 +5,7 @@ import { mutateUserTask, type PlanLifecycleMutationOutcome } from '$lib/api/plan
 import { clearExpiredSession } from '$lib/stores/auth';
 
 /** The presses in Activity's band; a failed one's button reads Try again. */
-export type PressAction = 'answer' | 'send' | 'dont_send' | 'done';
+export type PressAction = 'answer' | 'send' | 'dont_send' | 'done' | 'wont_do';
 
 /**
  * What a press came to, in Activity's terms. `refused`: the server answered and pressing again can't change it, so it
@@ -32,17 +32,23 @@ export async function markTaskDonePress(task: ActivityTaskDetail): Promise<Press
 	return taskPressed(await mutateUserTask(task.plan_id, 'mark_done', task.node_id, task.revision, key));
 }
 
+/** Won't do on a task only the person can do: the plan's close, as the step's own bar sends it. */
+export async function closeTaskPress(task: ActivityTaskDetail): Promise<Pressed> {
+	const key = `close_node:${task.node_id}:${task.revision}`;
+	return taskPressed(await mutateUserTask(task.plan_id, 'close_node', task.node_id, task.revision, key));
+}
+
 /** A decision's answer. */
 export function answerPressed(outcome: AnswerOutcome): Pressed {
 	switch (outcome.status) {
 		case 'ok': return { outcome: 'succeeded' };
 		// Answered or closed elsewhere first: the server's sentence says which.
-		case 'gone': return { outcome: 'refused', reason: 'gone', text: outcome.message, final: true };
+		case 'gone': return { outcome: 'refused', reason: 'gone', text: `${outcome.message.trim()} It stays open here until you pick another item.`, final: true };
 		// The re-read shows the decision's latest revision, to answer again.
 		case 'stale': return { outcome: 'refused', reason: 'changed', text: 'This decision changed. Showing the latest.' };
 		case 'rejected': return { outcome: 'refused', reason: 'rejected', text: outcome.message };
 		case 'unauthorized': return { outcome: 'refused', reason: 'unavailable', text: 'This decision isn’t available.', final: true };
-		default: return { outcome: 'failed', text: 'Couldn’t save your answer. Try again.' };
+		default: return { outcome: 'failed', text: 'Couldn’t save your answer.' };
 	}
 }
 

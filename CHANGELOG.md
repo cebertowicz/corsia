@@ -16,6 +16,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
 - Access tokens are now hidden from agents in three more forms: a signed web token (JWT) anywhere in a command or message; an Authorization header written with quotes, as in a headers list or JSON; and a password, token or key field in JSON carried as text inside other JSON, such as the details an agent sends with an action. It also applies when an agent reads back an earlier chat. Other tokens, such as one after --token or in a custom header, stay visible unless their shape is one CORSIA already recognizes.
+- Activity now lets you answer a decision, task or message where you read it: the asker is a link to their chat, the options and the Answer button sit with the question, and on a phone the answer bar docks at the bottom.
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
