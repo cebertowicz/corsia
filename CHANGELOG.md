@@ -17,6 +17,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
 - Access tokens are now hidden from agents in three more forms: a signed web token (JWT) anywhere in a command or message; an Authorization header written with quotes, as in a headers list or JSON; and a password, token or key field in JSON carried as text inside other JSON, such as the details an agent sends with an action. It also applies when an agent reads back an earlier chat. Other tokens, such as one after --token or in a custom header, stay visible unless their shape is one CORSIA already recognizes.
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
+- Activity opens a shared-browser task in the asking chat's browser when it is still available, and uses the chat's compact document header on a phone.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
 - Activity refreshes quickly again however many documents and comments you have, reading only the documents you commented in, and keeps one refresh open at a time, so a comment or other post from a phone over remote access is no longer held waiting for a free connection until it fails.

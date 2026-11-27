@@ -64,7 +64,9 @@ def test_person_task_descriptions_are_in_activity_rows(isolated_db):
         details = {row['detail']['node_id']: row['detail'] for row in projection.rows(db, 'owner-token', [])
                    if row['kind'] == 'task'}
         assert details[browser.id]['description'] == 'Enter your password.'
+        assert details[browser.id]['browser_thread_id'] == 'owner'
         assert details[ordinary.id]['description'] == 'Follow these instructions.'
+        assert 'browser_thread_id' not in details[ordinary.id]
     finally:
         db.close()
 

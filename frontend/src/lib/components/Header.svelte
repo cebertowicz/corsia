@@ -176,11 +176,11 @@
 				<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Chat settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Chat settings'}>
 					{@render gearIcon()}
 				</button>
-			{:else if activeView === 'activity' && $uiScope}
+			{:else if activeView === 'activity' && !phoneDocument && $uiScope}
 				<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
 					{@render gearIcon()}
 				</button>
-			{:else if activeView === 'activity' && !$uiScope}
+			{:else if activeView === 'activity' && !phoneDocument && !$uiScope}
 				<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
 					{@render gearIcon()}
 				</button>

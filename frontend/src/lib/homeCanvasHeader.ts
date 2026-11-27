@@ -54,6 +54,10 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 	}
 	if (input.activeView === 'activity') {
 		const item = phoneItem.current;
+		if (item?.artifact) {
+			setCompactHeader({ ...item.artifact, onBack: item.onBack }, item.backLabel);
+			return;
+		}
 		canvasHeader.set(item
 			? {
 				title: '',
@@ -86,20 +90,20 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 	// step 2), not "back to the thread that spawned this one". The subagent
 	// header returns as soon as chat is the active surface again.
 	if (input.activeView === 'chat' && input.compactArtifact) {
-		const { title, tabCount, anyChanged, onBack, onTabs } = input.compactArtifact;
-		// The name opens the open-files list (a ⌄ after it says so); the document's own controls join the bar from its header.
-		canvasHeader.set({
-			title,
-			backLabel: 'Chat',
-			onBack,
-			titleAction: {
-				label: `Open files, ${tabCount}`,
-				title: anyChanged ? 'Show open files — one has changed' : 'Show open files',
-				onClick: onTabs,
-				changed: anyChanged,
-			},
-		});
+		setCompactHeader(input.compactArtifact, 'Chat');
 		return;
 	}
 	canvasHeader.set(null);
+}
+
+/** The name and controls shared by a compact document in chat and Activity. */
+function setCompactHeader({ title, tabCount, anyChanged, onBack, onTabs }: CompactArtifactHeader, backLabel: string) {
+	canvasHeader.set({
+		title, backLabel, onBack,
+		titleAction: {
+			label: `Open files, ${tabCount}`,
+			title: anyChanged ? 'Show open files — one has changed' : 'Show open files',
+			onClick: onTabs, changed: anyChanged,
+		},
+	});
 }

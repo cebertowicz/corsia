@@ -72,6 +72,10 @@ def rows(db, user_id, annotated):
     plans = {r["id"]: dict(r) for r in db.execute("SELECT * FROM plans WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(sorted(allowed)),))}
     task_nodes = _due_person_tasks(db, plans)
     node_ids = [n["id"] for n in task_nodes]
+    # The same immutable creation provenance used by the operator plan identifies browser steps here.
+    from api.operator_annotations import BROWSER_STEP_PROVENANCES
+    from plans.public import nodes_created_with
+    browser_steps = nodes_created_with(node_ids, BROWSER_STEP_PROVENANCES, db=db)
     details = {r["id"]: dict(r) for r in db.execute("SELECT id,title,description,revision,created_at FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(node_ids),))}
     links = person_comment_task.comment_tasks(db, node_ids)
     # Match the artifact route's owner selection; access is that route's own predicate, one
@@ -105,7 +109,7 @@ def rows(db, user_id, annotated):
         artifact_id = links.get(node["id"])
         if artifact_id and artifact_id not in authorized_artifacts:
             continue
-        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], "description":detail["description"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":0})
+        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], "description":detail["description"], **({"comment_artifact_id":artifact_id} if artifact_id else {}), **({"browser_thread_id":plans[node["plan_id"]]["owner_id"]} if node["id"] in browser_steps else {})}, "priority":0})
     return out
 
 

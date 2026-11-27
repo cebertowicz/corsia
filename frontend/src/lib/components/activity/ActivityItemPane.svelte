@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { setContext, untrack } from 'svelte';
 	import { REVIEW_ANSWERED, REVIEW_REPLIES } from '$lib/reviewBarState.svelte';
-	import { openActivityDocument } from './activityDocumentOpen';
+	import { openActivityBrowser, openActivityDocument } from './activityDocumentOpen';
 	import { Button } from '$lib/components/ui';
 	import { keepInView } from '$lib/actions/keepInView';
 	import ErrorReference from '$lib/components/ui/ErrorReference.svelte';
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
 	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
+	import ActivityDocumentUnavailable from './ActivityDocumentUnavailable.svelte';
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
@@ -30,9 +31,11 @@
 	 * through the call its own surface already uses; the list then re-reads, and the item leaves only when the server
 	 * stops returning it. Every outcome of a press is reported here; nothing here writes the attention queue's state.
 	 */
-	let { item, workspaceKey, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat }: {
+	let { item, workspaceKey, phone = false, showBrowser = true, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat }: {
 		item: ActivityQueueItem;
 		workspaceKey: string;
+		phone?: boolean;
+		showBrowser?: boolean;
 		draft?: DecisionDraft;
 		onDraft: (draft: DecisionDraft) => void;
 		onClearDraft: () => void;
@@ -57,6 +60,13 @@
 	const document = $derived(documentDetailOf(item));
 	const doc = $derived(documentOf(item));
 	const sourceThread = $derived(item.source.thread_id);
+	const browserThread = untrack(() => task?.browser_thread_id ?? null);
+	let browserEnded = $state(false);
+	$effect(() => {
+		if (!browserThread || !showBrowser) return;
+		browserEnded = false;
+		openActivityBrowser(workspaceKey, browserThread);
+	});
 	// The open document keeps its original lookup context until the person moves on.
 	const documentThread = untrack(() => item.source.thread_id);
 	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
@@ -86,10 +96,13 @@
 	// its document must not land again.
 	const landsOnReplies = untrack(() => item.kind === 'document');
 	const replyThread = untrack(() => doc?.commentId);
-	$effect(() => openActivityDocument(
-		workspaceKey, docArtifactId, documentThread, landsOnReplies, replyThread,
-		(value) => { lookup = value; },
-	));
+	$effect(() => {
+		if (browserThread && !browserEnded) return;
+		return openActivityDocument(
+			workspaceKey, docArtifactId, documentThread, landsOnReplies, replyThread,
+			(value) => { lookup = value; },
+		);
+	});
 
 	/**
 	 * Runs one press: busy while it runs, then the list re-reads, or the reason shows under the buttons. A refusal
@@ -221,28 +234,16 @@
 	{:else if held?.error}<!-- Why the last Send didn't go, shown here until the next press. --><div class="act-failure-row"><p class="act-failure">{held.error}</p>{#if held.error_ref}<ErrorReference reference={held.error_ref} />{/if}</div>{/if}
 {/snippet}
 
-{#if doc}
+{#if browserThread && showBrowser && !browserEnded}
+	<div class="doc-pane"><ArtifactLeaf threadId={workspaceKey} collapsible={false} mode={phone ? 'compact' : 'expanded'} onNoBrowser={() => { browserEnded = true; }} /></div>
+{:else if doc}
 	{#if lookupFailed}
-		<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
-			{#snippet body()}
-				<div class="unopenable" role="status">
-					<h1 class="dh">Couldn’t open this document.</h1>
-					<p class="dctx">
-						{lookup?.status === 'failed'
-							? 'Its chat’s files didn’t load.'
-							: 'It isn’t in the files of the chat it came from; it may have been moved or removed.'}
-					</p>
-					{#if sourceThread}
-						<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>Open {item.source.thread_label}’s chat</Button>
-					{/if}
-				</div>
-			{/snippet}
-		</ActivityKindPanel>
+		<ActivityDocumentUnavailable notice={noLonger || stale ? itemNotice : undefined} label={item.title} failed={lookup?.status === 'failed'} {sourceThread} threadLabel={item.source.thread_label} {onOpenChat} />
 	{:else if lookup?.status !== 'found'}
 		<div class="doc-pane" aria-busy="true"></div>
 	{:else}
 		<div class="doc-pane">
-			<ArtifactLeaf threadId={workspaceKey} targetThreadId={documentThread} notice={document || noLonger || stale ? documentNotice : undefined} protectReplyLanding={landsOnReplies} collapsible={false} mode="expanded" />
+			<ArtifactLeaf threadId={workspaceKey} targetThreadId={documentThread} notice={document || noLonger || stale ? documentNotice : undefined} protectReplyLanding={landsOnReplies} collapsible={false} mode={phone ? 'compact' : 'expanded'} />
 		</div>
 	{/if}
 {:else if decision}
@@ -392,7 +393,6 @@
 		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary);
 		color: var(--text-primary); font: inherit; font-size: var(--text-subhead); resize: vertical;
 	}
-	.unopenable { padding-top: var(--space-4); }
 	.act-failure-row { flex: 1 0 100%; order: 10; text-align: right; }
 	.offline-notice { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.act-failure { margin: 0; color: var(--red-text); font-size: var(--text-footnote); }

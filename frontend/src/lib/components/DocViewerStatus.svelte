@@ -17,6 +17,7 @@
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import { publishDocumentBar } from '$lib/stores/documentBar';
 	import { canvasCompact } from '$lib/stores/artifactCanvas';
+	import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 	import { isMobile } from '$lib/stores/viewport';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
@@ -77,9 +78,9 @@
 	/** File changed, until Reload clears it (and not offered beside a refused typing save). */
 	const urgent = $derived(staleControl);
 	/** In the compact canvas, File changed sits after the name; the desktop tab strip draws the text control. */
-	const changeInBar = $derived($canvasCompact);
+	const changeInBar = $derived($canvasCompact || !!$activityPhoneItem?.artifact);
 	/** On a phone with the panel closed, the app bar's Toggle panel is here instead, as Show panel. */
-	const paneHere = $derived($isMobile && $canvasCompact && !$paneOpen);
+	const paneHere = $derived($isMobile && ($canvasCompact || !!$activityPhoneItem?.artifact) && !$paneOpen);
 	/** What needs you behind Details and is nowhere else on screen, named in the words the panel itself uses for each
 	 * entry, so the control says what is waiting rather than how many: Overdue, an ask whose card is hidden, an ask
 	 * with no reason text named by its asker rather than leaving an empty leg, and comments waiting for your decision
@@ -257,7 +258,7 @@
 {/snippet}
 
 {#if artifactId}<DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" showControls={false} />{/if}
-<header class="document-header" class:ask-covered={askCovered} bind:this={headerEl}>
+<header class="document-header" class:ask-covered={askCovered || !!$activityPhoneItem?.tabsOpen} bind:this={headerEl}>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<!-- The pickers and review controls keep one instance while Details is closed. It drops over the document. -->
 	<div class="doc-panel" id={panelId} role="region" aria-label="Document details" hidden={!panelOpen} bind:this={panelEl} style:--panel-max={panelMax ? `${panelMax}px` : undefined}>

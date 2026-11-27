@@ -116,6 +116,25 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+describe('Activity browser steps', () => {
+	it('opens the browser for its thread, while an ordinary task stays a task', async () => {
+		const ordinary = served.find((item) => item.kind === 'task')!;
+		const browser: ActivityQueueItem = {
+			...ordinary,
+			key: 'task:browser', external_id: 'browser', title: 'Continue in browser',
+			detail: { plan_id: 'p', node_id: 'browser', revision: 1, browser_thread_id: 'browser-owner' },
+		};
+		served = [ordinary, browser];
+		render();
+		await settle();
+		const key = activityWorkspaceKey('project-1');
+		expect(get(threadWorkspaces)[key]?.tabs.some((tab) => tab.kind === 'browser')).not.toBe(true);
+		rows()[1].click();
+		await settle();
+		expect(get(threadWorkspaces)[key]?.tabs.some((tab) => tab.kind === 'browser' && tab.threadId === 'browser-owner')).toBe(true);
+	});
+});
+
 describe('Activity list', () => {
 	it('shows every kind in the ranker’s order and opens the top item with why it is there', async () => {
 		render();
