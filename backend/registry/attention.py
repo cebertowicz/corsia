@@ -131,8 +131,10 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
         ask_holds: dict[str, list[str]] = {}
         for ask in asks:
             ask_holds.setdefault(str(ask["artifact_id"]), []).append(str(ask["hold_id"]))
+        # The conditions of idx_artifact_identities_attention_state, so the read takes the
+        # raised rows from it instead of parsing every identity's metadata.
         metadata_rows = _db.execute(
-            "SELECT * FROM artifact_identities i WHERE i.state='active'"
+            "SELECT * FROM artifact_identities i WHERE i.state='active' AND json_valid(i.metadata)"
             " AND json_extract(i.metadata, '$.attention_state')=?"
             f" AND NOT {plans_public.ask_linked_sql('i')}",
             (ATTENTION_RAISED,),

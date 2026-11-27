@@ -14,6 +14,8 @@ CORSIA is a free, open-source app that runs on your own computer. The agents run
 ![Built by its own agents](https://img.shields.io/badge/built_by-its_own_agents-7c3aed)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
+[![The Activity screen in the desktop app: the person works down a ranked list of tasks one at a time, asking three agents to review a page, accepting a suggested edit, sending an email, commenting on a design, picking a flight and marking a task done; then reads a reply on the Notifications tab and opens the Measurement screen](docs/readme/hero.gif)](docs/readme/measurement-dashboard.png)
+
 ## The problem
 
 One AI agent is easy to run. A team of agents can take on far more of your work, but a team brings two jobs that grow with every agent you add: organizing the agents, and supervising their work. Without help, both land on you.
@@ -26,20 +28,13 @@ Each agent works toward a goal you can measure, such as how much of your time a 
 
 **Every piece of work has one accountable agent, and agents check each other.** Agents message each other and hand smaller tasks to helper agents, but one agent answers for each result. When two goals pull in different directions, such as shipping fast and shipping without bugs, separate agents hold each one and review each other's work.
 
+![On a phone, the plan shows its steps and one task's time, tokens and cost. On the desktop, the person asks three agents to review an email draft, accepts a suggested edit, reads their comments and sends the email with Send now](docs/readme/story-review.gif)
+
 **You steer from one ranked list, and changes have to prove themselves.** You set the plans and priorities. The Activity screen lists what is waiting on you in one list, ranked by your agents against the priorities you set, each item with a one-line reason; it works on your Mac, and in your phone's browser once you connect it. The agents' working detail stays folded unless you open it. You and your agents can edit the same document, and each comment goes to the agent responsible for that part.
 
-![An agent's plan on a phone: a task with its status, working and waiting time and tokens, and the smaller tasks under it that are working, awaiting review, or waiting on another task](docs/phone-plan.png)
-
-![A user requests a review from three AI agents, who join the document and edit, comment and suggest changes live alongside the user](docs/live-review.gif)
+![On a phone, ask the agent what to focus on, see what goes into its next turn and open the priorities it follows. On the desktop, draw a box on a homepage headline, tag the Website agent in a comment, and it replies](docs/readme/story-image-comments.gif)
 
 For every agent, CORSIA records the minutes you spent in the app on each finished result, the share of results accepted without being sent back, and what they cost; the numbers fill in as work is finished. When you correct an agent, the lesson can be tried on some of its later tasks and compared with tasks done without it before it becomes part of the agent's permanent instructions. Agents can also install reviewed workflows and skills from a shared library.
-
-![CORSIA measurement: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens](docs/measurement-kpis-light.png)
-
-![Daily model cost per estimated hour of delivered work over two weeks on one install](docs/measurement-trend-light.png)
-![Cost per task and first-try rate for each model, by task size](docs/measurement-models-light.png)
-
-*The Measurement screen on the install that builds CORSIA, September 25 to October 8, 2026.*
 
 The three parts depend on each other. Agents that keep the team organized and their plans current give each result one accountable agent to measure; checks between agents with opposing goals make those numbers harder to game; and one ranked list keeps a growing team's work reviewable by you.
 
@@ -66,6 +61,10 @@ Weeks run Monday to Sunday, Pacific time. The September 28 week counts Monday to
 Agents run on a Claude Code or Codex subscription, an API key billed by use, or a local model at no cost per use on a Mac with 32 GB of memory or more. Every model gets the same instructions, skills and tools. Changing an agent's model or account keeps its plan and documents, and when an account reaches its usage limit, the agent can move to another account you allow. CORSIA itself is free; model use is billed by whoever provides the model: your subscription's usage limits, your API bill, or nothing per use with a local model.
 
 A team of agents uses far more of a subscription than one agent does, so start with one. For scale: over one week in November 2026, the install that builds CORSIA averaged about 22 agents at work in any given hour and used about 4.5 billion tokens a day, with a 97% cache hit rate. Each hour of agent work used 20% fewer tokens than in the same week a month earlier, and 12% fewer uncached tokens.
+
+![Close-ups from the Measurement screen: the key figures, daily cost per hour of delivered work with its 7-day average, and each model's share of spend, cost per task and first-try rate](docs/readme/measurement-highlights.png)
+
+*Close-ups from the Measurement screen.*
 
 ## Getting started
 

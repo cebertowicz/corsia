@@ -48,7 +48,7 @@
 	 * exists, so a just-spawned subagent has nothing left yet. That is the chip's
 	 * first state, not an edge case: show no count until there is one to show.
 	 */
-	const hasLeft = $derived((node.child?.progress.open ?? 0) > 0);
+	const hasLeft = $derived((node.child?.progress.open_above ?? 0) > 0);
 	// A waiting child says what it waits on and when its agent checks back (EW9). Its state stays its liveness.
 	const childWait = $derived(node.child?.progress.liveness === 'waiting' ? node.child.wait ?? null : null);
 	const waitMore = $derived(childWait && childWait.more > 0 ? ` +${childWait.more} more` : '');
@@ -68,8 +68,10 @@
 		}}
 		aria-expanded={expanded}
 		aria-label={waitName ?? (hasLeft
-			? `${childActivityLabel()} subagent, ${node.child?.progress.open} ${node.child?.progress.open === 1 ? 'subtask' : 'subtasks'} left`
-			: `${childActivityLabel()} subagent, no open subtasks`)}
+			? `${childActivityLabel()} subagent, ${node.child?.progress.open_above} ${node.child?.progress.open_above === 1 ? 'subtask' : 'subtasks'} left`
+			: (node.child?.progress.open ?? 0) > 0
+				? `${childActivityLabel()} subagent, 0 subtasks left`
+				: `${childActivityLabel()} subagent, no open subtasks`)}
 		title={waitName ?? `${childActivityLabel()} subagent · expand subtasks`}
 	>
 		{#if childWait}
@@ -79,7 +81,7 @@
 			<span class="child-dot {childActivity()}" aria-hidden="true"></span>
 		{/if}
 		{#if hasLeft && !childWait}
-			<span>{node.child?.progress.open} left</span>
+			<span>{node.child?.progress.open_above} left</span>
 		{/if}
 	</button>
 	<button

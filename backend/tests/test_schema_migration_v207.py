@@ -7,7 +7,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_suggestion_history_migration_is_registered_and_preserves_existing_rows():
-    assert SCHEMA_VERSION == 209
+    assert SCHEMA_VERSION == 211
     assert MIGRATIONS[206] is migrate_206_to_207
     db = sqlite3.connect(':memory:')
     try:

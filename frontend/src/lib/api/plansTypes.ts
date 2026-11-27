@@ -82,6 +82,8 @@ export interface OperatorProgress {
 	total: number;
 	/** Unsettled leaves in play, shown as "N left": done/total would read 0 of N in a flat plan. */
 	open: number;
+	/** Open leaves above the line (not in Later); the plan header's N left. */
+	open_above: number;
 	liveness: OperatorLiveness;
 	distribution?: OperatorDistribution;
 }

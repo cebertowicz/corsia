@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { unsentSends, type UnsentSend } from '$lib/chatCommentDelivery';
-	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
+	import { chatCommentDrafts, chatPress } from '$lib/chatCommentDrafts.svelte';
 	import { retryChatComment } from './composerSend';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
@@ -28,9 +28,16 @@
 		finally { retrying = retrying.filter(id => id !== send.messageId); }
 	}
 
-	/** A refused reply keeps its text and shows why in its field. */
+	/**
+	 * A refused reply keeps its text and shows why in its field. Pressed, it keeps the comment it answers, so one whose post
+	 * fails for a reason that passes goes on its own; with its message not in this chat's history it can't, and only its press says why.
+	 */
 	async function postReply(comment: ChatComment, text: string): Promise<void> {
-		if (onReply) await chatCommentDrafts.postReply(comment.id, text, (inputId) => onReply(text, inputId));
+		if (!onReply) return;
+		const seq = $messages.find(item => item.id === messageId && item.thread_id === threadId)?.seq;
+		const { from_off, to_off, quote, anchor_prefix, anchor_suffix } = comment;
+		const press = typeof seq === 'number' ? chatPress({ threadId, messageId, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, root_user_message_id: comment.user_message_id, root_cid: comment.cid }) : undefined;
+		await chatCommentDrafts.postReply(comment.id, text, (inputId) => onReply(text, inputId), press);
 	}
 
 	function answerId(answer: ChatComment['answers'][number]): string {

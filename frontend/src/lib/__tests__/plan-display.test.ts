@@ -47,7 +47,7 @@ function entry(over: Partial<OperatorPlanEntry> = {}): OperatorPlanEntry {
 			state: 'active', revision: 1, updated_at: 'now',
 		},
 		owner: { label: 'Thread', project_id: null, thread_id: 't1' },
-		progress: { done: 0, total: 1, open: 1, liveness: 'idle', distribution: DISTRIBUTION },
+		progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'idle', distribution: DISTRIBUTION },
 		display: { label_key: 'waiting', tone_key: 'waiting' },
 		oversize: null,
 		current_node_ids: [],
@@ -85,7 +85,7 @@ describe('contract-v2 server display keys', () => {
 				state: 'paused', revision: 1, updated_at: 'now',
 			},
 			progress: {
-				done: 1, total: 1, open: 0, liveness: 'advancing',
+				done: 1, total: 1, open: 0, open_above: 0, liveness: 'advancing',
 				distribution: { ...DISTRIBUTION, done: 1, pending_ready: 0 },
 			},
 			display: { label_key: 'working', tone_key: 'active' },

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from infra.auth import authenticate, may_access_artifact, owns_thread, require_user
 from infra.database import get_db
-from infra.db_async import run_in_db
+from infra.db_async import run_in_db, run_read
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
 from api.attention_notifications import router as notifications_router
@@ -282,9 +282,9 @@ async def get_queue(user: dict = Depends(require_user), project_id: str | None =
                     view: Literal['activity'] | None = None):
     """Read the selected view of the person's ordered queue; no view is the dock's.
 
-    An unknown view is refused (422), never served as the dock's list.
+    An unknown view is refused (422), never served as the dock's list. Read lane: it never holds a write-pool worker.
     """
-    return await run_in_db(lambda: _queue_response(user['id'], project_id, view))
+    return await run_read(lambda: _queue_response(user['id'], project_id, view))
 
 
 @router.get("/rollup")

@@ -86,16 +86,20 @@ export async function fetchRoots(projectId?: string | null): Promise<ScopeRoot[]
  *
  * Never registers the read to a thread and never emits a change notification,
  * so it is safe to call on a change nudge or when the window regains focus.
+ * With `within`, the answer and its body must arrive inside that many ms or the
+ * probe ends with `PostTimeoutError`.
  */
 export async function fetchRevision(
 	path: string,
 	projectId?: string | null,
 	artifactId?: string | null,
+	within?: number,
 ): Promise<DocRevision> {
 	const q = `?path=${encodeURIComponent(path)}`
 		+ (projectId ? `&project_id=${encodeURIComponent(projectId)}` : '')
 		+ (artifactId ? `&artifact_id=${encodeURIComponent(artifactId)}` : '');
-	return ok(await apiFetch(`/api/files/revision${q}`, { sessionInAddress: true }));
+	const init = { sessionInAddress: true };
+	return within ? readWithin(`/api/files/revision${q}`, init, within, ok) : ok(await apiFetch(`/api/files/revision${q}`, init));
 }
 
 export async function fetchContent(path: string, opts: { projectId?: string | null; threadId?: string | null; liveOpen?: boolean } = {}): Promise<DocContent> {
@@ -171,7 +175,7 @@ export async function fetchComments(artifactId: string, within?: number): Promis
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; anchor_prefix?: string; anchor_suffix?: string; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	// The answer and its body share one deadline: a post never waits on either without end.
 	const timing = timingHeaders(c.client_id);

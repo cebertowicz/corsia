@@ -537,19 +537,23 @@ def test_e1_child_drafted_decision_wakes_the_parent_with_full_draft(db):
 
 def test_e1_the_gate_still_only_lets_the_parent_tier_act(db):
     """E1 must not weaken the existing authz gate: only the parent tier may
-    ``parent_review``/``raise`` the drafted decision."""
-    from plans import decisions
+    ``parent_review``/``raise`` the drafted decision. Since #3401 the worker's
+    refusal names whose step it is instead of the bare scope error."""
+    from plans import decision_authz, decisions
 
     _step, plan, node = delegated(db)
     drafted = _drafted(db, node, plan)
     decision_id = drafted.result["decision"]["id"]
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(service.PlanError, match=decision_authz.PARENT_RAISES):
         decisions.parent_review(
             decision_id, expected_revision=drafted.result["decision"]["revision"],
             mutation_id="review-worker", actor=worker_actor(),
             provenance="tool.plans", db=db,
         )
+    from plans import decision_projection
+
+    assert decision_projection.read(decision_id, db=db)["state"] == "draft"
 
 
 def test_e1_the_child_gets_a_digest_not_a_wake_and_is_not_stalled(db):

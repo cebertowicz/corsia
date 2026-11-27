@@ -119,6 +119,35 @@ def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
     assert sent[0].count("v1") == 1  # the version reads once, in the prefix
 
 
+def test_first_activation_sends_nothing_to_the_first_chat(isolated_db, monkeypatch):
+    import asyncio
+
+    from core.corrections_recording import active_corrections_version
+    from events import delivery
+    from jobs import corrections_activation
+
+    version = _version()
+    assert corrections_activation.complete_backfill(
+        version, owner_user_id="owner", weeks=13, before_count=None, after_count=4.0,
+    )
+    monkeypatch.setattr(
+        "core.agent_roster_queries.corsia_agent_contact",
+        lambda _owner, _db: ({"id": "first-chat"}, None),
+    )
+    calls = []
+
+    async def accepted(*args, **kwargs):
+        calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(delivery, "deliver_to_thread", accepted)
+    asyncio.run(corrections_activation.tell_conductor_about_activation(version))
+    asyncio.run(corrections_activation.retry_pending_activation_notice())
+
+    assert active_corrections_version() == version
+    assert calls == []
+
+
 def test_notice_is_marked_only_after_acceptance_and_is_not_resent(isolated_db, monkeypatch):
     import asyncio
 

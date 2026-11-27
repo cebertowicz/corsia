@@ -106,6 +106,46 @@ def _ambiguous_duplicate(old: str, new: str, start: int, end: int, quote: str, *
     return matches != 1
 
 
+def _slides_onto(lines: list[str], i: int, j: int, first: int, last: int) -> bool:
+    """Whether changed lines[i:j] could equally sit on lines first..last.
+
+    A block shifts one line left when the line before it equals its own last line, and right
+    when the line after it equals its own first line. Each shift leaves the other text
+    byte-identical, so the diff's choice among them is arbitrary. If a shifted position
+    reaches the anchored lines, the edit may have removed or added the anchored copy itself.
+    """
+    if i == j:
+        return False
+    lo, hi, size = i, j, j - i
+    while lo > 0 and lines[lo - 1] == lines[lo - 1 + size]:
+        lo -= 1
+    while hi < len(lines) and lines[hi] == lines[hi - size]:
+        hi += 1
+    return (lo < i or hi > j) and first < hi and last >= lo
+
+
+def _holds_twin(lines: list[str], i: int, j: int, first: int, last: int, quote: str) -> bool:
+    """Whether changed lines[i:j] touch lines first..last and contain another copy of quote.
+
+    The copy and the text between it and the anchor changed together, so the diff cannot
+    tell whether the edit removed or added that copy or the anchored one.
+    """
+    return i < j and (last + 1 == i or j == first) and quote in ''.join(lines[i:j])
+
+
+def _edit_may_be_anchor(old: str, new: str, old_lines: tuple[int, int], new_lines: tuple[int, int],
+                        quote: str) -> bool:
+    """Whether any removed or added block of lines could equally be the anchored block."""
+    before, after = old.splitlines(keepends=True), new.splitlines(keepends=True)
+    for tag, i, j, k, end in live_diff._line_opcodes(before, after):
+        if tag != 'equal' and (_slides_onto(before, i, j, *old_lines)
+                               or _slides_onto(after, k, end, *new_lines)
+                               or _holds_twin(before, i, j, *old_lines, quote)
+                               or _holds_twin(after, k, end, *new_lines, quote)):
+            return True
+    return False
+
+
 def _word_content(fragment: str) -> int:
     fragment = re.sub(r'^\s*(?:(?:[-+*]|\d+[.)])\s*)+', '', fragment)
     return sum(char.isalnum() for char in fragment)
@@ -127,6 +167,17 @@ def evaluate(old: str, new: str, old_span: tuple[int, int], new_span: tuple[int,
     new_start, new_end = new_index.line_at(c), new_index.line_at(d - 1)
     pairs = _line_pairs(old, new) if line_pairs is None else line_pairs
     kind, target = pairs.get(old_line, ('unclear', None))
+    if '\n' in old[a:b]:
+        end_kind, end_target = pairs.get(old_index.line_at(b - 1), ('unclear', None))
+        if (kind not in ('equal', 'paired') or target != new_start
+                or end_kind not in ('equal', 'paired') or end_target != new_end):
+            return False, False, 'line_' + kind
+        if old != new and old.count(quote) != new.count(quote) and _edit_may_be_anchor(
+                old, new, (old_line, old_index.line_at(b - 1)), (new_start, new_end), quote):
+            return False, True, 'duplicate_ambiguous'
+        before, after = _fragments(old, a, b)
+        current_before, current_after = _fragments(new, c, d)
+        return (new[c:d] == quote and before == current_before and after == current_after), False, 'context'
     if kind in ('delete', 'unclear') or target != new_start or new_start != new_end:
         return False, False, 'line_' + kind
     if kind == 'paired':

@@ -25,7 +25,7 @@
 	import { imagePins } from '$lib/cm/image-pins';
 	import { commentNewSigns } from '$lib/cm/comment-new-signs';
 	import { widgetComments } from '$lib/cm/widget-comments';
-	import { selectionOffer, type SelectionOffer } from '$lib/cm/selection-offer';
+	import { footOffer, passageOffer, selectionOffer, type SelectionOffer } from '$lib/cm/selection-offer';
 	import { cardQuoteLabel } from '$lib/cm/widget-cells';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { suggestionHistory, suggestionHistoryEffect, type SuggestionHistoryEntry } from '$lib/cm/suggestionHistory';
@@ -120,6 +120,8 @@
 
 	/** Clear document input at an explicit mode boundary, preserving independent comment focus. */
 	export function clearInputSelection() { if (view) clearDocumentInput(view); }
+	/** A kept draft's passage offered as a selection of it would be, or the view's foot for one with no place (`to` = `from`); the box marks it, so the input selection goes. */
+	export function offerFor(from: number, to: number): SelectionOffer | null { if (!view) return null; const offer = to > from ? passageOffer(view, from, to, composerAnchor) : footOffer(view); clearDocumentInput(view); return offer; }
 
 	let moved = false;
 	/** Tell open cards their text may have moved. The layout is read once CodeMirror has finished updating. */

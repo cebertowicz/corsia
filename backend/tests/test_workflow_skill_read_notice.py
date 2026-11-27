@@ -9,6 +9,11 @@ from tests.test_workflow_runs import SHIP_BODY, SHIP_STEPS, Run
 pytestmark = pytest.mark.asyncio
 
 NOTICE = 'plan_update add with kind "phase", workflow_ref "ship"'
+WHERE_IT_GOES = (
+    'start one run: plan_update add with kind "phase", workflow_ref "ship", a difficulty, a size and '
+    'parent_id: the plain phase (no workflow_ref) that holds this piece of work; add that phase '
+    'first if it has none.'
+)
 
 
 def _configure_sandbox(monkeypatch, workspace) -> None:
@@ -40,7 +45,7 @@ async def test_a_workflow_skill_read_names_its_start_call_and_the_call_works(iso
     _configure_sandbox(monkeypatch, workspace)
 
     text = await _read(run, workspace, "ship")
-    assert text.startswith("[Workflow skill") and NOTICE in text
+    assert text.startswith("[Workflow skill") and NOTICE in text and WHERE_IT_GOES in text
     assert "Write the draft." in text
     assert "[Workflow skill" not in await _read(run, workspace, "ship", offset=5)
     assert "[Workflow skill" not in await _read(run, workspace, "plain")

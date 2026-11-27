@@ -290,7 +290,7 @@
 				<div class="doc-host" class:covered={documentCovered} inert={documentCovered}>
 					<DocViewer
 						bind:this={viewer}
-						{target}
+						{target} tabThreadId={threadId}
 						{protectReplyLanding}
 						{escapeCloses}
 						onClose={() => onEscapeClose?.()}
@@ -309,7 +309,7 @@
 					<ArtifactDocumentImageOverlay
 						image={shownImage}
 						comments={imageComments}
-						{target}
+						{target} tabThreadId={threadId}
 						place={shownImage.camera ?? null}
 						onBack={() => closeImage()} onReplyJump={(id) => viewer?.jumpToUnread(id, () => closeImage(false))}
 						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}

@@ -47,7 +47,7 @@ def rows(db, user_id, annotated):
     keys = [(i["identity"]["integration"], i["identity"]["type"], i["external_id"]) for i in reviews]
     ids = {}
     if keys:
-        for r in db.execute("SELECT id,integration,type,external_id,created_at FROM artifact_identities WHERE state='active' AND external_id IN (SELECT value FROM json_each(?))", (json.dumps([k[2] for k in keys]),)):
+        for r in attention_detail.active_identities(db, "i.id,i.integration,i.type,i.external_id,i.created_at", keys):
             ids[(r["integration"], r["type"], r["external_id"])] = dict(r)
     ask_rows = []
     if ids:

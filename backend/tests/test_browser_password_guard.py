@@ -123,7 +123,7 @@ async def test_new_password_visit_opens_a_new_step_and_reports_to_the_pane(monke
 async def test_password_probe_keeps_known_nodes_only_on_their_own_visit(monkeypatch):
     """A node seen on the password page can still resolve to a box after the page navigates away."""
     class FakeCdp:
-        def __init__(self, _endpoint):
+        def __init__(self, _endpoint, **_options):
             self.session_id, self.parents, self.attached = None, {}, []
 
         async def __aenter__(self):
@@ -161,7 +161,7 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
     }
 
     class FakeCdp:
-        def __init__(self, _endpoint):
+        def __init__(self, _endpoint, **_options):
             self.session_id, self.parents, self.attached = None, {}, []
 
         async def __aenter__(self):

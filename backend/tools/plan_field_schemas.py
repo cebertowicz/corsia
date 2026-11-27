@@ -30,10 +30,14 @@ _DECISION_REVISION = {
 TEXT = {"type": "string", "minLength": 1}
 NULLABLE_TEXT = {"type": ["string", "null"]}
 
+# The kinds an agent may create. 'track' was never given behavior apart from 'phase';
+# stored tracks stay valid (public.NODE_KINDS keeps it) and read as containers.
+OFFERED_NODE_KINDS = ("phase", "task")
+
 MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "kind": {
         "type": "string",
-        "enum": sorted(public.NODE_KINDS),
+        "enum": list(OFFERED_NODE_KINDS),
         "description": "The plan node kind.",
     },
     # The plan pane already renders state and counts. A title only names the
@@ -322,6 +326,7 @@ DECISION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "minItems": public.DECISION_MIN_OPTIONS,
         "maxItems": public.DECISION_MAX_OPTIONS,
         "items": _OPTION_SCHEMA,
+        "description": "In context, tradeoff and rationale, name an option by its label: the person never sees ids (A, B).",
     },
     "other_enabled": {
         "type": "boolean",

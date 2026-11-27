@@ -40,7 +40,7 @@ def test_startup_migration_removes_legacy_session_tables_idempotently() -> None:
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert SCHEMA_VERSION == 209
+        assert SCHEMA_VERSION == 211
         assert (result.migrated, result.from_version, result.to_version) == (True, 64, SCHEMA_VERSION)
         assert _table_names(db) == set()
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

@@ -4,10 +4,13 @@ import { CommentSendRefused, unknownSendFailure, type SendableChatComment } from
 import { retryRefusedForGood } from '$lib/chatCommentDelivery';
 import { adoptCommentThreads } from '$lib/chatCommentRefresh';
 import { apiFetch } from '$lib/api/request';
+import { commentFetch } from '$lib/api/boundedRequest';
+import { retryCommentConnection, retryCommentStatus } from '$lib/commentRetry';
 import { findModelById, workspaceModels } from '$lib/stores/models';
 import { reasoningEffort, threads } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
 import { viewingDocumentForThread } from '$lib/stores/documentViewport';
+import { TEXT_KEPT } from '$lib/stores/draftKept';
 import { canEditCheckpointWindow } from './v7/modelWarning';
 
 /** What a send asks the runtime to do with the turn in flight. */
@@ -39,9 +42,13 @@ function blockedSendText(cause: ReplySendBlock, noun: 'comment' | 'reply'): stri
 	return `Couldn’t send this ${noun} because the connection is unavailable. Your ${noun} stays here; try again.`;
 }
 
+/** Only a chat with no model to answer waits for the person; a restart or a lost connection passes. */
 function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
-	throw new CommentSendRefused(blockedSendText(cause, noun));
+	throw new CommentSendRefused(blockedSendText(cause, noun), false, cause !== 'noModel', cause);
 }
+
+/** HTTP failures shared with the document comment retry rule. */
+const passing = retryCommentStatus;
 
 /**
  * Whether the person can raise this chat's model's context window in its details, by the model details' own rule
@@ -59,7 +66,7 @@ function windowEditable(threadId: string): boolean {
  * Only the box keeps the text, so only a box line says so.
  */
 export function commentFailure(detail: unknown, reference: unknown, noun: 'comment' | 'reply', act: 'sent' | 'retried', threadId: string): { text: string; final: boolean } {
-	const kept = act === 'sent' ? ' Your text stays here to copy.' : '';
+	const kept = act === 'sent' ? ` ${TEXT_KEPT}` : '';
 	if (detail === 'chat_not_found') return { text: `This chat is deleted, so this ${noun} couldn’t be ${act}.${kept}`, final: true };
 	if (detail === 'comment_quote_gone') return { text: `The text this ${noun} quotes isn’t in the chat, so this ${noun} couldn’t be ${act}.${kept}`, final: true };
 	if (detail === 'comment_model_cap') {
@@ -75,7 +82,7 @@ async function adoptPosted(response: Response, threadId: string, noun: 'comment'
 	const result = await response.json().catch(() => null);
 	if (!response.ok) {
 		const failure = commentFailure(result?.detail, result?.reference, noun, act, threadId);
-		throw new CommentSendRefused(failure.text, failure.final);
+		throw new CommentSendRefused(failure.text, failure.final, passing(response.status), String(response.status));
 	}
 	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }
@@ -100,10 +107,13 @@ export async function postChatComment(reply: SendableChatComment, threadId: stri
 	const body = JSON.stringify({ input_id: reply.input_id, comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
 	let response: Response;
 	try {
-		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
+		response = await commentFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
 			method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
 		});
-	} catch { refuse('notAccepted', noun); }
+	} catch (error) {
+		if (retryCommentConnection(error)) refuse('notAccepted', noun);
+		throw error;
+	}
 	await adoptPosted(response, threadId, noun, 'sent');
 	// Counted once the server holds it: a refused press, or a press again after a lost answer, is not another comment.
 	emitComposerSend(threadId, '', 0, [comment]);

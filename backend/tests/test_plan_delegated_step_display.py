@@ -105,6 +105,24 @@ def _node(db, thread_id: str, node_id: str) -> dict:
     return nodes[node_id]
 
 
+@pytest.mark.parametrize("above", [0, 2])
+def test_child_summary_counts_only_open_work_above_later(above):
+    db = _db()
+    try:
+        parent = service.ensure_plan("thread", "owner", db=db)
+        step = _task(parent.id, "Delegated", spawn_kind="claude-code", db=db)
+        child = service.ensure_plan("thread", "child", db=db)
+        _task(child.id, "Set aside", later=True, db=db)
+        for index in range(above):
+            _task(child.id, f"In play {index}", db=db)
+        mutations.attach_spawned_thread(step.id, "child", db=db)
+        progress = _node(db, "owner", step.id)["child"]["progress"]
+        assert progress["open"] == above + 1
+        assert progress["open_above"] == above
+    finally:
+        db.close()
+
+
 def test_a_delegated_step_and_its_plan_read_in_progress_while_the_child_plan_runs():
     db = _db()
     try:
@@ -260,7 +278,7 @@ def test_a_delegated_step_awaiting_review_reads_as_review_once_the_child_is_done
         entry = _plan(db, "owner")
 
         # The child's finished step folded out of its counter.
-        assert node["child"]["progress"] == {"done": 0, "total": 0, "open": 0, "liveness": "idle"}
+        assert node["child"]["progress"] == {"done": 0, "total": 0, "open": 0, "open_above": 0, "liveness": "idle"}
         assert node["execution"]["condition"] == "review"
         assert node["display"] == {"label_key": "working", "tone_key": "active"}
         assert entry["progress"]["liveness"] == "needs-review"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capSheetAboveText, giveBackRoom, keptWhole, liftSheetCap, placeAboveSheet, SHEET_GAP, sheetCapped, sheetRaised } from './sheetClearance';
+import { capSheetAboveText, giveBackRoom, holdSheetHeight, keptWhole, liftSheetCap, placeAboveSheet, SHEET_GAP, sheetCapped, sheetRaised } from './sheetClearance';
 
 /**
  * A sheet in a drawer whose content is `natural` px tall: it lays out at that height, or at its cap when the cap is lower, its body
@@ -179,6 +179,68 @@ describe('placeAboveSheet', () => {
 		placeAboveSheet(el, { top: 500, bottom: 521 }, band, true);
 		giveBackRoom(el);
 		expect(el.style.paddingBottom).toBe('10px');
+	});
+});
+
+describe('holdSheetHeight', () => {
+	const frames = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+
+	it('caps the sheet at the height it has, and a later cap from the room above never lets it grow past that', () => {
+		const panel = sheet(852, 443);
+		capSheetAboveText(panel, { height: 46, regionTop: 122 });
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('652px');
+		holdSheetHeight(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('443px');
+		capSheetAboveText(panel, { height: 46, regionTop: 122 });
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('443px');
+		// A cap that leaves less room than the held height still wins.
+		capSheetAboveText(panel, { height: 300, regionTop: 122 });
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('398px');
+	});
+
+	it('turns the height transition off for the press, so the sheet does not swell towards its cap and settle back, then gives it back', async () => {
+		const panel = sheet(852, 443);
+		capSheetAboveText(panel, { height: 46, regionTop: 122 });
+		holdSheetHeight(panel);
+		expect(panel.style.transition).toBe('none');
+		await frames();
+		expect(panel.style.transition).toBe('');
+	});
+
+	it('takes the pulled grabber out of the height it holds', () => {
+		const panel = sheet(852, 443);
+		capSheetAboveText(panel, { height: 46, regionTop: 122 });
+		panel.style.setProperty('--drawer-pull', '40px');
+		holdSheetHeight(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('403px');
+	});
+
+	it('is the cap the grabber lifts: the held sheet grows when pulled up, and nothing holds it after', () => {
+		const panel = sheet(852, 600);
+		capSheetAboveText(panel, { height: 46, regionTop: 122 });
+		holdSheetHeight(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('600px');
+		const held = sheet(852, 443);
+		capSheetAboveText(held, { height: 46, regionTop: 122 });
+		holdSheetHeight(held);
+		expect(sheetCapped(held)).toBe(false); // nothing more to show: the body fits
+		liftSheetCap(held);
+		expect(held.style.getPropertyValue('--drawer-text-cap')).toBe('');
+		capSheetAboveText(held, { height: 46, regionTop: 122 });
+		expect(held.style.getPropertyValue('--drawer-text-cap')).toBe('652px');
+	});
+
+	it('leaves a sheet with no cap, and a sheet the reader pulled up, as they are', () => {
+		const bare = sheet(852, 443);
+		holdSheetHeight(bare);
+		expect(bare.style.getPropertyValue('--drawer-text-cap')).toBe('');
+		expect(bare.style.transition).toBe('');
+		const raisedPanel = sheet(852, 443);
+		capSheetAboveText(raisedPanel, { height: 46, regionTop: 122 });
+		liftSheetCap(raisedPanel);
+		holdSheetHeight(raisedPanel);
+		expect(raisedPanel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+		holdSheetHeight(null);
 	});
 });
 

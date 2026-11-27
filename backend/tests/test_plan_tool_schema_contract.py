@@ -181,6 +181,13 @@ def test_plan_decision_rationale_publishes_its_purpose_and_limit():
     assert rationale["description"].startswith("Why you recommend it")
 
 
+def test_plan_decision_options_publish_name_by_label():
+    from tools.plans import PlanDecisionTool
+
+    options = PlanDecisionTool().parameters["properties"]["params"]["properties"]["options"]
+    assert "name an option by its label" in options["description"]
+
+
 @pytest.mark.parametrize("operation", sorted(_MUTATION_REQUIRED))
 def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(operation):
     from tools.plans import PlanUpdateTool
@@ -399,7 +406,14 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_update 9,620 -> 9,680 (+60): `request_review` takes a reviewer's `verdict`, which
 # settles a review step. The field is a bare enum: only a reviewer handed a review step
 # uses it, so its instruction rides in that reviewer's hand-over brief, not in every turn.
-_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_100}
+# plan_decision 3,100 -> 3,200: `options` says to name an option by its label in context, tradeoff
+# and rationale, because the person's screen shows labels only and agents wrote "A ... B ...".
+# plan_decision 3,200 -> 3,650 (measured 3,627): the description says when a choice is not a
+# card (background the options depend on, or a layout to see); in an old-vs-new test on a small
+# local model, the old text sent both kinds of choice as cards and the new text sent them as
+# briefs. It also corrects "the parent tier reviews before raise", which was wrong for an agent
+# with no parent: that agent calls parent_review itself.
+_PUBLISHED_BYTES = {"plan_update": 9_680, "plan_decision": 3_650}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

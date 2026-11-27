@@ -8,10 +8,11 @@ counting the whole canonical unread set through ``feedback_state`` directly.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from doceditor import doc_sections
-from doceditor.feedback_state import unread_comment_rows
+from doceditor.feedback_state import _SCOPE_CHUNK, unread_comment_rows
 from infra.activity_queue_base import clip_title, flat as _flat
 from infra.auth import may_access_artifact
 from plans.public import UNKNOWN_THREAD_SOURCE, thread_sources
@@ -95,21 +96,26 @@ def _document_row(artifact: str, rows: list, sources: dict) -> dict:
     }
 
 
-def document_rows(db, user_id: str) -> list[dict]:
-    """Return one row per document holding an unread agent reply to the person's comment.
+def _person_documents(db) -> list[str]:
+    """The documents holding a comment by the person, in id order.
 
-    A document qualifies when an agent answered in a thread the person commented in, and
-    the answer is unread. Its count is the unread replies that qualify — answers to the
-    person's own comments — not every unread item in the document: an unrelated unread
-    agent comment never rides the row's number. ``latest_reply_id`` stays the newest
-    unread item of any kind (#3358): Done passes it as the read mark, and since it is
-    never older than the newest counted reply, one press clears every counted reply and
-    the row with it; an item that arrives after the press stays unread until the next
-    qualifying reply starts a new row.
+    Only these can hold a qualifying reply: one needs the person to have written its
+    thread's root or a reply under it, on the same document. A comment by the person is
+    ``author_kind='user'``, as in the qualifying test below. ``INDEXED BY``: the person's
+    comments by time (idx_doc_comments_user_created) hold only their rows, so the read
+    never visits an agent's comment; with no ANALYZE the planner would scan every comment.
     """
-    unread_sql, unread_params = unread_comment_rows(user_id, None)
+    rows = db.execute("""SELECT DISTINCT artifact_id FROM doc_comments INDEXED BY idx_doc_comments_user_created
+                         WHERE author_kind='user' ORDER BY artifact_id""").fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _replies(db, user_id: str, scope: tuple[str, ...]) -> list:
+    """The qualifying unread replies on the given documents, by document, newest first."""
+    unread_sql, unread_params = unread_comment_rows(user_id, scope)
     # The attention authorization seam requires a current routing owner; a
     # released owner's registration is not an owner, even if comments can read it.
+    # One JSON list binds the scope here, so a full chunk stays under SQLite's bind limit.
     sql = f"""
     WITH owner_candidates AS (
       SELECT r.artifact_id, r.parent_thread_id,
@@ -118,14 +124,19 @@ def document_rows(db, user_id: str) -> list[dict]:
                r.updated_at DESC, r.id ASC) AS pos
       FROM artifact_registrations r
       WHERE r.relationship_state IN ('owner-pinned','owner-active')
+        AND r.artifact_id IN (SELECT value FROM json_each(?))
     ), unread AS (
       SELECT root.id AS root_id, item.id AS reply_id, item.artifact_id,
              item.created_at, item.author_thread_id,
              (item.parent_id IS NOT NULL AND item.author_kind='agent'
               AND item.artifact_id=root.artifact_id
               AND EXISTS (SELECT 1 FROM threads author WHERE author.id=item.author_thread_id AND author.user_id=?)
-              AND EXISTS (SELECT 1 FROM doc_comments person WHERE person.artifact_id=root.artifact_id
-                          AND person.author_kind='user' AND (person.id=root.id OR person.parent_id=root.id))
+              -- The person commented in this thread: they wrote its root, or a reply under it.
+              -- Each side is an index lookup (the root's own row, idx_doc_comments_parent); one
+              -- EXISTS over the whole document re-scanned every comment in it for every reply.
+              AND (root.author_kind='user'
+                   OR EXISTS (SELECT 1 FROM doc_comments person WHERE person.parent_id=root.id
+                              AND person.author_kind='user' AND person.artifact_id=root.artifact_id))
              ) AS qualifies
       {unread_sql}
     ), counted AS (
@@ -142,6 +153,25 @@ def document_rows(db, user_id: str) -> list[dict]:
     WHERE c.qualifies AND own.parent_thread_id IS NOT NULL AND own.parent_thread_id<>''
     ORDER BY c.artifact_id, c.created_at DESC, c.reply_id DESC
     """
+    return db.execute(sql, (json.dumps(scope), user_id, *unread_params)).fetchall()
+
+
+def document_rows(db, user_id: str) -> list[dict]:
+    """Return one row per document holding an unread agent reply to the person's comment.
+
+    A document qualifies when an agent answered in a thread the person commented in, and
+    the answer is unread. Its count is the unread replies that qualify — answers to the
+    person's own comments — not every unread item in the document: an unrelated unread
+    agent comment never rides the row's number. ``latest_reply_id`` stays the newest
+    unread item of any kind (#3358): Done passes it as the read mark, and since it is
+    never older than the newest counted reply, one press clears every counted reply and
+    the row with it; an item that arrives after the press stays unread until the next
+    qualifying reply starts a new row.
+
+    Only the documents the person commented in are read, a chunk at a time, each through
+    its own index range, so a poll's cost follows those documents, not every comment.
+    """
+    documents = _person_documents(db)
     # Access is the artifact routes' own predicate, asked once per owner thread.
     access: dict[str, bool] = {}
 
@@ -150,7 +180,8 @@ def document_rows(db, user_id: str) -> list[dict]:
             access[owner] = may_access_artifact(owner, user_id, db=db)
         return access[owner]
 
-    replies = [row for row in db.execute(sql, (user_id, *unread_params)).fetchall()
+    replies = [row for start in range(0, len(documents), _SCOPE_CHUNK)
+               for row in _replies(db, user_id, tuple(documents[start:start + _SCOPE_CHUNK]))
                if allowed(row['owner_thread'])]
     sources = thread_sources(db, {str(r['author_thread_id']) for r in replies})
     groups: dict[str, list] = {}

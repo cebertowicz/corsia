@@ -3,7 +3,9 @@
 	import { messages } from '$lib/stores/threads';
 	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
-	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
+	import { chatCommentDrafts, chatPress } from '$lib/chatCommentDrafts.svelte';
+	import { unsentComments } from '$lib/stores/unsentComments.svelte';
+	import { bodyOf, KeptResume, rangeRect } from './chatKeptResume';
 	import { clipChatSelection, chatTextPoint, sendCommentReply, type SendableChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
@@ -28,7 +30,8 @@
 	const threadBounds = () => transcriptBounds(messageRoot());
 	// On a phone the comment-writing sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
 	let sheet = $state<HTMLElement | null>(null);
-	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string };
+	/** `unplaced`: a kept draft whose passage no longer reads as kept: its box opens at its message, on no text. */
+	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string; unplaced?: boolean };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
 	// `list` is every thread on the pressed text when there are two or more; `listed` says the list, not one of its threads, is showing.
@@ -46,6 +49,9 @@
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	const rootDraft = $derived(threadId && draft ? chatCommentDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
+	const draftKey = $derived(threadId && draft ? chatCommentDrafts.rootKey(threadId, draft.messageId, draft.anchor) : '');
+	// A box on a draft that posted on its own closes, as when its own press posts.
+	$effect(() => { if (draftKey && chatCommentDrafts.postedOnItsOwn(draftKey)) untrack(() => { chatCommentDrafts.closedOn(draftKey); requestClose(); }); });
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = coarsePointer();
@@ -108,13 +114,9 @@
 		if (!body.contains(selection.getRangeAt(0).endContainer)) {
 			selection.removeAllRanges(); selection.addRange(clipped.range);
 		}
-		const rects = [...clipped.range.getClientRects()];
-		if (!rects.length) { pick = null; return; }
-		const { top, bottom, left, right } = rects.reduce((box, rect) => ({
-			top: Math.min(box.top, rect.top), bottom: Math.max(box.bottom, rect.bottom),
-			left: Math.min(box.left, rect.left), right: Math.max(box.right, rect.right),
-		}), { top: Infinity, bottom: -Infinity, left: Infinity, right: -Infinity });
-		pick = { messageId: message.id, seq: message.seq, anchor: clipped.anchor, rect: new DOMRect(left, top, right - left, bottom - top) };
+		const rect = rangeRect(clipped.range);
+		if (!rect) { pick = null; return; }
+		pick = { messageId: message.id, seq: message.seq, anchor: clipped.anchor, rect };
 	}
 	type PaintedMark = { from: number; to: number; quote: string; wraps: HTMLElement[]; labels: string[] };
 	const painted = new WeakMap<HTMLElement, Map<string, PaintedMark>>();
@@ -145,9 +147,13 @@
 			for (const comment of message.chat_comments ?? []) if (comment.id === open && unreadNow(comment)) heldUnread.add(comment.id);
 		}
 	});
+	// A chat's kept comments come back the first time it is drawn (`KeptResume`): its one box opens, brought into view once painted.
+	const kept = new KeptResume();
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
+		const resumed = kept.run(root, threadId, $messages.filter(message => message.thread_id === threadId), !open && !viewing);
+		if (resumed) draft = resumed;
 		const focusedMark = document.activeElement instanceof HTMLElement && root.contains(document.activeElement)
 			? document.activeElement.closest<HTMLElement>('[data-comment-ids][role="button"]') : null;
 		const focusedId = focusedMark?.dataset.commentIds?.split(',')[0];
@@ -173,7 +179,7 @@
 			const target = byId.get(row.dataset.messageId ?? '');
 			const sent = target?.chat_comments ?? [];
 			const marks = sent.map(comment => ({ ...comment, kind: replySending(comment) ? 'pending' as const : 'placed' as const }));
-			if (draft && draft.messageId === row.dataset.messageId) marks.push({ ...draft.anchor, id: 'draft', kind: 'pending' } as typeof marks[number]);
+			if (draft && !draft.unplaced && draft.messageId === row.dataset.messageId) marks.push({ ...draft.anchor, id: 'draft', kind: 'pending' } as typeof marks[number]);
 			const valid = marks.filter(comment => (body.textContent ?? '').slice(comment.from_off, comment.to_off) === comment.quote);
 			recordUnplaced(row.dataset.messageId, sent, valid);
 			for (const [id, old] of previous) {
@@ -225,6 +231,8 @@
 				}
 			}
 		}
+		const resumedBody = resumed && bodyOf(root, resumed.messageId);
+		if (resumedBody) (painted.get(resumedBody)?.get('draft')?.wraps.find(wrap => wrap.isConnected) ?? resumedBody).scrollIntoView({ block: 'center', behavior: 'instant' });
 		if (focusedId && focusedMessageId) {
 			const row = root.querySelector<HTMLElement>(`.message[data-message-id="${CSS.escape(focusedMessageId)}"]`);
 			const replacement = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
@@ -329,7 +337,9 @@
 		const currentDraft = draft;
 		if (!currentDraft || !threadId) return;
 		// The box stays, read-only, until the server stores the comment, then closes; a refusal keeps it open with its cause.
-		const stored = await chatCommentDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, (inputId) => onSendReply({ id: crypto.randomUUID(), input_id: inputId, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }));
+		// Pressed, it keeps where it goes, so a post that fails for a reason that passes goes on its own.
+		const press = chatPress({ threadId, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor });
+		const stored = await chatCommentDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, (inputId) => onSendReply({ id: crypto.randomUUID(), input_id: inputId, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }), press);
 		if (stored && draft === currentDraft && !closing) {
 			afterClose = () => { close(); focusPosted(currentDraft, note); };
 			closing = true;
@@ -355,7 +365,7 @@
 </script>
 
 {#if pick && !open}
-	<button bind:offsetWidth={buttonWidth} class="sel-comment" class:above={place?.above} class:below={!place?.above} style="top:{place?.top}px; left:{left}px" onmousedown={event => event.preventDefault()} onclick={() => { draft = pick; }}>
+	<button bind:offsetWidth={buttonWidth} class="sel-comment" class:above={place?.above} class:below={!place?.above} style="top:{place?.top}px; left:{left}px" onmousedown={event => event.preventDefault()} onclick={() => { draft = pick; if (draftKey) chatCommentDrafts.closedOn(draftKey); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
 {/if}
@@ -363,7 +373,7 @@
 	<ChatThreadSheet bind:panel={sheetPanel} bind:dialog={sheetDialog} messageId={viewing.messageId} {threadId} comments={viewing.listed ? listedComments : [viewedComment!]} listed={!!viewing.listed} {fromList} {closing} {narrow} anchor={threadAnchor} bounds={threadBounds} onReply={replyInThread} onBack={() => { if (viewing) viewing = { ...viewing, listed: true }; }} onClose={requestClose} onClosed={closed} />
 {/if}
 {#snippet composerBody()}
-	<CommentComposer mentions={false} quote={draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={isReply ? 'Reply' : 'Comment'} submittingLabel={isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.posting} error={rootDraft?.error ?? ''} shownKey={threadId && draft ? chatCommentDrafts.rootKey(threadId, draft.messageId, draft.anchor) : ''} retryable={!rootDraft?.final} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />
+	<CommentComposer mentions={false} quote={draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={isReply ? 'Reply' : 'Comment'} submittingLabel={isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.posting} sending={!!draftKey && unsentComments.sending(draftKey)} error={rootDraft?.error ?? ''} shownKey={threadId && draft ? chatCommentDrafts.rootKey(threadId, draft.messageId, draft.anchor) : ''} retryable={!rootDraft?.final} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />
 {/snippet}
 {#snippet marginBody()}
 	{#key target}<div role="dialog" aria-label={heading}>{@render composerBody()}</div>{/key}

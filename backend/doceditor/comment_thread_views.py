@@ -32,8 +32,8 @@ def mark_viewed(user_id: str, artifact_id: str, root_id: str, seen_reply_id: str
         db.close()
 
 
-# Documents per write transaction, under SQLite's bound-parameter limit (three IN lists each).
-_READ_CHUNK = 300
+# Documents per write transaction: the unread query's four IN lists bind 4*N + 5 values, under SQLite's oldest default limit of 999.
+_READ_CHUNK = 240
 
 
 def mark_documents_read(user_id: str, documents: list[tuple[str, str]]) -> None:

@@ -7,7 +7,7 @@ function screen(overrides: Partial<ScreenHandoff> = {}): ScreenHandoff {
 	return {
 		v: 1, operationId: 'update-1',
 		model: { value: 41.3, step: 'upgrading', lifted: 0, visitedMigration: true, lastAt: NOW - 1_000, phase: { from: 30, to: 60, expected: 60, elapsed: 12 } },
-		fromVersion: '2026.10.12', toVersion: '2026.10.13', usualSeconds: 45,
+		fromVersion: '2026.10.12', toVersion: '2026.10.13', usualSeconds: 45, drainDeadline: null,
 		downAt: NOW - 70_000, seqChangedAt: NOW - 61_000, lastSeq: 12, lastPid: 4242,
 		failure: null, theme: 'light', route: '/?project=abc',
 		...overrides,
@@ -18,9 +18,11 @@ afterEach(() => history.replaceState(null, '', '/'));
 
 describe('the update screen handoff', () => {
 	it('round-trips the whole screen through a fragment well inside the bound', () => {
-		const fragment = `#${encodeHandoff(screen())}`;
+		const handoff = screen({ drainDeadline: NOW + 30_000, paused: { safe: 1, total: 26 } });
+		expect(readHandoff(`#${encodeHandoff(screen({ paused: { safe: 27, total: 26 } }))}`, NOW)).toBeNull();
+		const fragment = `#${encodeHandoff(handoff)}`;
 		expect(fragment.length).toBeLessThan(HANDOFF_MAX_CHARS / 2);
-		expect(readHandoff(fragment, NOW)).toEqual(screen());
+		expect(readHandoff(fragment, NOW)).toEqual(handoff);
 	});
 
 	it.each([

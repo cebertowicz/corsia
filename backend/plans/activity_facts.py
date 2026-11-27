@@ -7,10 +7,10 @@ import json
 
 from infra.packed_rows import fetch_all
 from plans import (
-    admission_attempts, admission_projection, artifact_links, decision_projection, delegation,
-    hierarchy,
+    admission_attempts, admission_projection, artifact_links, decision_projection,
+    decision_waits, delegation, hierarchy,
     node_states, node_waits, not_moving, operator_display_state, operator_stopped,
-    user_steering, wait_causes,
+    user_steering,
 )
 
 
@@ -154,10 +154,15 @@ def decision_indexes(plan_ids: list[str], *, db) -> tuple[list[dict], set[str], 
     waits = {
         str(item["source_node_id"])
         for item in facts
-        if wait_causes.decision_wait_kind(
+        if decision_waits.decision_wait_kind(
             item["decision_state"], author=item["owner_id"], reviewer=item["spawned_by"],
             answerable=item["answerable"],
         ) is not None
+    }
+    # A decision's own review task waits on the agent tier until the raise
+    # (``decision_waits.not_raised_cause``), so it never reads as an ask (#3401).
+    waits |= {
+        str(item["node_id"]) for item in facts if decision_waits.awaits_raise(item["decision_state"])
     }
     return facts, human_decisions, waits
 

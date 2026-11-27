@@ -34,6 +34,11 @@ export const MIN_BOX_PX = 6;
 export const HIT_RADIUS = 22;
 
 export const isPoint = (region: ImageRegion): boolean => region.w <= 0 && region.h <= 0;
+const isWhole = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;
+/** What the composer says a new comment is on, in place of a quote. */
+export function regionLabel(region: ImageRegion): string {
+	return isWhole(region) ? 'The whole image' : isPoint(region) ? 'Point on the image' : 'Box on the image';
+}
 
 const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high);
 

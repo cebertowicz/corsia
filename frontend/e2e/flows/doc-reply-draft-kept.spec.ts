@@ -11,7 +11,7 @@ import { expectFailureLook } from '../support/failureLook';
 /**
  * A reply half typed on a document comment is still there, with its caret, after the person goes to another conversation and
  * comes back: the comment surface is rebuilt on return, and the reply is kept outside it until it is posted or cleared. A reply
- * whose post fails says why under its field and keeps its text. Taken at 1440 (the margin beside the document) and at 393 (the
+ * whose post is refused says why and keeps its text; a transient failure waits to send again. Taken at 1440 (the margin beside the document) and at 393 (the
  * phone's thread sheet, opened by tapping the highlight).
  */
 
@@ -27,7 +27,7 @@ const DRAFT = 'Half a reply about the gate and the gloves';
 /** How far back from the end the caret is moved before leaving, so its place is not just the end. */
 const BACK = 6;
 
-type Seeded = { title: string; other: string; id: string };
+type Seeded = { title: string; other: string; id: string; artifactId: string };
 
 /** A comment taller than the thread's popover at 1440 and its sheet at 393, so either scrolls its own reply field out of view (`long`). */
 const LONG_COMMENT = ['Should we say where to park?', ...Array.from({ length: 30 }, (_, i) => `Point ${i + 1}: the lot by the north gate fills early, so say which street to use.`)].join('\n\n');
@@ -60,7 +60,7 @@ async function seed(page: Page, long = false): Promise<Seeded> {
 			threads: { [threadId]: { tabs: [{ instanceId: 'reply-kept-tab', artifactId, path: docPath, title: fileName, loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'reply-kept-tab', visible: true, activeSurface: 'artifact' } }, splitWidth: null,
 		}));
 	}, { threadId, docPath, fileName, artifactId });
-	return { title, other, id };
+	return { title, other, id, artifactId };
 }
 
 const docText = (page: Page) => page.locator('.cm-content', { hasText: 'Trail day' });
@@ -71,18 +71,44 @@ const card = (page: Page, id: string) => page.locator(`[data-thread-id="${id}"]`
 const field = (page: Page, id: string) => card(page, id).getByPlaceholder('Reply…');
 const phone = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768;
 /** The reply POST for thread `id` is held until `fail()`, which fails it as a dropped connection. */
-async function holdReply(page: Page, id: string) {
-	let release!: () => void, seen!: () => void;
+async function holdReply(page: Page, id: string, refusal = false) {
+	let release!: () => void, seen!: () => void, finished!: () => void;
+	let clientId = '', posts = 0, restored = false;
 	const held = new Promise<void>((resolve) => { release = resolve; });
 	const arrived = new Promise<void>((resolve) => { seen = resolve; });
+	const dropped = new Promise<void>((resolve) => { finished = resolve; });
 	await page.route('**/api/artifacts/*/comments*', async (route) => {
 		const request = route.request();
-		if (request.method() !== 'POST' || (request.postDataJSON() as { parent_id?: string } | null)?.parent_id !== id) return route.continue();
+		const body = request.method() === 'POST' ? request.postDataJSON() as { parent_id?: string; client_id?: string } | null : null;
+		if (body?.parent_id !== id) return route.continue();
+		posts++;
+		if (posts > 1) return restored ? route.continue() : route.abort('failed');
+		clientId = body.client_id ?? '';
 		seen();
 		await held;
-		return route.abort('failed');
+		if (refusal) await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ detail: 'Cannot post this reply' }) });
+		else await route.abort('failed');
+		finished();
 	});
-	return { arrived, fail: release };
+	return { arrived, dropped, fail: release, restore: () => { restored = true; }, clientId: () => clientId };
+}
+
+async function sentOnce(page: Page, artifactId: string, parentId: string, clientId: string) {
+	expect(clientId).not.toBe('');
+	await expect.poll(async () => {
+		const response = await page.request.get(`/api/artifacts/${artifactId}/comments`, { params: { token: TEST_TOKEN } });
+		expect(response.ok()).toBeTruthy();
+		const { comments } = await response.json();
+		const parent = comments.find((item: { id: string }) => item.id === parentId);
+		return (parent?.replies ?? []).filter((item: { body: string }) => item.body === DRAFT).map((item: { id: string }) => item.id);
+	}).toEqual([clientId]);
+}
+
+async function waitingReply(page: Page, id: string, reply: Locator) {
+	await expect(reply, 'the text is kept').toHaveValue(DRAFT);
+	await expect(card(page, id).getByRole('status').filter({ hasText: 'Sending…' })).toHaveCount(1);
+	await expect(card(page, id).getByRole('alert')).toHaveCount(0);
+	await expect(failToast(page)).toHaveCount(0);
 }
 const failToast = (page: Page) => page.locator('.toast').filter({ hasText: /post/i });
 const painted = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -94,6 +120,8 @@ const painted = (page: Page) => page.evaluate(() => new Promise<void>((resolve) 
 async function goTo(page: Page, title: string) {
 	if (phone(page)) {
 		if (await sheet(page).count()) await putSheetAway(page);
+		const chat = page.getByRole('button', { name: 'Chat', exact: true });
+		if (await chat.isVisible()) await chat.tap();
 		await page.getByRole('button', { name: /^Toggle sidebar/ }).tap();
 		await expect(page.locator('aside.sidebar')).toHaveClass(/\bopen\b/);
 		await waitForMainSlideToSettle(page);
@@ -105,9 +133,19 @@ async function goTo(page: Page, title: string) {
 	}
 }
 
+/** On a phone returning to chat, open its document panel as the person does. */
+async function showDocument(page: Page) {
+	if (phone(page) && await page.getByRole('button', { name: 'Toggle panel', exact: true }).isVisible()) {
+		await page.getByRole('button', { name: 'Toggle panel', exact: true }).tap();
+		await page.getByRole('button', { name: /^reply-kept-.*\.md / }).tap();
+		await waitForMainSlideToSettle(page);
+	}
+	await expect(docText(page)).toBeVisible({ timeout: 15_000 });
+}
+
 /** The comment's thread opened and its reply field showing: the margin card pressed at 1440, the highlight tapped at 393. */
 async function openThread(page: Page, id: string): Promise<Locator> {
-	await expect(docText(page)).toBeVisible({ timeout: 15_000 });
+	await showDocument(page);
 	await expect(mark(page)).toBeVisible({ timeout: 15_000 });
 	if (phone(page)) {
 		const line = await mark(page).evaluate((el) => { const r = el.getClientRects()[0]; return { x: r.left + Math.min(24, r.width / 2), y: r.top + r.height / 2 }; });
@@ -167,6 +205,12 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 
 		test('a reply being typed is still there, caret and all, after going to another conversation and back', async ({ page }) => {
 			const { title, other, id } = await seed(page);
+			let posts = 0;
+			await page.route('**/api/artifacts/*/comments*', async (route) => {
+				const request = route.request();
+				if (request.method() === 'POST' && request.postDataJSON()?.parent_id === id) posts++;
+				await route.continue();
+			});
 			await loginByUrl(page, { waitForComposer: false });
 			await goTo(page, title);
 			const reply = await openThread(page, id);
@@ -182,13 +226,94 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			const back = await openThread(page, id);
 			await expect(back, 'the reply is kept').toHaveValue(DRAFT);
 			expect(await back.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd]), 'the caret is where it was left').toEqual([caret, caret]);
+			expect(posts, 'the unpressed reply was never posted').toBe(0);
 		});
 
-		test('a reply whose post fails says why under its field, and only there, and keeps its text', async ({ page }) => {
+		test('a dropped reply stays in its field and sends on return', async ({ page }) => {
+			const { title, id, artifactId } = await seed(page);
+			const wire = await holdReply(page, id);
+			await loginByUrl(page, { waitForComposer: false });
+			await goTo(page, title);
+			const reply = await openThread(page, id);
+			await reply.fill(DRAFT);
+			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
+			await wire.arrived;
+			wire.fail();
+			await wire.dropped;
+			await waitingReply(page, id, reply);
+			wire.restore();
+			await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+			await sentOnce(page, artifactId, id, wire.clientId());
+			await expect(reply).toHaveValue('');
+		});
+
+		test('a dropped reply stays kept while away and sends on return', async ({ page }) => {
+			const { title, other, id, artifactId } = await seed(page);
+			const wire = await holdReply(page, id);
+			await loginByUrl(page, { waitForComposer: false });
+			await goTo(page, title);
+			const reply = await openThread(page, id);
+			await reply.fill(DRAFT);
+			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
+			await wire.arrived;
+			await goTo(page, other);
+			await expect(docText(page)).toHaveCount(0);
+			wire.fail();
+			await wire.dropped;
+			await expect(failToast(page)).toHaveCount(0);
+			await goTo(page, title);
+			const back = await openThread(page, id);
+			await waitingReply(page, id, back);
+			wire.restore();
+			await goTo(page, other);
+			await goTo(page, title);
+			await showDocument(page);
+			await sentOnce(page, artifactId, id, wire.clientId());
+			const returned = await openThread(page, id);
+			await expect(returned).toHaveValue('');
+		});
+
+		test('a dropped reply scrolled away stays kept and sends on reconnect', async ({ page }) => {
+			const { title, id, artifactId } = await seed(page, true);
+			const wire = await holdReply(page, id);
+			await loginByUrl(page, { waitForComposer: false });
+			await goTo(page, title);
+			const reply = await openThread(page, id);
+			await card(page, id).getByRole('button', { name: 'Show more' }).click();
+			await reply.fill(DRAFT);
+			await card(page, id).getByRole('button', { name: 'Send reply' }).click();
+			await wire.arrived;
+			const over = await reply.evaluate((element) => {
+				let scroller = element.parentElement;
+				while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+				if (!scroller) throw new Error('no scroller above the reply field');
+				const box = scroller.getBoundingClientRect(), top = Math.max(box.top, 0), bottom = Math.min(box.bottom, window.innerHeight);
+				return { x: box.left + box.width / 2, y: (top + bottom) / 2 };
+			});
+			await page.mouse.move(over.x, over.y);
+			const outside = () => reply.evaluate((element) => {
+				const box = element.getBoundingClientRect();
+				let scroller = element.parentElement;
+				while (scroller && !/(auto|scroll)/.test(`${getComputedStyle(scroller).overflowX} ${getComputedStyle(scroller).overflowY}`)) scroller = scroller.parentElement;
+				const clip = scroller?.getBoundingClientRect();
+				return Math.min(box.bottom, window.innerHeight, clip?.bottom ?? Infinity) <= Math.max(box.top, 0, clip?.top ?? 0);
+			}).catch(() => true);
+			for (let i = 0; i < 20 && !(await outside()); i += 1) { await page.mouse.wheel(0, -600); await painted(page); }
+			expect(await outside(), 'the reply field is out of view before the post fails').toBe(true);
+			wire.fail();
+			await wire.dropped;
+			await waitingReply(page, id, reply);
+			wire.restore();
+			await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+			await sentOnce(page, artifactId, id, wire.clientId());
+			await expect(reply).toHaveValue('');
+		});
+
+		test('a reply whose post is refused says why under its field, and only there, and keeps its text', async ({ page }) => {
 			const { title, id } = await seed(page);
 			await page.route('**/api/artifacts/*/comments*', (route) => {
 				const request = route.request();
-				if (request.method() === 'POST' && (request.postDataJSON() as { parent_id?: string } | null)?.parent_id === id) return route.abort('failed');
+				if (request.method() === 'POST' && (request.postDataJSON() as { parent_id?: string } | null)?.parent_id === id) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ detail: 'Cannot post this reply' }) });
 				return route.continue();
 			});
 			await loginByUrl(page, { waitForComposer: false });
@@ -223,7 +348,7 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 
 		test('a reply whose post fails after going to another conversation says why in a toast, and under its field on return', async ({ page }, testInfo) => {
 			const { title, other, id } = await seed(page);
-			const wire = await holdReply(page, id);
+			const wire = await holdReply(page, id, true);
 			await loginByUrl(page, { waitForComposer: false });
 			await goTo(page, title);
 			const reply = await openThread(page, id);
@@ -235,14 +360,13 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			await expect(docText(page), 'the field is gone with its conversation').toHaveCount(0);
 			wire.fail();
 			await expect(failToast(page), 'no field is on screen, so a toast says why').toBeVisible({ timeout: 30_000 });
-			// Held up, as a pointer resting on it holds it, however long the way back takes: only the field coming back takes it away.
-			await failToast(page).dispatchEvent('mouseenter');
 			await frame(page, 'reply-away-toast');
+			await failToast(page).getByRole('button', { name: 'Dismiss' }).click();
+			await expect(failToast(page)).toHaveCount(0);
 			await goTo(page, title);
 			const back = await openThread(page, id);
 			await expect(back, 'the text is kept').toHaveValue(DRAFT);
 			await expect(card(page, id).getByRole('alert'), 'the field says why on return').toBeVisible();
-			await expect(failToast(page), 'and the toast goes, so the reason shows in one place').toHaveCount(0);
 			await expectFailureLook(page, testInfo, card(page, id).getByRole('alert'), 'reply field');
 			await frame(page, 'reply-returned-reason');
 		});
@@ -252,7 +376,7 @@ for (const [label, size] of [['1440', DESKTOP], ['393', PHONE]] as const) {
 			// 393. Either one scrolls as a whole, so with the long comment shown in full, reading back up to its start takes the field
 			// out of view.
 			const { title, id } = await seed(page, true);
-			const wire = await holdReply(page, id);
+			const wire = await holdReply(page, id, true);
 			await loginByUrl(page, { waitForComposer: false });
 			await goTo(page, title);
 			const reply = await openThread(page, id);

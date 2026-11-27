@@ -177,7 +177,7 @@
 			class:has-menu={!!onUserAction && hasMenu(node)}
 			{...rowHandlers(node)}
 			data-node-id={node.id}
-			class:dragging={drag?.id === node.id}
+			class:dragging={drag?.id === node.id} class:drag-lifted={drag?.liftedIds.includes(node.id)}
 			class:drag-live={!!drag}
 			class:can-drag={!!onUserAction && canMove(node) && !userActionBusy}
 			onclickcapture={(event) => { if (reorder.consumeClick()) { event.preventDefault(); event.stopPropagation(); } }}
@@ -343,7 +343,7 @@
 	.tree-row.can-drag { touch-action: pan-y; }
 	.tree-row.dragging { position: relative; z-index: 3; background: var(--bg-primary); box-shadow: var(--shadow-chip); }
 	/* Rows ease aside only while a drag is live. On drop the offsets clear in the same render as the DOM reorder, so the swap must be instant: a transition there slides the dropped row in from a slot past its place. */
-	.tree-row.drag-live { transition: transform 160ms ease; }
+	.tree-row.drag-live:not(.drag-lifted) { transition: transform 160ms ease; }
 	.tree-row, .drill-row {
 		--plan-row-line-height: calc(var(--text-subhead) * var(--lh-normal));
 		--plan-row-action-height: 28px;

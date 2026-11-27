@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from doceditor import comments, comment_recipients, comment_snapshots, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
 from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed, not_active_message
-from doceditor.comment_creation import Anchor, CreateReceipt
+from doceditor.comment_creation import Anchor, CreateReceipt, kept_anchor, kept_sides
 from doceditor.comments import CommentAccessDenied, CommentTargetMoved  # storage raises the first too, for a reply's parent
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -35,6 +35,10 @@ class CommentInput:
     end: int | None = None
     browser: bool = False
     live_capture: bool = False
+    # The 32-character sides a person's kept draft holds of its passage; with both, a post with no capture held is
+    # placed where its quote still has exactly those sides (`kept_place`), or refused.
+    kept_prefix: str | None = None
+    kept_suffix: str | None = None
     registration: dict | None = None
     submit: bool = False
     review_request_id: str | None = None
@@ -57,6 +61,14 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
                 duplicate["anchor_prefix"], duplicate["anchor_suffix"], None, None)
     if anchor is not None:
         return anchor.quote, anchor.start, anchor.end, anchor.prefix, anchor.suffix, anchor.text, None
+    if kept_sides(request):
+        # Sent again from a kept draft: no capture is held, so its quote is found by its sides in the file.
+        try:
+            text = read_doc_text(request.path)
+        except (OSError, ValueError):
+            return request.quote, request.start, request.end, None, None, None, 'read_error'
+        placed = kept_anchor(text, request)
+        return placed.quote, placed.start, placed.end, placed.prefix, placed.suffix, placed.text, None
     if request.live_capture:
         raise CommentSelectionChanged("The live document closed. Reopen it; your draft is kept.")
     if request.parent_id or request.review or not request.quote:

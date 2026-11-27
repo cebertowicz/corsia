@@ -20,6 +20,8 @@ in front of this order (infra/activity_urgency.py).
 
 from __future__ import annotations
 
+import json
+
 import plans.artifact_links as artifact_links
 import plans.decision_projection as decision_projection
 
@@ -97,6 +99,23 @@ def _decision_detail(
 # --- batch lookups, bounded by the raised rows -------------------------------
 
 
+def active_identities(db, columns: str, keys) -> list:
+    """The active identities with these (integration, type, external_id) keys, as ``columns``.
+
+    Each key is one lookup in the identity's unique index. An ``external_id IN`` read
+    can't use that index (external_id is its last column), so it reads every identity.
+    ``CROSS JOIN`` keeps the keys outermost: with no ANALYZE the planner may otherwise
+    scan the identities and probe the key list.
+    """
+    return db.execute(
+        f"""SELECT {columns} FROM json_each(?) key CROSS JOIN artifact_identities i
+             WHERE i.integration=json_extract(key.value, '$[0]')
+               AND i.type=json_extract(key.value, '$[1]')
+               AND i.external_id=json_extract(key.value, '$[2]') AND i.state='active'""",
+        (json.dumps(sorted(set(keys))),),
+    ).fetchall()
+
+
 def _identity_rows(db, items: list[dict]) -> dict[tuple[str, str, str], dict]:
     """Load exactly the identities in this raised batch, keyed on full identity.
 
@@ -109,16 +128,11 @@ def _identity_rows(db, items: list[dict]) -> dict[tuple[str, str, str], dict]:
                item["external_id"]) for item in items}
     if not wanted:
         return {}
-    external_ids = sorted({key[2] for key in wanted})
-    marks = ",".join("?" for _ in external_ids)
-    rows = db.execute(
-        f"""SELECT id AS artifact_id, external_id, integration, type, title,
-                   metadata, created_at
-              FROM artifact_identities
-             WHERE state='active' AND external_id IN ({marks})""",
-        tuple(external_ids),
-    ).fetchall()
-    return {_identity_key(row): row for row in rows if _identity_key(row) in wanted}
+    rows = active_identities(
+        db, "i.id AS artifact_id, i.external_id, i.integration, i.type, i.title, i.metadata, i.created_at",
+        wanted,
+    )
+    return {_identity_key(row): row for row in rows}
 
 
 # --- the queue ---------------------------------------------------------------
