@@ -55,6 +55,7 @@ Source: `backend/infra/analytics_db.py`.
 | `db_read_ms` | DOUBLE | No | No | — | — |
 | `dbq_bulk_ms` | DOUBLE | No | No | — | — |
 | `db_bulk_ms` | DOUBLE | No | No | — | — |
+| `worker_wait_ms` | DOUBLE | No | No | — | — |
 
 Indexes: None.
 
@@ -73,6 +74,21 @@ Source: `backend/infra/analytics_db.py`.
 | `max_ms` | DOUBLE | No | Yes | — | — |
 | `sum_bytes` | BIGINT | No | No | — | — |
 | `max_bytes` | BIGINT | No | No | — | — |
+| `buckets` | INTEGER[] | No | Yes | — | — |
+
+Indexes: None.
+
+### `worker_wait_daily`
+
+Source: `backend/infra/analytics_db.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `day` | DATE | Yes | Yes | — | — |
+| `outcome` | VARCHAR | Yes | Yes | — | — |
+| `count` | BIGINT | No | Yes | — | — |
+| `sum_ms` | DOUBLE | No | Yes | — | — |
+| `max_ms` | DOUBLE | No | Yes | — | — |
 | `buckets` | INTEGER[] | No | Yes | — | — |
 
 Indexes: None.

@@ -205,6 +205,9 @@ def _schedule_current_corrections_classifier() -> None:
 
 
 async def _start_runtime_services() -> None:
+    from infra.agent_pool import start as start_agent_pool
+
+    start_agent_pool()
     # The database is initialized by now; capture already started in the
     # lifespan, before the first database write.
     await asyncio.to_thread(_apply_saved_cpu_profiler)

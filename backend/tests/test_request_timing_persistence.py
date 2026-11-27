@@ -66,14 +66,14 @@ def test_write_batch_inserts_slow_rows(analytics):
 def test_write_batch_persists_per_lane_columns_and_leaves_unmeasured_null(analytics):
     laned = request_timing.SlowRequest(
         datetime.now(UTC), "GET", "/laned", 200, 1_200, 9, 8, response_bytes=4,
-        dbq_read_ms=3, db_read_ms=2, dbq_bulk_ms=1, db_bulk_ms=0,
+        dbq_read_ms=3, db_read_ms=2, dbq_bulk_ms=1, db_bulk_ms=0, worker_wait_ms=25,
     )
     request_timing.write_batch({}, [laned, _slow("/unlaned")])
 
     rows = analytics.execute(
-        "SELECT route, response_bytes, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms FROM request_slow ORDER BY route"
+        "SELECT route, response_bytes, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms, worker_wait_ms FROM request_slow ORDER BY route"
     ).fetchall()
-    assert rows == [("/laned", 4, 3, 2, 1, 0), ("/unlaned", None, None, None, None, None)]
+    assert rows == [("/laned", 4, 3, 2, 1, 0, 25), ("/unlaned", None, None, None, None, None, None)]
 
 
 def test_bootstrap_adds_lane_columns_to_an_existing_file_as_unknown(tmp_path, monkeypatch):
@@ -149,10 +149,10 @@ async def test_record_after_swap_lands_in_next_batch(analytics, monkeypatch):
     writing, release = threading.Event(), threading.Event()
     real_write = request_timing.write_batch
 
-    def blocking_write(aggregates, slow):
+    def blocking_write(aggregates, slow, worker_waits):
         writing.set()
         release.wait(5)
-        written.append((aggregates, slow))
+        written.append((aggregates, slow, worker_waits))
 
     _record("/first")
     monkeypatch.setattr(request_timing, "write_batch", blocking_write)
@@ -171,30 +171,83 @@ async def test_record_after_swap_lands_in_next_batch(analytics, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_failed_write_drops_batch_and_counts_failure(analytics, monkeypatch, caplog):
-    def failing_write(aggregates, slow):
+    def failing_write(aggregates, slow, worker_waits):
         raise RuntimeError("disk full")
 
     _record()  # started_at=0 makes this request slow, so it also queues one slow row
+    request_timing.record_worker_wait(0.01, "cancelled")
     monkeypatch.setattr(request_timing, "write_batch", failing_write)
     with caplog.at_level(logging.WARNING, logger=request_timing.__name__):
         await request_timing.flush_pending()
 
     assert request_timing.flush_failures == 1
-    assert not request_timing._aggregates and not request_timing._slow_requests
+    assert not request_timing._aggregates and not request_timing._slow_requests and not request_timing._worker_waits
     messages = [record.getMessage() for record in caplog.records]
     assert [message for message in messages if not message.startswith("slow request ")] == [
-        "request timing flush failed; dropped 1 aggregate keys and 1 slow rows: disk full"
+        "request timing flush failed; dropped 1 aggregate keys, 2 slow rows and 1 worker wait keys: disk full"
     ]
 
 
 @pytest.mark.asyncio
 async def test_disabled_analytics_drops_pending_without_writing(analytics, monkeypatch):
     _record()
+    request_timing.record_worker_wait(0.01, "timed_out")
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
     await request_timing.flush_pending()
 
-    assert not request_timing._aggregates
+    assert not request_timing._aggregates and not request_timing._worker_waits
     assert analytics.execute("SELECT COUNT(*) FROM request_timing_daily").fetchone()[0] == 0
+    assert analytics.execute("SELECT COUNT(*) FROM request_slow").fetchone()[0] == 0
+    assert analytics.execute("SELECT COUNT(*) FROM worker_wait_daily").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_http_request_persists_worker_wait(analytics, monkeypatch):
+    monkeypatch.setattr(request_timing, "_SLOW_MS", -1)
+
+    async def app(scope, receive, send):
+        request_timing.record_worker_wait(0.025, "cancelled")
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await request_timing.RequestTimingMiddleware(app)(
+            {"type": "http", "method": "GET", "route": SimpleNamespace(path="/x")}, None, None
+        )
+    await request_timing.flush_pending()
+    assert analytics.execute(
+        "SELECT method, status, worker_wait_ms FROM request_slow ORDER BY method"
+    ).fetchall() == [("GET", 499, 25), ("WORKER", 499, 25)]
+    assert analytics.execute("SELECT outcome, count, sum_ms FROM worker_wait_daily").fetchone() == (
+        "cancelled", 1, 25,
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_waits_persist_and_merge_without_http_context(analytics):
+    for outcome, wait in [("assigned", 0.001), ("cancelled", 0.02), ("timed_out", 0.3), ("failed", 0.05)]:
+        request_timing.record_worker_wait(wait, outcome)
+    await request_timing.flush_pending()
+    request_timing.record_worker_wait(0.004, "assigned")
+    await request_timing.flush_pending()
+
+    rows = analytics.execute(
+        "SELECT outcome, count, sum_ms, max_ms, buckets FROM worker_wait_daily ORDER BY outcome"
+    ).fetchall()
+    assert [(r[0], r[1], r[2], r[3]) for r in rows] == [
+        ("assigned", 2, 5, 4), ("cancelled", 1, 20, 20), ("failed", 1, 50, 50),
+        ("timed_out", 1, 300, 300)
+    ]
+    assert [sum(r[4]) for r in rows] == [2, 1, 1, 1]
+    assert analytics.execute(
+        "SELECT method, route, status, dur_ms, worker_wait_ms, response_bytes "
+        "FROM request_slow ORDER BY dur_ms"
+    ).fetchall() == [
+        ("WORKER", "<worker-pool>", 200, 1, 1, None),
+        ("WORKER", "<worker-pool>", 200, 4, 4, None),
+        ("WORKER", "<worker-pool>", 499, 20, 20, None),
+        ("WORKER", "<worker-pool>", 500, 50, 50, None),
+        ("WORKER", "<worker-pool>", 408, 300, 300, None),
+    ]
 
 
 @pytest.mark.asyncio
@@ -217,11 +270,14 @@ def test_prune_retention_keeps_boundary_date_and_timestamp(analytics):
     insert_slow = "INSERT INTO request_slow (ts, method, route, status, dur_ms, dbq_ms, db_ms) VALUES (?, 'GET', ?, 200, 1, 0, 0)"
     analytics.execute(insert_slow, (now - timedelta(days=30, microseconds=1), "/old"))
     analytics.execute(insert_slow, (now - timedelta(days=30), "/edge"))
+    analytics.execute("INSERT INTO worker_wait_daily VALUES ('2026-06-26', 'assigned', 1, 1, 1, [1])")
+    analytics.execute("INSERT INTO worker_wait_daily VALUES ('2026-06-27', 'cancelled', 1, 1, 1, [1])")
 
     request_timing.prune_retention(now)
 
     assert analytics.execute("SELECT route FROM request_timing_daily").fetchall() == [("/edge",)]
     assert analytics.execute("SELECT route FROM request_slow").fetchall() == [("/edge",)]
+    assert analytics.execute("SELECT outcome FROM worker_wait_daily").fetchall() == [("cancelled",)]
 
 
 def test_bootstrap_drops_the_old_slow_row_ts_index_and_the_prune_still_works(tmp_path, monkeypatch):

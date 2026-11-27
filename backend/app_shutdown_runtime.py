@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 
+async def shutdown_agent_pool(logger, pending_cancel, run_cleanup_owner):
+    """Reap the pool's children before storage and timing are torn down."""
+    from infra.agent_pool import shutdown
+
+    failure, cancelled = await run_cleanup_owner("agent pool", shutdown(), logger)
+    return failure, pending_cancel or cancelled
+
+
 async def shutdown_fork_owners():
     """Join shared forks, then their checkpoint-specific wake owner."""
     from core.checkpoint_runtime import shutdown_checkpoint_wakes

@@ -1,4 +1,4 @@
-"""Non-blocking, aggregate-only HTTP request timing instrumentation.
+"""Non-blocking HTTP request and worker wait timing instrumentation.
 
 ``response_bytes`` counts body bytes emitted to the client. This middleware
 wraps JSON compression, so for gzip-capable clients it records compressed
@@ -17,6 +17,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Callable
 
 from infra.product_events import analytics_disabled
+from infra.request_timing_types import DbTiming, SlowRequest
+from infra.worker_wait_timing import record_worker_wait as _record_worker_wait, write_worker_waits
 
 log = logging.getLogger(__name__)
 
@@ -37,22 +39,6 @@ CLIENT_CLOSED = 499
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 #: Every method label a route entry can carry (``_normalized_method``); the browser capture accepts exactly these.
 METHOD_LABELS = _HTTP_METHODS | {"OTHER"}
-
-
-@dataclass
-class DbTiming:
-    """Mutable request-local database timing totals in milliseconds.
-
-    ``queue_ms`` and ``execution_ms`` total every executor lane. The read and
-    bulk lanes are also kept apart, so a slow request shows which lane it waited on.
-    """
-
-    queue_ms: float = 0.0
-    execution_ms: float = 0.0
-    read_queue_ms: float = 0.0
-    read_execution_ms: float = 0.0
-    bulk_queue_ms: float = 0.0
-    bulk_execution_ms: float = 0.0
 
 
 @dataclass
@@ -84,29 +70,12 @@ class Aggregate:
         self.buckets[-1] += 1
 
 
-@dataclass(frozen=True)
-class SlowRequest:
-    """Aggregate-safe details retained only until the next batch flush."""
-
-    ts: datetime
-    method: str
-    route: str
-    status: int
-    duration_ms: float
-    dbq_ms: float
-    db_ms: float
-    response_bytes: int | None = None
-    dbq_read_ms: float | None = None
-    db_read_ms: float | None = None
-    dbq_bulk_ms: float | None = None
-    db_bulk_ms: float | None = None
-
-
 _request_db_timing: contextvars.ContextVar[DbTiming | None] = contextvars.ContextVar(
     "request_db_timing", default=None
 )
 _aggregates: dict[tuple[str, str, str, str], Aggregate] = defaultdict(Aggregate)
 _slow_requests: list[SlowRequest] = []
+_worker_waits: dict[tuple[str, str], Aggregate] = defaultdict(Aggregate)
 flush_failures = 0
 
 
@@ -125,6 +94,21 @@ def add_db_timing(queue_seconds: float, execution_seconds: float, lane: str | No
     elif lane == "bulk":
         timing.bulk_queue_ms += queue_ms
         timing.bulk_execution_ms += execution_ms
+
+
+def record_worker_wait(wait_seconds: float, outcome: str) -> None:
+    """Record one pool wait on the event-loop thread, with or without an HTTP request.
+
+    Call once per enqueued call, on assignment, cancellation, queue timeout, or failure.
+    Every call adds a request_slow row, even below the HTTP slow threshold: method
+    WORKER, route <worker-pool>, status 200/499/408/500 for those outcomes, and
+    duration and worker_wait_ms equal to the wait. No call identity is stored.
+    Persistence uses the request timing batch: it is best effort, disabled with
+    analytics, and pending data is lost on a failed flush or abrupt shutdown.
+    """
+    _record_worker_wait(
+        wait_seconds, outcome, _worker_waits, _slow_requests, _request_db_timing.get()
+    )
 
 
 def bucket_percentile(buckets: list[int], percentile: float) -> float:
@@ -249,7 +233,7 @@ class RequestTimingMiddleware:
                     datetime.now(UTC), key[1], route, status, duration_ms,
                     timing.queue_ms, timing.execution_ms, response_bytes,
                     timing.read_queue_ms, timing.read_execution_ms,
-                    timing.bulk_queue_ms, timing.bulk_execution_ms,
+                    timing.bulk_queue_ms, timing.bulk_execution_ms, timing.worker_wait_ms,
                 )
             )
         if duration_ms > _LOGGED_SLOW_MS:
@@ -262,20 +246,23 @@ class RequestTimingMiddleware:
             )
 
 
-_Batch = tuple[dict[tuple[str, str, str, str], Aggregate], list[SlowRequest]]
+_Batch = tuple[dict[tuple[str, str, str, str], Aggregate], list[SlowRequest],
+               dict[tuple[str, str], Aggregate]]
 
 
 def _swap_pending() -> _Batch:
     """Detach the pending batch; called only on the event-loop thread."""
-    global _aggregates, _slow_requests
-    batch = (_aggregates, _slow_requests)
+    global _aggregates, _slow_requests, _worker_waits
+    batch = (_aggregates, _slow_requests, _worker_waits)
     _aggregates = defaultdict(Aggregate)
     _slow_requests = []
+    _worker_waits = defaultdict(Aggregate)
     return batch
 
 
 def write_batch(aggregates: dict[tuple[str, str, str, str], Aggregate],
-                slow: list[SlowRequest]) -> None:
+                slow: list[SlowRequest],
+                worker_waits: dict[tuple[str, str], Aggregate] | None = None) -> None:
     """Persist one detached batch in a single DuckDB transaction; raise on failure."""
     from infra.analytics_db import get_db
 
@@ -306,19 +293,20 @@ def write_batch(aggregates: dict[tuple[str, str, str, str], Aggregate],
                 params,
             )
         if slow:
-            values = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in slow)
+            values = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in slow)
             slow_params = [
                 value
                 for row in slow
                 for value in (row.ts, row.method, row.route, row.status, row.duration_ms,
                               row.dbq_ms, row.db_ms, row.response_bytes, row.dbq_read_ms, row.db_read_ms,
-                              row.dbq_bulk_ms, row.db_bulk_ms)
+                              row.dbq_bulk_ms, row.db_bulk_ms, row.worker_wait_ms)
             ]
             cur.execute(
                 "INSERT INTO request_slow (ts, method, route, status, dur_ms, dbq_ms, db_ms, response_bytes, "
-                "dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms) VALUES " + values,
+                "dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms, worker_wait_ms) VALUES " + values,
                 slow_params,
             )
+        write_worker_waits(cur, worker_waits)
         cur.sql("COMMIT")
     finally:
         cur.close()  # an uncommitted transaction rolls back on close
@@ -327,15 +315,15 @@ def write_batch(aggregates: dict[tuple[str, str, str, str], Aggregate],
 async def flush_pending() -> None:
     """Swap the batch on the loop thread, then write it off-loop or drop it."""
     global flush_failures
-    aggregates, slow = _swap_pending()
-    if analytics_disabled() or not (aggregates or slow):
+    aggregates, slow, worker_waits = _swap_pending()
+    if analytics_disabled() or not (aggregates or slow or worker_waits):
         return
     try:
-        await asyncio.to_thread(write_batch, aggregates, slow)
+        await asyncio.to_thread(write_batch, aggregates, slow, worker_waits)
     except Exception as error:  # analytics is intentionally non-load-bearing
         flush_failures += 1
-        log.warning("request timing flush failed; dropped %d aggregate keys and %d slow rows: %s",
-                    len(aggregates), len(slow), error)
+        log.warning("request timing flush failed; dropped %d aggregate keys, %d slow rows and %d worker wait keys: %s",
+                    len(aggregates), len(slow), len(worker_waits), error)
 
 
 async def _flush_loop() -> None:
@@ -380,6 +368,10 @@ def prune_retention(now: datetime | None = None) -> None:
         cur.execute("DELETE FROM request_slow WHERE ts < ?", (now - timedelta(days=30),))
         cur.execute(
             "DELETE FROM request_timing_daily WHERE day < ?",
+            ((now - timedelta(days=90)).date(),),
+        )
+        cur.execute(
+            "DELETE FROM worker_wait_daily WHERE day < ?",
             ((now - timedelta(days=90)).date(),),
         )
         cur.execute(

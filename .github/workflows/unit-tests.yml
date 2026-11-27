@@ -382,6 +382,7 @@ jobs:
           mkdir -p "$CORSIA_WORKSPACE/.corsia" "$CORSIA_STATE_DIR"
           .venv/bin/python -c "from infra.database import init_db; init_db()"
           .venv/bin/python -m pytest -c backend/pytest.ini "${files[@]}" \
+            backend/tests/test_agent_pool.py::PoolTests::test_real_child_priority \
             -m "not integration and not cloud_required" \
             --tb=short -vv -o faulthandler_timeout=60 \
             --basetemp="$isolated_root/pytest" \
