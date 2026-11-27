@@ -238,4 +238,4 @@ printf 'CORSIA bundled backend: git=%s\n' "$(command -v git || echo none)"
 printf '%s' "$config_notes" | while IFS= read -r note; do
   if [ -n "$note" ]; then printf 'CORSIA bundled backend: %s\n' "$note"; fi
 done
-exec "$resources/python/bin/CORSIA" -m uvicorn main:app --app-dir "$resources/backend" "$@"
+exec "$resources/python/libexec/CORSIA" -m uvicorn main:app --app-dir "$resources/backend" "$@"
