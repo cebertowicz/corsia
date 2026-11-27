@@ -45,12 +45,10 @@ mkdir -p "$(dirname "$APP")"
 ditto "$SOURCE_APP" "$APP"
 readonly RESOURCES="$APP/Contents/Resources"
 readonly PYTHON="$RESOURCES/python/bin/python3"
-readonly SERVER="$RESOURCES/python/bin/CORSIA"
+readonly SERVER="$RESOURCES/python/libexec/CORSIA"
 readonly PACKAGES="$RESOURCES/python/backend-packages"
 [ -x "$SERVER" ] || { echo "error: named interpreter is missing or not executable: $SERVER" >&2; exit 1; }
-# The server keeps python3's signing identity, so privacy grants made to it survive the rename.
-codesign -d --verbose=2 "$SERVER" 2>"$TEMP_ROOT/signature"
-grep -Fx "Identifier=python3" "$TEMP_ROOT/signature"
+[ ! -e "$RESOURCES/python/bin/CORSIA" ] || { echo "error: CORSIA in python/bin would shadow the corsia command on agent PATHs" >&2; exit 1; }
 codesign -d --entitlements :- "$SERVER" >"$TEMP_ROOT/entitlements.plist" 2>/dev/null
 "$PYTHON" -I -c 'import plistlib, sys; assert plistlib.load(open(sys.argv[1], "rb")) == plistlib.load(open(sys.argv[2], "rb"))' \
   "$TEMP_ROOT/entitlements.plist" "$ROOT/desktop/src-tauri/Entitlements.plist"
