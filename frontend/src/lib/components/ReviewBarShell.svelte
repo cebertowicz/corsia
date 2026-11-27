@@ -184,7 +184,7 @@
 		<span class="rb-head">
 			{#snippet lead()}
 				<span class="rb-lead">
-					<Avatar name={who.name} color={agentColor(who.id)} hidden />
+					<Avatar name={who.name} color={agentColor(who.id || who.name)} hidden />
 					<span class="rb-who">{#if openChat}<AskerLink {who} {plus} cut colon {openChat} />{:else}<strong><MiddleName name={who.name} /></strong>{#if plus}<span class="rb-plus" aria-hidden="true">+{plus}</span>{/if}:{/if}</span>
 				</span>
 			{/snippet}

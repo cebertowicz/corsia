@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
+import { ASKER_CHAT } from './ReviewBarShell.svelte';
 import CommentTaskDismiss from './comments/CommentTaskDismiss.svelte';
 import ReviewBarHarness from '$lib/__tests__/fixtures/ReviewBarHarness.svelte';
 import { createReviewBarState, DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarState.svelte';
@@ -130,6 +131,37 @@ describe('ReviewBar', () => {
 		expect(button('Won’t do')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
 		expect(button('Send back')).toBeUndefined();
+	});
+
+	describe('a document task in Activity (asker is a chat link)', () => {
+		const step = (node_description: string) => ({
+			node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3, node_description,
+			plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent',
+		});
+		async function inActivity(node_description: string) {
+			api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false, person_step: step(node_description) });
+			component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1' }, context: new Map([[ASKER_CHAT, () => {}]]) });
+			await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
+			flushSync();
+		}
+
+		it.each([['empty', ''], ['the title again', ' Set up the workspace ']])('says only "Task for you" when the description is %s', async (_name, description) => {
+			await inActivity(description);
+			expect(host.textContent).toContain('Task for you');
+			expect(host.querySelector('[aria-expanded]')).toBeNull();
+			expect(host.textContent).not.toContain('Needs you to do this');
+			expect(button('Done')).toBeTruthy();
+		});
+
+		it('opens the step\'s own description when it says more than the title', async () => {
+			await inActivity('Run the installer. Already tried: the supported route.');
+			expect(host.textContent).toContain('Task for you');
+			expect(host.textContent).not.toContain('Run the installer.');
+			host.querySelector<HTMLElement>('[aria-expanded]')!.click();
+			flushSync();
+			expect(host.textContent).toContain('Run the installer. Already tried: the supported route.');
+			expect(host.textContent).not.toContain('Needs you to do this');
+		});
 	});
 
 	it('a document\'s comment task says what waits and offers only Dismiss all, which re-reads the bar', async () => {

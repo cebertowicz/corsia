@@ -51,7 +51,7 @@
 
 	// Every band here, the document's own review band included, names the agent asking at rest.
 	setContext(ASKER_AT_REST, true);
-	setContext(ASKER_WHO, { get name() { return item.source.thread_label; }, get id() { return item.source.thread_id ?? item.key; } });
+	setContext(ASKER_WHO, { get name() { return item.source.thread_label; }, get id() { return item.source.thread_id ?? ''; } });
 	setContext(REVIEW_ANSWERED, () => void onActed());
 
 	const decision = $derived(decisionOf(item));
@@ -62,7 +62,7 @@
 	const sourceThread = $derived(item.source.thread_id);
 	// The open document keeps its original lookup context until the person moves on.
 	const documentThread = untrack(() => item.source.thread_id);
-	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? item.key });
+	const who = $derived({ name: item.source.thread_label, id: item.source.thread_id ?? '' });
 
 	let sending = $state(false);
 	const offline = $derived($connectionState !== 'connected');
@@ -222,9 +222,6 @@
 {#snippet askerTop(status: string)}
 	{#if desk && openChat}<AskerTop {who} {status} {openChat} />{/if}
 {/snippet}
-{#snippet decisionNotice()}{@render itemNotice()}{@render askerTop('Waiting for your answer')}{/snippet}
-{#snippet taskNotice()}{@render itemNotice()}{@render askerTop('Task for you')}{/snippet}
-{#snippet heldNotice()}{@render itemNotice()}{@render askerTop('Waiting for you to send it')}{/snippet}
 {#snippet failureLine()}
 	<!-- One flex item, so the reference sits under its line on the band's wrapping row, not beside the buttons. -->
 	{#if failure?.quiet}<div class="act-failure-row"><p class="offline-notice" role="status">{failure.text}</p></div>
@@ -264,8 +261,9 @@
 		{@render failureLine()}
 		{#if offline}<p class="act-failure-row offline-notice" role="status">Answering is paused until this reconnects.</p>{/if}
 	{/snippet}
-	<ActivityKindPanel notice={desk && openChat ? decisionNotice : noLonger || stale ? itemNotice : undefined} label="Decision" gutter>
+	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Decision" gutter>
 		{#snippet body()}
+			{@render askerTop('Waiting for your answer')}
 			<h1 class="dh">{decision.title}</h1>
 			{#if ago}<p class="ago">{ago}</p>{/if}
 			{#if decision.context}<p class="dctx">{decision.context}</p>{/if}
@@ -290,8 +288,9 @@
 		</div>
 		{@render failureLine()}
 	{/snippet}
-	<ActivityKindPanel notice={desk && openChat ? taskNotice : noLonger || stale ? itemNotice : undefined} label="Task">
+	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Task">
 		{#snippet body()}
+			{@render askerTop('Task for you')}
 			<h1 class="dh">{item.title}</h1>
 			{#if ago}<p class="ago">{ago}</p>{/if}
 			{#if task.description}{@const steps = taskSteps(task.description)}
@@ -317,8 +316,9 @@
 		{@render failureLine()}
 		{#if offline}<p class="act-failure-row offline-notice" role="status">Sending and declining are paused until this reconnects.</p>{/if}
 	{/snippet}
-	<ActivityKindPanel notice={desk && openChat ? heldNotice : noLonger || stale ? itemNotice : undefined} label="Message">
+	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label="Message">
 		{#snippet body()}
+			{@render askerTop('Waiting for you to send it')}
 			<h1 class="dh">{item.title}</h1>
 			{#if ago}<p class="ago">{ago}</p>{/if}
 			<p class="dctx">To: {held.provider ? `${held.recipient} on ${held.provider}` : held.recipient}</p>

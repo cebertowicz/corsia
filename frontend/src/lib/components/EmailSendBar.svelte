@@ -77,7 +77,7 @@
 </script>
 
 <div class="email-send-bar" role="group" aria-label="Send this email">
-	{#if openChat && asker && (step === 'draft' || step === 'failed')}
+	{#if openChat && asker?.id && (step === 'draft' || step === 'failed')}
 		<button type="button" class="asker-chat" aria-label={`Open chat with ${asker.name}`} onclick={() => openChat(asker.id)}>{asker.name}</button>
 	{/if}
 	{#if readOnly && step === 'draft'}
@@ -117,8 +117,8 @@
 	.asker-chat { flex: 0 1 auto; min-width: 0; margin-right: auto; padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-subhead); color: var(--accent-text); cursor: pointer; text-align: left; overflow-wrap: anywhere; border-radius: var(--radius-xs); }
 	.asker-chat:hover { text-decoration: underline; }
 	.asker-chat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* On a phone the name sits at the text edge, left of From:. */
-	:global(.activity.phone) .asker-chat { margin-left: calc(var(--space-6) - var(--doc-inset, var(--space-6))); }
+	/* On a phone the bar spans the page and keeps the 24px text edge, so the name sits at that edge, left of From:, with the buttons on its line. */
+	:global(.activity.phone) .email-send-bar { margin-inline: calc(-1 * var(--canvas-pad-inline, 0px)); padding-inline: var(--space-6); }
 	.bar-text.failed { color: var(--red-text); }
 	.bar-actions { flex: 0 0 auto; display: inline-flex; gap: var(--space-2); }
 	.email-send-bar :global(.btn) { flex: 0 0 auto; }

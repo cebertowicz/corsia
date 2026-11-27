@@ -21,7 +21,7 @@
 	}
 </script>
 
-<p class="opts-label" id="decision-{decision.id}-label">{isPickAny(decision) ? 'Choose any' : 'Choose one'}</p>
+<p class="opts-label" id="decision-{decision.id}-label">{isPickAny(decision) ? 'Choose any that apply' : 'Choose one'}</p>
 <fieldset class="choices" aria-labelledby="decision-{decision.id}-label">
 	{#each decision.options as option (option.id)}
 		{@const recommended = Array.isArray(decision.recommendation) ? decision.recommendation.includes(option.id) : decision.recommendation === option.id}
@@ -38,21 +38,21 @@
 		</label>
 	{/each}
 	{#if decision.other_enabled && !isPickAny(decision)}
-		<label class="choice else" class:sel={selected === OTHER_OPTION_ID}>
+		<!-- The field sits beside the radio's label, not inside it: a label holds one control, and the radio's name must not follow what is typed. -->
+		<div class="choice else" class:sel={selected === OTHER_OPTION_ID}>
 			<svg class="mark" viewBox="0 0 12 9" aria-hidden="true"><path d="M1 4.6 4.3 8 11 1" /></svg>
-			<input type="radio" name="decision-{decision.id}" value={OTHER_OPTION_ID} checked={selected === OTHER_OPTION_ID} onchange={() => { selected = OTHER_OPTION_ID; onChange(); }} disabled={sending || offline} />
-			<span class="ctext"><span class="chead"><b>Something else</b></span><span class="cdetail">Select to write your own answer.</span>
+			<span class="ctext"><label class="elsehead"><input type="radio" name="decision-{decision.id}" value={OTHER_OPTION_ID} checked={selected === OTHER_OPTION_ID} onchange={() => { selected = OTHER_OPTION_ID; onChange(); }} disabled={sending || offline} /><span class="chead"><b>Something else</b></span><span class="cdetail">Select to write your own answer.</span></label>
 				{#if selected === OTHER_OPTION_ID}
 					<textarea class="other" rows="3" use:keepInView={{ enabled: fieldFocused }} onfocus={() => { fieldFocused = true; }} onblur={() => { fieldFocused = false; }} bind:value={other} oninput={(event) => { other = event.currentTarget.value; onChange(); }} disabled={sending || offline}
 						placeholder="Say what you want instead" aria-label="Your answer"></textarea>
 				{/if}
 			</span>
-		</label>
+		</div>
 	{/if}
 </fieldset>
 {#if decision.other_enabled && isPickAny(decision)}
-	<textarea class="other note" rows="3" use:keepInView={{ enabled: fieldFocused }} onfocus={() => { fieldFocused = true; }} onblur={() => { fieldFocused = false; }} bind:value={other} oninput={(event) => { other = event.currentTarget.value; onChange(); }} disabled={sending || offline}
-		placeholder="Add a note (optional)" aria-label="Note"></textarea>
+	<label class="opts-label note-label" for="decision-{decision.id}-note">Note (optional)</label>
+	<textarea id="decision-{decision.id}-note" class="other note" rows="3" use:keepInView={{ enabled: fieldFocused }} onfocus={() => { fieldFocused = true; }} onblur={() => { fieldFocused = false; }} bind:value={other} oninput={(event) => { other = event.currentTarget.value; onChange(); }} disabled={sending || offline}></textarea>
 {/if}
 
 <style>
@@ -63,7 +63,7 @@
 	.choice:hover { background: var(--bg-hover); }
 	.choice.sel, .choice.sel:hover { background: var(--accent-wash); }
 	.choice input { position: absolute; opacity: 0; pointer-events: none; }
-	.choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.ctext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); line-height: var(--lh-snug); }
 	.chead b { font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.rec { font-style: normal; color: var(--accent-text); font-size: var(--text-footnote); line-height: var(--lh-snug); }
@@ -75,7 +75,11 @@
 	.cwhy .wt { min-width: 0; }
 	.mark { position: absolute; left: var(--row-inset); top: calc(var(--space-3) + (var(--head-fs) * 1.4 - var(--check-w) * 9 / 12) / 2); width: var(--check-w); height: auto; fill: none; stroke: var(--accent-text); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; visibility: hidden; }
 	.choice.sel .mark { visibility: visible; }
-	.note { margin-top: var(--space-3); }
+	.elsehead { display: flex; flex-direction: column; gap: var(--space-1); cursor: pointer; }
+	.elsehead::before { content: ''; position: absolute; inset: 0; }
+	.choice.else .other { position: relative; z-index: 1; cursor: text; }
+	.note-label { display: block; margin: var(--space-4) 0 var(--space-4); }
+	.note-label + .note { margin-top: 0; }
 	.other {
 		display: block; width: 100%; box-sizing: border-box; min-height: calc(var(--space-7) + var(--space-8)); margin-top: var(--space-2); padding: var(--space-2) var(--space-3);
 		border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--glass-thin);

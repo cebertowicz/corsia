@@ -751,12 +751,15 @@ describe('answering a decision or a held message in Activity', () => {
 
 	it('says what "Something else" is for, and opens its field in the row once picked', async () => {
 		await openDecision({ other_enabled: true });
-		const row = pane().querySelector('label.else')!;
+		const row = pane().querySelector('.choice.else')!;
 		expect(row.textContent).toContain('Select to write your own answer.');
 		expect(row.querySelector('textarea')).toBeNull();
 		row.querySelector<HTMLInputElement>('input')!.click();
 		await settle();
-		expect(pane().querySelector('label.else textarea.other')).not.toBeNull();
+		expect(pane().querySelector('.choice.else textarea.other')).not.toBeNull();
+		// The field is not inside the radio's label, so the radio's name never follows what is typed.
+		expect(pane().querySelector('.choice.else label textarea')).toBeNull();
+		expect(row.querySelector('label')!.textContent).not.toContain('Say what you want instead');
 	});
 
 	it('shows the recommendation reason under the recommended option and describes it', async () => {
@@ -1121,6 +1124,20 @@ describe('Activity on a wide screen: the asker on top, the buttons under the con
 		expect(pane().querySelector('.asker-top-status')?.textContent).toBe('Waiting for your answer');
 		expect(pane().querySelector('.rb-dock')).toBeNull();
 		expect(pane().querySelector('.act-desk')?.textContent).toContain('Answer');
+	});
+
+	it('shows an asker with no chat as plain text, never a link that goes nowhere', async () => {
+		const first = served[1];
+		const source = { ...activitySource('Unnamed asker', 'thread-none'), thread_id: null };
+		served = [first, { ...first, key: 'decision:nothread', external_id: 'decision-nothread', source, detail: { ...decisionOf(first)!, source } }];
+		const selectThread = render();
+		await settle();
+		rows()[1].click();
+		await settle();
+		expect(pane().querySelector('.asker-top-link')?.tagName).toBe('SPAN');
+		expect(pane().querySelector('.asker-top-link')?.textContent).toContain('Unnamed asker:');
+		expect(pane().querySelector('button[aria-label^="Open chat with"]')).toBeNull();
+		expect(selectThread).not.toHaveBeenCalled();
 	});
 
 	it('puts Won’t do beside Done on a task and sends the plan’s close', async () => {
