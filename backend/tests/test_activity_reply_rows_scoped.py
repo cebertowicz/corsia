@@ -13,7 +13,7 @@ from infra.schema import SCHEMA_SQL
 from plans.public import thread_sources
 
 
-def _unscoped_rows(db, user_id: str) -> list[dict]:
+def _unscoped_replies(db, user_id: str):
     unread_sql, unread_params = unread_comment_rows(user_id, None)
     sql = f"""
     WITH owner_candidates AS (
@@ -48,7 +48,11 @@ def _unscoped_rows(db, user_id: str) -> list[dict]:
     WHERE c.qualifies AND own.parent_thread_id IS NOT NULL AND own.parent_thread_id<>''
     ORDER BY c.artifact_id, c.created_at DESC, c.reply_id DESC
     """
-    replies = [row for row in db.execute(sql, (user_id, *unread_params)).fetchall()
+    return db.execute(sql, (user_id, *unread_params)).fetchall()
+
+
+def _unscoped_rows(db, user_id: str) -> list[dict]:
+    replies = [row for row in _unscoped_replies(db, user_id)
                if may_access_artifact(row['owner_thread'], user_id, db=db)]
     sources = thread_sources(db, {str(r['author_thread_id']) for r in replies})
     groups: dict[str, list] = {}
@@ -160,6 +164,43 @@ def test_no_statement_the_read_runs_scans_every_comment_or_every_batch():
         assert 'SCAN item' not in plan and 'SCAN doc_comments USING INDEX idx_doc_comments_artifact' not in plan, plan
         assert 'idx_doc_feedback_batches_recipient_open' not in plan, plan
     assert any('SEARCH batch_item USING INDEX idx_doc_feedback_batch_items_comment (comment_id=?)' in p for p in plans)
+
+
+def test_reply_qualification_does_not_rescan_person_replies_per_unread_row():
+    db = _db()
+    _cases(db)
+    statements = []
+    db.set_trace_callback(statements.append)
+    activity_reply_rows._replies(db, 'u1', ('mixed',))
+    db.set_trace_callback(None)
+    sql = next(s for s in statements if 'WITH owner_candidates' in s)
+    plan = [row['detail'] for row in db.execute(f'EXPLAIN QUERY PLAN {sql}')]
+    assert not any('SEARCH person ' in detail for detail in plan), plan
+    assert any('MATERIALIZE person_threads' in detail for detail in plan), plan
+
+
+def test_multiple_person_replies_do_not_duplicate_qualified_replies():
+    db = _db()
+    _cases(db)
+    _comment(db, 'm-person-reply-2', 'mixed', '04', parent='m-agent-root', kind='user')
+    rows = activity_reply_rows._replies(db, 'u1', ('mixed',))
+    assert [row['reply_id'] for row in rows] == ['m-agent-reply', 'm-reply']
+    assert {row['latest_unread_id'] for row in rows} == {'m-other'}
+    assert [tuple(row) for row in rows] == [tuple(row) for row in _unscoped_replies(db, 'u1')
+                                           if row['artifact_id'] == 'mixed']
+    assert document_rows(db, 'u1') == _unscoped_rows(db, 'u1')
+
+
+def test_cross_document_person_reply_does_not_qualify_a_thread():
+    db = _db()
+    _document(db, 'one-doc')
+    _document(db, 'other-doc')
+    _comment(db, 'root', 'one-doc', '01')
+    _comment(db, 'answer', 'one-doc', '03', parent='root')
+    _comment(db, 'person-elsewhere', 'other-doc', '02', parent='root', kind='user')
+    _comment(db, 'scope', 'one-doc', '01', kind='user')
+    rows = activity_reply_rows._replies(db, 'u1', ('one-doc', 'other-doc'))
+    assert [tuple(row) for row in rows] == [tuple(row) for row in _unscoped_replies(db, 'u1')] == []
 
 
 def test_the_person_documents_read_only_the_persons_comments():
