@@ -61,12 +61,11 @@ def _without_userinfo(key: str | None, value: str) -> object:
     authority = rest[:end.start()] if end else rest
     suffix = rest[len(authority):]
     signs = authority.count("@")
-    # An '@' past the host part may close a password holding an unencoded '/', '?' or '#',
-    # whether or not the host part has its own '@'; more than one '@' there is ambiguous too.
-    if signs > 1 or "@" in suffix:
+    # The value holds an '@' and the prefix can't, so it sits in the host part or past it.
+    # Past the host part it may close a password holding an unencoded '/', '?' or '#';
+    # more than one in the host part is ambiguous too. Only one '@', in the host part, is safe.
+    if signs != 1 or "@" in suffix:
         return _OMIT
-    if signs == 0:
-        return value
     return prefix + authority.split("@", 1)[1] + suffix
 
 
