@@ -39,6 +39,25 @@ def _version_208() -> sqlite3.Connection:
 
 
 _FIXTURES = {208: _version_208}
+# The guard and body-pin proof share this mapping so neither can drift.
+_PINNED_BODIES = {
+    209: '''
+    def step(conn):
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "plans" not in tables:
+            return
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(plans)")}
+        if "later_reviewed_at" not in columns:
+            conn.execute("ALTER TABLE plans ADD COLUMN later_reviewed_at TEXT")
+    ''',
+    210: '''
+    def step(conn):
+        tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table, sql in (("plan_nodes", USER_OPEN_TASK_INDEX_SQL), ("artifact_identities", ATTENTION_STATE_INDEX_SQL)):
+            if table in tables:
+                conn.execute(sql.strip().rstrip(";"))
+    ''',
+}
 _NAMED_READ_PRAGMAS = {"table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list"}
 _READ_PRAGMAS = _NAMED_READ_PRAGMAS | {"database_list", "table_list", "compile_options", "data_version", "page_count", "page_size", "freelist_count", "schema_version", "user_version"}
 _ALLOWED = {
@@ -61,9 +80,9 @@ def _allowed(action, first, second, _database, _source):
     return False
 
 
-def test_every_additive_step_has_a_registered_migration_and_fixture():
+def test_every_additive_step_has_a_registered_migration_and_proof():
     assert ADDITIVE_STEPS <= MIGRATIONS.keys()
-    assert ADDITIVE_STEPS == _FIXTURES.keys() | {209, 210}
+    assert ADDITIVE_STEPS == _FIXTURES.keys() | _PINNED_BODIES.keys()
 
 
 def _assert_literal_execute_only(function):
@@ -139,24 +158,8 @@ def _body_ast(source):
 def test_metadata_guarded_steps_have_only_the_reviewed_operations():
     # An authorizer sees only the executed branch and cannot inspect ADD COLUMN's
     # definition. Pin the whole executable body and both referenced SQL constants.
-    expected_209 = '''
-    def step(conn):
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if "plans" not in tables:
-            return
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(plans)")}
-        if "later_reviewed_at" not in columns:
-            conn.execute("ALTER TABLE plans ADD COLUMN later_reviewed_at TEXT")
-    '''
-    expected_210 = '''
-    def step(conn):
-        tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        for table, sql in (("plan_nodes", USER_OPEN_TASK_INDEX_SQL), ("artifact_identities", ATTENTION_STATE_INDEX_SQL)):
-            if table in tables:
-                conn.execute(sql.strip().rstrip(";"))
-    '''
-    assert _body_ast(inspect.getsource(MIGRATIONS[209])) == _body_ast(expected_209)
-    assert _body_ast(inspect.getsource(MIGRATIONS[210])) == _body_ast(expected_210)
+    for version, expected in _PINNED_BODIES.items():
+        assert _body_ast(inspect.getsource(MIGRATIONS[version])) == _body_ast(expected)
     from infra.migration_210_to_211_queue_read_indexes import (
         ATTENTION_STATE_INDEX_SQL, USER_OPEN_TASK_INDEX_SQL,
     )
@@ -179,7 +182,7 @@ def test_metadata_guarded_steps_only_issue_safe_actions():
             CREATE TABLE plan_nodes (plan_id TEXT, assignee TEXT, kind TEXT, state TEXT, archived_at TEXT);
             CREATE TABLE artifact_identities (metadata TEXT, state TEXT);
         """)
-        for version in (209, 210):
+        for version in _PINNED_BODIES:
             events = []
             db.set_authorizer(lambda *event: (events.append(event), sqlite3.SQLITE_OK)[1])
             try:
