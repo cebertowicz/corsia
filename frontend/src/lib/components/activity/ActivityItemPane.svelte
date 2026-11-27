@@ -27,7 +27,7 @@
 	 * through the call its own surface already uses; the list then re-reads, and the item leaves only when the server
 	 * stops returning it. Every outcome of a press is reported here; nothing here writes the attention queue's state.
 	 */
-	let { item, workspaceKey, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat, onCloseChat }: {
+	let { item, workspaceKey, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, seenAnswers, onActed, onKeep, onOpenChat, onCloseChat }: {
 		item: ActivityQueueItem;
 		workspaceKey: string;
 		draft?: DecisionDraft;
@@ -36,7 +36,7 @@
 		noLonger?: boolean;
 		stale?: boolean;
 		/** The open document's replies were all read while it stayed open (elsewhere, or by Mark all read). */
-		allRead?: boolean;
+		allRead?: boolean; seenAnswers?: Set<string>;
 		/** Re-read the queue after an act landed. */
 		onActed: () => Promise<void> | void;
 		/** The server let the item go without doing what was pressed: keep it open, with the reason, until the person moves on. */
@@ -220,7 +220,7 @@
 {/snippet}
 
 {#if chat}
-	<ActivityChatPane {item} detail={chat} {allRead} {sending} readFailed={failure?.retry === 'done'} onDone={markRepliesRead} {onOpenChat} onClose={onCloseChat} />
+	<ActivityChatPane {item} detail={chat} {allRead} {seenAnswers} {sending} readFailed={failure?.retry === 'done'} onDone={markRepliesRead} {onOpenChat} onClose={onCloseChat} />
 {:else if doc}
 	{#if lookupFailed}
 		<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>

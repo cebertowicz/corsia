@@ -68,6 +68,12 @@
 	let refusedKeep = false;
 	let advancing: string | null = null;
 	const decisionDrafts = new Map<string, DecisionDraft>();
+	const reachedReplies = new Map<string, Set<string>>();
+	function reachedFor(key: string) {
+		let reached = reachedReplies.get(key);
+		if (!reached) { reached = new Set<string>(); reachedReplies.set(key, reached); }
+		return reached;
+	}
 
 	$effect(() => {
 		void projectId;
@@ -84,6 +90,7 @@
 			refusedKeep = false;
 			advancing = null;
 			decisionDrafts.clear();
+			reachedReplies.clear();
 			paneInstance += 1;
 			arrived = false;
 			emitProductEvent('activity', 'opened', { scope: projectId ? 'project' : 'workspace' });
@@ -345,7 +352,7 @@
 			{#key paneInstance}
 				{@const mountedInstance = paneInstance}
 				{@const mountedKey = openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && allReadKey === null} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} onCloseChat={() => { paneClosed = true; openKey = null; kept = null; phoneOpen = false; paneInstance += 1; }} />
+				<ActivityItemPane item={openItem} {workspaceKey} seenAnswers={reachedFor(mountedKey)} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && allReadKey === null} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} onCloseChat={() => { const next = !$isMobile && openKey ? followerOf(seen.notifications, openKey, notifications.filter(item => item.key !== openKey)) : null; if (next) moveTo(next); else { paneClosed = true; openKey = null; kept = null; phoneOpen = false; paneInstance += 1; } }} />
 			{/key}
 		{:else if !loading && store.status === 'ready' && !(tab === 'tasks' ? tasks : notifications).length}
 			<div class="nothing">{EMPTY_LINE[tab]}</div>

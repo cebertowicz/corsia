@@ -27,7 +27,7 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
     const secondAnswer = action === 'jump' ? await injectMessage(request, thread, { role: 'assistant', content: '[c1.1] Another answer.', metadata: { for_user: true } }, TEST_TOKEN) : null;
     const overflowTarget = action === 'overflow' ? await injectMessage(request, thread, { role: 'assistant', content: `Second message. ${'A longer discussion for context. '.repeat(45)}`, metadata: { for_user: true } }, TEST_TOKEN) : null;
     const overflowAnswers: string[] = [];
-    if (overflowTarget) for (let i = 1; i <= 3; i++) overflowAnswers.push(await injectMessage(request, thread, { role: 'assistant', content: `[c2.1] Additional answer ${i}.`, metadata: { for_user: true } }, TEST_TOKEN));
+    if (overflowTarget) for (let i = 1; i <= 3; i++) overflowAnswers.push(await injectMessage(request, thread, { role: 'assistant', content: `[c2.1] Additional answer ${i}. ${i === 1 ? 'Long reply for reading. '.repeat(240) : ''}`, metadata: { for_user: true } }, TEST_TOKEN));
     isolatedDb([
       'thread, target, answer = sys.argv[2:5]',
       'from datetime import datetime, timedelta, timezone',
@@ -60,7 +60,7 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
         'for i, answer in enumerate(answers, 1):',
         '  at = (now + timedelta(seconds=i)).isoformat()',
         '  connection.execute("UPDATE messages SET created_at=? WHERE id=?", (at,answer))',
-        '  connection.execute("INSERT INTO chat_visible_content(message_id,thread_id,content) VALUES (?,?,?)", (answer,thread,f"Additional answer {i}."))',
+        '  connection.execute("INSERT INTO chat_visible_content(message_id,thread_id,content) VALUES (?,?,?)", (answer,thread,f"Additional answer {i}. " + ("Long reply for reading. " * 240 if i == 1 else "")))',
         '  connection.execute("INSERT INTO chat_comment_answers(thread_id,user_message_id,cid,assistant_message_id,answered_at) VALUES (?,?,?,?,?)", (thread,"user-comment-2","c2.1",answer,at))',
       ], thread, overflowTarget, ...overflowAnswers);
     }
@@ -128,7 +128,7 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
       await expect(answers).toHaveCount(2);
       const gap = await answers.first().evaluate(header => {
         const text = header.nextElementSibling!;
-        const nextHeader = text.nextElementSibling!;
+        const nextHeader = header.parentElement!.nextElementSibling!.firstElementChild!;
         return nextHeader.getBoundingClientRect().top - text.getBoundingClientRect().bottom;
       });
       expect(gap).toBe(14);
@@ -140,16 +140,43 @@ for (const [width, action] of [[1440, 'done'], [393, 'done'], [1440, 'jump'], [3
     if (action === 'overflow') {
       await page.locator('[data-unread-answer]').nth(1).evaluate(el => el.scrollIntoView({ block: 'start' }));
       await expect(page.getByLabel('Replies to your comments')).toContainText('2 of 4 replies to your comments');
+      const tall = page.locator('.chat-pane [data-unread-answer-text]').nth(1);
+      const dimensions = await tall.evaluate(el => {
+        const pane = el.closest('.scroll') as HTMLElement;
+        const rect = el.getBoundingClientRect(), box = pane.getBoundingClientRect();
+        pane.scrollTop += rect.top - box.top + (rect.height - box.height) / 2;
+        pane.dispatchEvent(new Event('scroll'));
+        return { answer: rect.height, pane: box.height };
+      });
+      expect(dimensions.answer).toBeGreaterThan(dimensions.pane);
+      await expect(page.getByLabel('Replies to your comments')).toContainText('2 of 4 replies');
       await capture(page, info.outputPath('chat-second-reply.png'));
-      await page.locator('.chat-pane .scroll').evaluate(el => { el.scrollTop = el.scrollHeight; });
-      const lastReply = page.locator('.chat-pane .thread .text').last();
-      const pill = page.locator('.chat-pane [data-doc-jump]');
-      await expect(pill).toBeVisible();
+      const answers = page.locator('.chat-pane [data-unread-answer-text]');
+      for (let index = 2; index < 4; index++) {
+        await answers.nth(index).evaluate(el => el.scrollIntoView({ block: 'center' }));
+        await expect(answers.nth(index)).toBeInViewport();
+      }
+      await page.locator('.chat-pane .scroll').evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+      await expect(page.getByLabel('Replies to your comments')).toContainText('4 of 4 replies');
+      await expect(page.locator('.chat-pane [data-doc-jump]')).toHaveCount(0);
       await capture(page, info.outputPath('chat-bottom.png'));
-      await expect(lastReply).toBeInViewport();
-      const replyBox = await lastReply.boundingBox();
-      const pillBox = await pill.boundingBox();
-      expect(replyBox && pillBox && replyBox.y + replyBox.height <= pillBox.y).toBe(true);
+      const arriving = await injectMessage(request, thread, { role: 'assistant', content: '[c1.1] A new answer above.', metadata: { for_user: true } }, TEST_TOKEN);
+      isolatedDb([
+        'from datetime import datetime, timezone',
+        'thread, answer = sys.argv[2:4]',
+        'stamp = datetime.now(timezone.utc).isoformat()',
+        'connection.execute("UPDATE messages SET created_at=? WHERE id=?", (stamp,answer))',
+        'connection.execute("INSERT INTO chat_visible_content(message_id,thread_id,content) VALUES (?,?,?)", (answer,thread,"A new answer above."))',
+        'connection.execute("INSERT INTO chat_comment_answers(thread_id,user_message_id,cid,assistant_message_id,answered_at) VALUES (?,?,?,?,?)", (thread,"user-comment","c1.1",answer,stamp))',
+      ], thread, arriving);
+      await page.evaluate(async () => {
+        const modulePath = '/src/lib/ws/events.ts';
+        const events = await import(/* @vite-ignore */ modulePath);
+        events.emit('chat_comments_changed', {});
+      });
+      await expect(page.locator('.chat-pane [data-doc-jump]:not([inert]) button')).toHaveAttribute('aria-label', /1 new reply above/);
+      await page.locator('.chat-pane [data-doc-jump]:not([inert]) button').click();
+      await expect(page.locator('.chat-pane [data-doc-jump]')).toHaveCount(0);
       return;
     }
     if (action === 'close') {

@@ -1446,7 +1446,27 @@ describe('Activity on a phone', () => {
 		expect(rows()).toHaveLength(0);
 	});
 
-	it('closing the chat tab leaves the pane empty without claiming the list is empty', async () => {
+	it('closing a desktop chat opens the next row, or the row above at the end, without marking it read', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 1, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat, activityDocument('next')];
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [] }));
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		rows()[0].click(); await settle();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Close Planning"]')!.click(); await settle();
+		expect(openRow()?.textContent).toContain('next');
+		expect(rows()).toHaveLength(2);
+		notes = [activityDocument('next'), chat];
+		listeners.get('chat_comments_changed')?.(); await settle();
+		rows()[1].click(); await settle();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Close Planning"]')!.click(); await settle();
+		expect(openRow()?.textContent).toContain('next');
+		expect(rows()).toHaveLength(2);
+	});
+
+	it('closing the only chat leaves the pane empty without claiming the list is empty', async () => {
 		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
 			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
 			detail: { thread_id: 't', unread: 1, through: '2026-11-25T12:00:00Z' } };

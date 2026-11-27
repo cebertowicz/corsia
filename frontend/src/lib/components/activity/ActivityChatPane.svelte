@@ -15,11 +15,11 @@
 	import { Avatar, Button } from '$lib/components/ui';
 	import { agentColor } from '$lib/docPresence';
 
-	let { item, detail, allRead = false, sending = false, readFailed = false, onDone, onOpenChat, onClose }: {
+	let { item, detail, allRead = false, sending = false, readFailed = false, seenAnswers = new Set<string>(), onDone, onOpenChat, onClose }: {
 		item: ActivityQueueItem; detail: ActivityChatDetail; allRead?: boolean; sending?: boolean; readFailed?: boolean;
 		onDone: (through: string) => void | Promise<void>;
 		onOpenChat: (threadId: string, destination?: AttentionDestination) => void | Promise<void>;
-		onClose: () => void;
+		onClose: () => void; seenAnswers?: Set<string>;
 	} = $props();
 	type ChatMessage = { id: string; seq: number; content: string; chat_visible_content?: string; created_at: string; chat_comments: ChatComment[] };
 	const threadId = untrack(() => detail.thread_id);
@@ -35,12 +35,23 @@
 	function updateJump() {
 		if (!scroll || allRead) { jumpTarget = null; return; }
 		const box = scroll.getBoundingClientRect();
-		const answers = [...scroll.querySelectorAll<HTMLElement>('[data-unread-answer]')];
-		const above = answers.filter(el => el.getBoundingClientRect().bottom <= box.top);
-		const below = answers.filter(el => el.getBoundingClientRect().top >= box.bottom);
-		position = Math.min(detail.unread, above.length + 1);
-		jumpTarget = above.length ? { count: above.length, direction: 'above', element: above[above.length - 1] }
-			: below.length ? { count: below.length, direction: 'below', element: below[0] } : null;
+		const texts = [...scroll.querySelectorAll<HTMLElement>('[data-unread-answer-text]')];
+		for (const text of texts) {
+			const rect = text.getBoundingClientRect();
+			if (rect.bottom > box.top && rect.top < box.bottom) seenAnswers.add(text.dataset.unreadAnswerText!);
+		}
+		const unseen = texts.filter(el => !seenAnswers.has(el.dataset.unreadAnswerText!));
+		const below = unseen.filter(el => el.getBoundingClientRect().top >= box.bottom);
+		const unseenAbove = unseen.filter(el => el.getBoundingClientRect().bottom <= box.top);
+		const firstVisible = texts.findIndex(el => {
+			const rect = el.getBoundingClientRect();
+			return rect.bottom > box.top && rect.top < box.bottom;
+		});
+		const next = texts.findIndex(el => el.getBoundingClientRect().top >= box.bottom);
+		const atEnd = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 1;
+		position = atEnd ? detail.unread : firstVisible >= 0 ? firstVisible + 1 : next >= 0 ? next + 1 : Math.max(1, texts.length);
+		jumpTarget = below.length ? { count: unseen.length, direction: 'below', element: below[0] }
+			: unseenAbove.length ? { count: unseen.length, direction: 'above', element: unseenAbove[unseenAbove.length - 1] } : null;
 	}
 	let messages = $state<ChatMessage[]>([]);
 	$effect(() => {
@@ -56,7 +67,7 @@
 	let loadVersion = 0;
 	async function load(through: string) {
 		const version = ++loadVersion;
-		loading = true; failed = false;
+		loading = untrack(() => messages.length === 0); failed = false;
 		try {
 			const response = await apiFetch(`/api/attention/notifications/chats/${encodeURIComponent(threadId)}`);
 			if (!response.ok) throw new Error('read failed');
@@ -99,8 +110,10 @@
 						<div class="message" use:highlight={comment}>{' '}{@html renderMarkdown(message.chat_visible_content ?? message.content)}</div>
 						<div class="thread"><div><strong>You</strong> · {when(comment.created_at)}</div><div class="text">{@html renderMarkdown(comment.note)}</div>
 							{#each comment.answers as answer}
-								<div data-unread-answer={answer.unread ? '' : undefined}><span class:agent={answer.author_kind === 'agent'}>{answer.author_kind === 'agent' ? agentName : 'You'}</span> · {when(answer.created_at)}</div>
-								<div class="text">{@html renderMarkdown(answer.text)}</div>
+								<div data-unread-answer-text={answer.unread && answer.author_kind === 'agent' ? `${answer.user_message_id}:${answer.cid}:${answer.assistant_message_id}` : undefined}>
+									<div data-unread-answer={answer.unread ? '' : undefined}><span class:agent={answer.author_kind === 'agent'}>{answer.author_kind === 'agent' ? agentName : 'You'}</span> · {when(answer.created_at)}</div>
+									<div class="text">{@html renderMarkdown(answer.text)}</div>
+								</div>
 							{/each}
 						</div>
 					</section>
@@ -126,7 +139,7 @@
 	.message :global(> :last-child) { margin-bottom: 0; }
 	.message :global(.cm-comment-wrap) { background: var(--accent-subtle); color: inherit; border-bottom: var(--comment-rail-default) solid var(--accent); }
 	.thread { margin-top: var(--space-3); padding-left: var(--space-3); border-left: var(--comment-rail-default) solid var(--accent); }
-	.text { margin: calc(var(--space-1) + var(--space-px-2)) 0 calc(var(--space-3) + var(--space-px-2)); } .thread > .text:last-child { margin-bottom: 0; }
+	.text { margin: calc(var(--space-1) + var(--space-px-2)) 0 calc(var(--space-3) + var(--space-px-2)); } .thread > :last-child .text { margin-bottom: 0; }
 	.text :global(p) { margin: 0 0 var(--space-3); } .text :global(p:last-child) { margin-bottom: 0; }
 	.agent { color: var(--accent-text); }
 	:global(.activity.phone) .bar { padding-inline: var(--space-3); }
