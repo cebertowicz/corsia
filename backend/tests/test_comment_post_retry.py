@@ -59,6 +59,20 @@ def test_a_failure_with_anything_but_a_status_and_a_short_code_drops_the_header(
     assert parse_comment_timing(f"n=2,out={outcome}") is None
 
 
+@pytest.mark.parametrize("outcome", [f"failed:cap:{code}" for code in (
+    "unanswered", "changed", "offline", "settling", "lost", "identity", "refused", "hash")])
+def test_a_capture_that_ended_before_its_post_names_its_way_of_ending(outcome):
+    assert parse_comment_timing(f"n=2,out={outcome}") == {"n": 2, "out": outcome}
+
+
+@pytest.mark.parametrize("outcome", [
+    "failed:cup:unanswered", "failed:capture:unanswered", "failed:CAP:unanswered", "failed:cap1:unanswered",  # not cap
+    "failed:cap:" + "a" * 33, "failed:cap:Unanswered", "failed:cap:un answered", "failed:cap:unanswered:x",  # not a code
+])
+def test_a_capture_failure_with_anything_but_cap_and_a_short_code_drops_the_header(outcome):
+    assert parse_comment_timing(f"n=2,out={outcome}") is None
+
+
 def test_the_size_cap_is_the_longest_header_the_browser_builds():
     assert len(LONGEST) == MAX_HEADER_BYTES == 179
     assert parse_comment_timing(LONGEST) is not None
