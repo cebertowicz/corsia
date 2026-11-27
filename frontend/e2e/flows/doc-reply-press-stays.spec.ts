@@ -356,6 +356,61 @@ for (const surface of [PHONE, NARROW]) {
 	}
 }
 
+// With the keyboard up, a partially visible Agreed line must settle whole or fully outside the reading area.
+for (const position of ['short', 'mid', 'foot'] as const) {
+	test(`320 sheet: ${position} thread keeps the Agreed line whole with the keyboard up`, async ({ page, request }, info) => {
+		only(NARROW, info); test.setTimeout(180_000);
+		const seeded = await seedThread(request, `keyboard agreed ${position}`, 'middle', position === 'short' ? 1 : 20);
+		const { card } = await openThread(page, request, NARROW, seeded);
+		const earlier = card.locator('.ct-earlier').first();
+		if (await earlier.isVisible()) { await earlier.tap(); await page.waitForTimeout(1000); await settled(page); }
+		if (position !== 'short') {
+			const replies = card.locator('.ct-reply');
+			await (position === 'mid' ? replies.nth(9) : replies.last()).evaluate((node, where) => node.scrollIntoView({ block: where === 'mid' ? 'center' : 'end', behavior: 'instant' }), position);
+			await settled(page);
+		}
+		const agree = page.getByRole('button', { name: 'Agree', exact: true }).locator('visible=true').first();
+		await agree.tap();
+		await expect(card.locator('.ct-agreed')).toBeVisible();
+		await agree.tap();
+		await expect(card.locator('.ct-agreed')).toHaveCount(0);
+		const panel = page.locator('.drawer-panel:visible').last();
+		await card.locator('.ct-input').tap();
+		await page.setViewportSize({ width: 320, height: 304 });
+		await page.waitForTimeout(700); await settled(page);
+		const before = (await panel.boundingBox())!.y;
+		await card.evaluate((element) => {
+			element.addEventListener('introend', (event) => {
+				if (!(event.target instanceof HTMLElement) || !event.target.matches('.ct-agreed')) return;
+				let owner = event.target.parentElement;
+				while (owner && !/(auto|scroll)/.test(getComputedStyle(owner).overflowY)) owner = owner.parentElement;
+				if (!owner) return;
+				const start = owner.scrollTop;
+				queueMicrotask(() => element.setAttribute('data-agreed-settle-shift', String(owner!.scrollTop - start)));
+			}, { capture: true });
+		});
+		await agree.tap();
+		await expect(card.locator('.ct-agreed')).toBeVisible();
+		await panel.evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))); });
+		console.log(`Agreed settle shift (${position}): ${await card.getAttribute('data-agreed-settle-shift')} px`);
+		await settled(page);
+		const result = await card.evaluate((element) => {
+			const clipped = (node: Element) => {
+				const box = node.getBoundingClientRect(); let top = 0, bottom = innerHeight;
+				for (let parent = node.parentElement; parent; parent = parent.parentElement) if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) {
+					const clip = parent.getBoundingClientRect(); top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom);
+				}
+				return { whole: box.top >= top - 0.5 && box.bottom <= bottom + 0.5, hidden: box.bottom <= top || box.top >= bottom };
+			};
+			return { agreed: clipped(element.querySelector('.ct-agreed')!), field: clipped(element.querySelector('.ct-input')!), recipient: clipped(element.querySelector('.ct-goes')!) };
+		});
+		expect(result.agreed.whole || result.agreed.hidden, 'Agreed line is partly clipped').toBe(true);
+		expect(result.field.whole, 'reply field is clipped').toBe(true);
+		expect(result.recipient.whole, 'recipient line is clipped').toBe(true);
+		expect(Math.abs((await panel.boundingBox())!.y - before), 'sheet top moved').toBeLessThanOrEqual(STEADY);
+	});
+}
+
 // Agree in the phone sheet's header adds an "Agreed" line to the thread: the sheet keeps the height it had and the line scrolls inside it, as for earlier
 // replies, so the page and the Agree control stay where they are (the sheet used to grow, which carried the control up and moved the page).
 for (const surface of [PHONE, NARROW]) {

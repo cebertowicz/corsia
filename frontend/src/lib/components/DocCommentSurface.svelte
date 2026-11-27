@@ -5,6 +5,7 @@
 	import { documentFooterRoom } from '$lib/actions/documentFooterRoom';
 	import { documentThreadChromeRoom } from '$lib/actions/documentThreadChromeRoom';
 	import { preserveVisibleWhileGrowing } from '$lib/actions/keepInView';
+	import { clipFadeDuration } from '$lib/actions/clipFade';
 	import { createMentionSelection } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
@@ -234,10 +235,15 @@
 			: undefined;
 		const field = card?.querySelector<HTMLElement>('.ct-input');
 		const line = card?.querySelector<HTMLElement>('.ct-goes');
-		const cancel = field && line && !card?.querySelector('.ct-agreed') ? preserveVisibleWhileGrowing(field, line) : () => {};
+		const cancel = field && line && !card?.querySelector('.ct-agreed') ? preserveVisibleWhileGrowing(field, line, () => card?.querySelector<HTMLElement>('.ct-agreed') ?? null) : () => {};
 		holdSheetHeight(draftSheet);
 		const result = onAgree(id, agreed);
-		if (result) void result.then((ok) => { if (!ok) cancel(); }, cancel);
+		if (result) void result.then((ok) => {
+			if (!ok) { cancel(); return; }
+			// If no Agreed intro arrives, stop observing after its duration and one frame.
+			setTimeout(() => requestAnimationFrame(() => cancel(true)), clipFadeDuration(card));
+		}, cancel);
+		else cancel();
 	}
 	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5; in the margin the card leaves the column by itself and the column stays up), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so through this opening's card errors, which reset with the decisions' when the surface reopens.
 	function resolveThread(id: string, resolved: boolean): Promise<unknown> {

@@ -72,6 +72,23 @@ describe('keepInView', () => {
 		action.destroy();
 	});
 
+	it('finishes by clearing a partly clipped Agreed line while keeping the reply visible', () => {
+		const { card, field, owner } = sheet();
+		const recipient = document.createElement('div');
+		recipient.getBoundingClientRect = () => ({ top: SCROLLER_TOP + 440, bottom: SCROLLER_TOP + 470 }) as DOMRect;
+		card.append(recipient);
+		const agreed = document.createElement('div');
+		agreed.className = 'ct-agreed';
+		agreed.getBoundingClientRect = () => ({ top: SCROLLER_TOP - 8, bottom: SCROLLER_TOP + 10 }) as DOMRect;
+		card.append(agreed);
+		const action = keepInView(field, { enabled: false, whole: card });
+		const finish = preserveVisibleWhileGrowing(field, recipient, () => agreed);
+		owner.scrollTop = 20;
+		finish(true);
+		expect(owner.scrollTop).toBe(12);
+		action.destroy();
+	});
+
 	it('cancels a pending preservation when the acknowledgement fails', () => {
 		const { card, field, reveals } = sheet();
 		const line = document.createElement('div');
@@ -80,6 +97,8 @@ describe('keepInView', () => {
 		const action = keepInView(field, { enabled: false, whole: card });
 		const cancel = preserveVisibleWhileGrowing(field, line);
 		cancel();
+		const original = card.getBoundingClientRect;
+		card.getBoundingClientRect = () => ({ ...original(), height: CARD.bottom - CARD.top + 20 }) as DOMRect;
 		observers.get(card)?.();
 		finishPreservingVisible(field);
 		expect(reveals).not.toHaveBeenCalled();

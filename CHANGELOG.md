@@ -39,7 +39,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Phone header sits closer to the top of the screen when CORSIA is added to the Home Screen.
 - Pressing a reply in the comment you are already reading no longer scrolls the document back to the comment's text; in a long thread the page used to jump when you pressed a later reply. Go to text still takes you to the text, and in a phone's comment list a press inside the comment you are reading now leaves the list and the document where they are.
 - Plan task details now show the reading of the goal the task works under and what done means.
-- Pressing Agree on a comment in the phone sheet keeps the sheet's height and the page where they are, and the new "Agreed" line scrolls inside the sheet as the earlier replies do; before, the sheet grew and the page could move with it.
+- On a phone, pressing Agree in a short document comment thread keeps the sheet's height and the document in place; image comment sheets keep their height too. A visible reply field and recipient line stay in view, and a partly hidden Agreed line moves fully into or out of view after the press.
 - Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
 - Revoke host access in its drawer is now a plain button; before, it was red.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.

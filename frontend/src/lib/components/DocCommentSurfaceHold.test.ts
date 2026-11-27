@@ -44,6 +44,8 @@ afterEach(() => {
 	host?.remove();
 	document.body.replaceChildren();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+	vi.useRealTimers();
 });
 
 describe('the thread sheet keeps its height when Agree is pressed', () => {
@@ -78,6 +80,39 @@ describe('the thread sheet keeps its height when Agree is pressed', () => {
 		await pending;
 		await Promise.resolve();
 		expect(cancel).toHaveBeenCalledOnce();
+	});
+
+	it('ends preservation after a successful acknowledgement when the intro never fires', async () => {
+		vi.useFakeTimers();
+		let armed = false;
+		vi.spyOn(keepInView, 'preserveVisibleWhileGrowing').mockImplementation(() => {
+			armed = true;
+			return () => { armed = false; };
+		});
+		openThreadSheet(vi.fn(() => Promise.resolve(true)));
+		document.querySelector<HTMLButtonElement>('button[title="Agree"]')!.click();
+		await Promise.resolve();
+		expect(armed).toBe(true);
+		await vi.advanceTimersByTimeAsync(179);
+		expect(armed).toBe(true);
+		await vi.advanceTimersByTimeAsync(21);
+		expect(armed).toBe(false);
+		vi.useRealTimers();
+	});
+
+	it('keeps preservation armed through the reduced-motion intro and one frame', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('prefers-reduced-motion'), addEventListener: () => {}, removeEventListener: () => {} }));
+		const finish = vi.fn();
+		vi.spyOn(keepInView, 'preserveVisibleWhileGrowing').mockReturnValue(finish);
+		openThreadSheet(vi.fn(() => Promise.resolve(true)));
+		document.querySelector<HTMLElement>('[data-thread-id]')!.style.setProperty('--dur-tight', '160ms');
+		document.querySelector<HTMLButtonElement>('button[title="Agree"]')!.click();
+		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(159);
+		expect(finish).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(20);
+		expect(finish).toHaveBeenCalledWith(true);
 	});
 
 	it('leaves a sheet that has no cap as it is', () => {

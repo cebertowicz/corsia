@@ -1,8 +1,10 @@
-/** A field action can temporarily preserve the visible reply while its card grows. */
-const growthPreservers = new WeakMap<HTMLElement, { arm: (end: HTMLElement) => () => void; finish: () => void }>();
+import { agreeLineShift } from './agreeLineClearance';
 
-export function preserveVisibleWhileGrowing(field: HTMLElement, end: HTMLElement): () => void {
-	return growthPreservers.get(field)?.arm(end) ?? (() => {});
+/** A field action can temporarily preserve the visible reply while its card grows. */
+const growthPreservers = new WeakMap<HTMLElement, { arm: (end: HTMLElement, clear?: () => HTMLElement | null) => (finish?: boolean) => void; finish: () => void }>();
+
+export function preserveVisibleWhileGrowing(field: HTMLElement, end: HTMLElement, clear?: () => HTMLElement | null): (finish?: boolean) => void {
+	return growthPreservers.get(field)?.arm(end, clear) ?? (() => {});
 }
 
 export function finishPreservingVisible(field: HTMLElement): void {
@@ -93,6 +95,8 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	/** Where this action's own last reveal left the scroller. */
 	let revealedTop: number | null = null;
 	let preserving = false, growthChanged = false, growthHeight = 0, preservedTop = 0, generation = 0;
+	let preservedEnd: HTMLElement | null = null;
+	let clearLine: (() => HTMLElement | null) | undefined;
 	const topOf = () => owner?.scrollTop ?? window.scrollY;
 	const readShown = () => {
 		if (preserving && topOf() !== preservedTop) disarm();
@@ -176,12 +180,27 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	}) : null;
 	const disarm = () => {
 		preserving = false;
+		preservedEnd = null;
+		clearLine = undefined;
 		generation++;
 		if (whole) grown?.unobserve(whole);
 		cancelAnimationFrame(frame);
 	};
+	const finish = () => {
+		if (!preserving) return;
+		if (growthChanged || (whole && whole.getBoundingClientRect().height !== growthHeight)) reveal();
+		const agreed = clearLine?.();
+		if (owner && agreed && preservedEnd) {
+			const box = owner.getBoundingClientRect(), viewport = window.visualViewport;
+			const top = Math.max(box.top, viewport?.offsetTop ?? 0);
+			const bottom = Math.min(box.bottom, viewport ? viewport.offsetTop + viewport.height : window.innerHeight);
+			owner.scrollTop += agreeLineShift(top, bottom, agreed.getBoundingClientRect(), node.getBoundingClientRect(), preservedEnd.getBoundingClientRect());
+			revealedTop = topOf();
+		}
+		disarm();
+	};
 	growthPreservers.set(node, {
-		arm(end) {
+		arm(end, clear) {
 			disarm();
 			if (!owner || !whole || !grown) return () => {};
 			const box = owner.getBoundingClientRect(), field = node.getBoundingClientRect(), line = end.getBoundingClientRect();
@@ -190,18 +209,16 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			const bottom = Math.min(box.bottom, viewport ? viewport.offsetTop + viewport.height : window.innerHeight);
 			if (field.top < top || field.bottom > bottom || line.top < top || line.bottom > bottom) return () => {};
 			preserving = true;
+			preservedEnd = end;
+			clearLine = clear;
 			growthChanged = false;
 			growthHeight = whole.getBoundingClientRect().height;
 			preservedTop = topOf();
 			const current = generation;
 			grown.observe(whole);
-			return () => { if (current === generation) disarm(); };
+			return (complete = false) => { if (current === generation) { if (complete) finish(); else disarm(); } };
 		},
-		finish() {
-			if (!preserving) return;
-			if (growthChanged || (whole && whole.getBoundingClientRect().height !== growthHeight)) reveal();
-			disarm();
-		},
+		finish,
 	});
 	const ownerResized = !reading && typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
 	if (owner) ownerResized?.observe(owner);
