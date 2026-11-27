@@ -138,6 +138,13 @@ test.describe('@flow:document-comments a retryable post that fails after its box
 		await wire.dropped;
 		await expect(page.locator('.toast').filter({ hasText: /post/i })).toHaveCount(0);
 		await expect(reply, 'the reply is kept').toHaveValue('Lighten it a step');
+		if (width < 600) {
+			// The selected image comment opens in a sheet over Back; close it as a person would.
+			const sheet = page.locator('[data-adaptive-drawer]').filter({ has: page.locator('[data-sheet-thread]').filter({ hasText: 'The header crowds the logo' }) });
+			await expect(sheet).toBeVisible();
+			await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+			await expect(sheet).toBeHidden();
+		}
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(replying.getByText('Sending…')).toBeVisible();
 		await expect(replying.locator('[role="alert"]')).toHaveCount(0);
