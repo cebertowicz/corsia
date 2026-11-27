@@ -303,15 +303,6 @@ async def _start_otlp_listener() -> None:
     await listener.start()
 
 
-async def _shutdown_pool_and_tasks(startup_tasks, logger):
-    """Finish pool waits before joining the timing flush task."""
-    from app_shutdown_runtime import shutdown_agent_pool
-
-    failure, pending_cancel = await shutdown_agent_pool(logger, None, _run_cleanup_owner)
-    pending_cancel = (await _shutdown_owned_tasks(startup_tasks, logger)) or pending_cancel
-    return failure, pending_cancel
-
-
 async def _shutdown_mcp_sessions(logger):
     from tools.mcp_runtime import stop_mcp_runtime
 
@@ -325,9 +316,10 @@ async def _shutdown_runtime_services(
     from loguru import logger as _log_shutdown
 
     stop_watching_omlx()  # an oMLX exit during shutdown is never a crash
-    from app_shutdown_runtime import shutdown_listeners
+    from app_shutdown_runtime import shutdown_agent_pool, shutdown_listeners
 
-    pool_failure, pending_cancel = await _shutdown_pool_and_tasks(startup_tasks, _log_shutdown)
+    pool_failure, pending_cancel = await shutdown_agent_pool(_log_shutdown, None, _run_cleanup_owner)
+    pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown) or pending_cancel
     (devices_failure, otlp_failure), pending_cancel = await shutdown_listeners(
         _log_shutdown, pending_cancel, _run_cleanup_owner,
     )
