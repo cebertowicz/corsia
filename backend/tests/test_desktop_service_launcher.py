@@ -63,6 +63,7 @@ def _bundle_with_recording_python(contents: Path) -> Path:
         "esac\n"
     )
     interpreter.chmod(interpreter.stat().st_mode | stat.S_IXUSR)
+    shutil.copy(interpreter, interpreter.with_name("CORSIA"))
     return launcher
 
 

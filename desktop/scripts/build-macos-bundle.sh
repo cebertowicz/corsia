@@ -184,6 +184,10 @@ tar -xzf "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" -C "$BUNDLE_ROOT"
 readonly PYTHON="$BUNDLE_ROOT/python/bin/python3"
 [ -x "$PYTHON" ] || fail "standalone Python did not contain python/bin/python3"
 "$PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 11), sys.version'
+cp "$PYTHON" "$BUNDLE_ROOT/python/bin/CORSIA"
+cp "$PYTHON" "$BUNDLE_ROOT/python/bin/CORSIA Helper"
+[ -x "$BUNDLE_ROOT/python/bin/CORSIA" ] && [ -x "$BUNDLE_ROOT/python/bin/CORSIA Helper" ] || fail "named Python interpreters are not executable"
+"$BUNDLE_ROOT/python/bin/CORSIA" -I -c 'import sys; assert sys.prefix.endswith("/python"), sys.prefix'
 
 fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 "$PYTHON" -m pip install --no-cache-dir --target "$BUNDLE_ROOT/python/backend-packages" --requirement "$ROOT/backend/requirements.lock"
