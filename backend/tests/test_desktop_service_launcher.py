@@ -22,6 +22,7 @@ def _bundle_with_recording_python(contents: Path) -> Path:
     resources = contents / "Resources"
     (resources / "bin").mkdir(parents=True)
     (resources / "python" / "bin").mkdir(parents=True)
+    (resources / "python" / "libexec").mkdir(parents=True)
     # The launcher asks the bundled backend for its state root, so the fake
     # bundle carries the real resolver, in app-bundle position.
     infra = resources / "backend" / "infra"
@@ -43,9 +44,19 @@ def _bundle_with_recording_python(contents: Path) -> Path:
     launcher = resources / "bin" / "corsia-service"
     shutil.copy(LAUNCHER, launcher)
     launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
-    interpreter = resources / "python" / "bin" / "python3"
-    # Only the service start is faked. Anything else (the launcher's JSON parse
-    # of service.json) runs on a real interpreter.
+    # The server starts through the named interpreter; python3 only runs the
+    # launcher's helper reads, so it refuses a uvicorn start.
+    python3 = resources / "python" / "bin" / "python3"
+    python3.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        '  *uvicorn*) echo "server started through python3, not CORSIA" >&2; exit 97 ;;\n'
+        f'  *) exec "{sys.executable}" "$@" ;;\n'
+        "esac\n"
+    )
+    python3.chmod(python3.stat().st_mode | stat.S_IXUSR)
+    interpreter = resources / "python" / "libexec" / "CORSIA"
+    # Only the service start is faked. Anything else runs on a real interpreter.
     interpreter.write_text(
         "#!/bin/sh\n"
         'case "$*" in\n'

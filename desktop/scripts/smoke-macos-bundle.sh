@@ -45,6 +45,17 @@ mkdir -p "$(dirname "$APP")"
 ditto "$SOURCE_APP" "$APP"
 readonly RESOURCES="$APP/Contents/Resources"
 readonly PYTHON="$RESOURCES/python/bin/python3"
+readonly SERVER="$RESOURCES/python/libexec/CORSIA"
+readonly PACKAGES="$RESOURCES/python/backend-packages"
+[ -x "$SERVER" ] || { echo "error: named interpreter is missing or not executable: $SERVER" >&2; exit 1; }
+[ ! -e "$RESOURCES/python/bin/CORSIA" ] || { echo "error: CORSIA in python/bin would shadow the corsia command on agent PATHs" >&2; exit 1; }
+codesign -d --entitlements :- "$SERVER" >"$TEMP_ROOT/entitlements.plist" 2>/dev/null
+"$PYTHON" -I -c 'import plistlib, sys; assert plistlib.load(open(sys.argv[1], "rb")) == plistlib.load(open(sys.argv[2], "rb"))' \
+  "$TEMP_ROOT/entitlements.plist" "$ROOT/desktop/src-tauri/Entitlements.plist"
+printf 'entitlements=server verified\n'
+process_name() {
+  "$PYTHON" -I -c 'import sys; sys.path.insert(0, sys.argv[2]); import psutil; print(psutil.Process(int(sys.argv[1])).name())' "$1" "$PACKAGES"
+}
 readonly GIT="$RESOURCES/bin/git"
 readonly GIT_CORE="$RESOURCES/libexec/git-core"
 readonly GIT_HTTP="$GIT_CORE/git-remote-http"
@@ -164,6 +175,9 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 grep -q '"status":"ok"' "$TEMP_ROOT/health.json"
+server_name="$(process_name "$BACKEND_PID")"
+printf 'server-process-name=%s\n' "$server_name"
+[ "$server_name" = CORSIA ] || { echo "error: unexpected server process name" >&2; exit 1; }
 curl --fail --silent "http://127.0.0.1:$port/api/version" >"$TEMP_ROOT/version.json"
 # Both the service's PATH and every Git its backend ran (version reads it) lead
 # to the bundle, not the shims ahead of the system paths.
