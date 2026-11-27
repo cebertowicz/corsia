@@ -109,6 +109,7 @@ async def shutdown() -> None:
     task = _task
     if task is None:
         return
+    assert _stop is not None  # The task and its stop event are created together.
     _stop.set()
     await task
     _task = None
