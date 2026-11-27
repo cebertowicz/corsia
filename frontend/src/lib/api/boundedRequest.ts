@@ -1,5 +1,18 @@
 import { apiFetch, type ApiInit } from './request';
 
+/** A rejected fetch for a comment request, distinguished from errors in application code. */
+export class CommentConnectionError extends Error {
+	constructor() { super('Comment connection unavailable'); }
+}
+
+/** Mark a browser fetch rejection at the request boundary, before application code reads the response. */
+export function commentFetch(input: string, init: ApiInit): Promise<Response> {
+	return apiFetch(input, init).catch((error: unknown) => {
+		if (error instanceof TypeError) throw new CommentConnectionError();
+		throw error;
+	});
+}
+
 export class PostTimeoutError extends Error {
 	constructor(ms: number) {
 		super(`request timed out after ${ms}ms (may have committed server-side)`);
@@ -19,7 +32,9 @@ const CONNECTION_WAIT_MS = 50_000;
  * connection wait above, plus 10 s for the server's own save (the slowest measured took 2.2 s, 2026-11-18). Cost: a
  * server that never answers takes this long to end the post failed.
  */
-export const COMMENT_POST_TIMEOUT_MS = CONNECTION_WAIT_MS + 10_000;
+/** Allowance for the server's save, shared with the draft retry throttle. */
+export const SERVER_SAVE_MS = 10_000;
+export const COMMENT_POST_TIMEOUT_MS = CONNECTION_WAIT_MS + SERVER_SAVE_MS;
 /**
  * How long the look for a comment an unanswered post may have stored waits before the post ends failed: the
  * connection wait above, since the look sits in the same queue as the post it follows, plus 5 s for the server (about
@@ -58,7 +73,7 @@ export async function readWithin<T>(input: string, init: ApiInit, ms: number, re
 		timer = setTimeout(() => { ctrl.abort(); reject(new PostTimeoutError(ms)); }, ms);
 	});
 	try {
-		return await Promise.race([apiFetch(input, { ...init, signal: ctrl.signal }).then(read), expired]);
+		return await Promise.race([commentFetch(input, { ...init, signal: ctrl.signal }).then(read), expired]);
 	} catch (e) {
 		if (e instanceof DOMException && e.name === 'AbortError') throw new PostTimeoutError(ms);
 		throw e;

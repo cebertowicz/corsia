@@ -61,6 +61,22 @@ def test_a_closed_document_places_a_kept_draft_where_its_passage_moved(integrati
     assert (row['anchor_prefix'], row['anchor_suffix']) == (passage['anchor_prefix'], passage['anchor_suffix'])
 
 
+def test_a_closed_unreadable_document_keeps_the_comment_and_records_read_error(integration_client, integration_workspace, monkeypatch, caplog):
+    from doceditor import comment_create_db
+
+    text = LEAD + 'Budget is final for Q3.\n'
+    path = document(integration_workspace, 'resend-unreadable.md', text)
+    artifact = _register(integration_client, path)
+    def unreadable(_path):
+        raise OSError('unreadable')
+    monkeypatch.setattr(comment_create_db, 'read_doc_text', unreadable)
+    with caplog.at_level('INFO', logger='doceditor.comment_snapshots'):
+        response = resend(integration_client, artifact, kept(text, 'final'), 'resend-unreadable', live_capture=True)
+    assert response.status_code == 200, response.text
+    assert response.json()['comment']['id'] == 'resend-unreadable'
+    assert 'reason=read_error' in caplog.text
+
+
 def test_a_repeated_word_resent_goes_to_the_copy_it_was_written_on(integration_client, integration_workspace):
     text = LEAD + 'First, ship it.\n\nSecond, ship it again after review.\n'
     path = document(integration_workspace, 'resend-repeat.md', text)

@@ -234,7 +234,7 @@ it('posts a new draft of the same words under its own new id, not under the id o
 	user.set({ id: 'person-1', name: 'person-1' });
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post('Same words');
-	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe(SENDING); });
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
 	host.querySelector<HTMLButtonElement>('button.cancel')!.click(); await settle();
 	// The person starts over on the same passage with the same words: a new draft, so a new input.
 	await openBox(); await post('Same words');

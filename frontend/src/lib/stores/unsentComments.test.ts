@@ -68,7 +68,7 @@ async function returnToApp(page: Page): Promise<void> {
 const refusal = (page: Page, status: number, kind: string | null, detail: string) => async () => {
 	throw new page.docs.RequestRefused(`${status} ${JSON.stringify({ detail, kind })}`, kind);
 };
-const offline = async () => { throw new TypeError('Failed to fetch'); };
+const offline = async () => { const { CommentConnectionError } = await import('$lib/api/boundedRequest'); throw new CommentConnectionError(); };
 const PASSAGE_GONE = 'The text this comment was on changed before it sent, so it isn’t placed. Your draft is kept.';
 
 beforeEach(() => { localStorage.clear(); wire.posts = []; wire.answer = []; wire.stored = []; wire.onScreen = false; });
@@ -199,6 +199,7 @@ describe('what the server answers', () => {
 
 	it.each([
 		['the document is gone', 404, null],
+		['a server error', 500, null],
 		['a tag is not allowed', 400, 'tag_unavailable'],
 		['the document no longer takes comments', 409, 'not_commentable'],
 	])('%s: refused, not tried again', async (_name, status, kind) => {
@@ -212,7 +213,7 @@ describe('what the server answers', () => {
 	});
 
 	it.each([
-		['a server error', 500, null],
+		['a temporarily unavailable server', 503, null],
 		['too many requests', 429, null],
 		['an id still settling', 409, 'identity_settling'],
 		['a 409 with no reason', 409, null],
@@ -226,18 +227,14 @@ describe('what the server answers', () => {
 		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
 	});
 
-	it('a signed-out answer waits for sign-in: nothing goes while signed out, and it goes on the connection after', async () => {
+	it('a signed-out answer tells the person and keeps the draft for another press', async () => {
 		const page = await open(), { key } = pressed(page);
 		wire.answer.push(refusal(page, 401, 'sign_in_required', 'Sign in.'));
 		await connect(page);
-		expect(page.drafts.keptCommentDrafts.get(key)?.send).toEqual(SEND);
-		page.auth.user.set(null);
-		await returnToApp(page);
-		expect(wire.posts).toHaveLength(1);
-		page.auth.user.set({ id: 'person-1', name: 'person-1' });
+		expect(page.drafts.keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(page.drafts.keptCommentDrafts.get(key)?.error).toBeTruthy();
 		await connect(page);
-		expect(wire.posts).toHaveLength(2);
-		expect(page.drafts.keptCommentDrafts.get(key)).toBeUndefined();
+		expect(wire.posts).toHaveLength(1);
 	});
 
 	it('an id that is another comment’s goes once more under a new id', async () => {
@@ -461,6 +458,8 @@ describe('a pressed chat comment or reply goes on its own', () => {
 		['the chat is deleted', 404, 'chat_not_found', 'This chat is deleted'],
 		['the chat’s model is too small', 409, 'comment_model_cap', 'too small a context window'],
 		['any other refusal', 400, 'comment_not_sent', 'Couldn’t send this comment. Try again. Reference: ref-9'],
+		['a server error', 500, 'comment_not_stored', 'Couldn’t send this comment. Try again. Reference: ref-9'],
+		['a session to sign in again', 401, 'sign_in_required', 'Couldn’t send this comment. Try again. Reference: ref-9'],
 	])('%s: refused for good, kept with its words, and a notice names the chat', async (_name, status, detail, says) => {
 		const page = await open(), { key } = pressedChat(page);
 		answers.push(answer(status, detail));
@@ -477,8 +476,7 @@ describe('a pressed chat comment or reply goes on its own', () => {
 
 	it.each([
 		['no connection', new TypeError('Failed to fetch')],
-		['a server error', answer(500, 'comment_not_stored')],
-		['a session to sign in again', answer(401, 'sign_in_required')],
+		['a temporarily unavailable server', answer(503, 'comment_not_stored')],
 		['too many requests', answer(429, 'too_many')],
 	] as const)('%s: says nothing and goes again on the next trigger', async (_name, first) => {
 		const page = await open(), { key } = pressedChat(page);

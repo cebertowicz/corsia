@@ -63,7 +63,11 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
         return anchor.quote, anchor.start, anchor.end, anchor.prefix, anchor.suffix, anchor.text, None
     if kept_sides(request):
         # Sent again from a kept draft: no capture is held, so its quote is found by its sides in the file.
-        placed = kept_anchor(read_doc_text(request.path), request)
+        try:
+            text = read_doc_text(request.path)
+        except (OSError, ValueError):
+            return request.quote, request.start, request.end, None, None, None, 'read_error'
+        placed = kept_anchor(text, request)
         return placed.quote, placed.start, placed.end, placed.prefix, placed.suffix, placed.text, None
     if request.live_capture:
         raise CommentSelectionChanged("The live document closed. Reopen it; your draft is kept.")

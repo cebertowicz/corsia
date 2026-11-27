@@ -4,6 +4,8 @@ import { CommentSendRefused, unknownSendFailure, type SendableChatComment } from
 import { retryRefusedForGood } from '$lib/chatCommentDelivery';
 import { adoptCommentThreads } from '$lib/chatCommentRefresh';
 import { apiFetch } from '$lib/api/request';
+import { commentFetch } from '$lib/api/boundedRequest';
+import { retryCommentConnection, retryCommentStatus } from '$lib/commentRetry';
 import { findModelById, workspaceModels } from '$lib/stores/models';
 import { reasoningEffort, threads } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
@@ -42,11 +44,11 @@ function blockedSendText(cause: ReplySendBlock, noun: 'comment' | 'reply'): stri
 
 /** Only a chat with no model to answer waits for the person; a restart or a lost connection passes. */
 function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
-	throw new CommentSendRefused(blockedSendText(cause, noun), false, cause !== 'noModel');
+	throw new CommentSendRefused(blockedSendText(cause, noun), false, cause !== 'noModel', cause);
 }
 
-/** Statuses where nothing was refused: the same post may go later (a session to sign in again, a timeout, too many requests, a server error). */
-const passing = (status: number) => status === 401 || status === 408 || status === 429 || status >= 500;
+/** HTTP failures shared with the document comment retry rule. */
+const passing = retryCommentStatus;
 
 /**
  * Whether the person can raise this chat's model's context window in its details, by the model details' own rule
@@ -80,7 +82,7 @@ async function adoptPosted(response: Response, threadId: string, noun: 'comment'
 	const result = await response.json().catch(() => null);
 	if (!response.ok) {
 		const failure = commentFailure(result?.detail, result?.reference, noun, act, threadId);
-		throw new CommentSendRefused(failure.text, failure.final, passing(response.status));
+		throw new CommentSendRefused(failure.text, failure.final, passing(response.status), String(response.status));
 	}
 	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }
@@ -105,10 +107,13 @@ export async function postChatComment(reply: SendableChatComment, threadId: stri
 	const body = JSON.stringify({ input_id: reply.input_id, comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
 	let response: Response;
 	try {
-		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
+		response = await commentFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
 			method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
 		});
-	} catch { refuse('notAccepted', noun); }
+	} catch (error) {
+		if (retryCommentConnection(error)) refuse('notAccepted', noun);
+		throw error;
+	}
 	await adoptPosted(response, threadId, noun, 'sent');
 	// Counted once the server holds it: a refused press, or a press again after a lost answer, is not another comment.
 	emitComposerSend(threadId, '', 0, [comment]);

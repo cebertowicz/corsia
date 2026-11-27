@@ -4,6 +4,7 @@
 // There is no timer: a try that fails for a reason that passes waits for the next of those, and one refused stops for good.
 // One post goes at a time across the app, so these never take the page's own connections from it.
 import { get } from 'svelte/store';
+import { SERVER_SAVE_MS } from '$lib/api/boundedRequest';
 import { user } from './auth';
 import { commentDraft } from './commentDraft';
 import { posting } from './commentPostTiming';
@@ -12,7 +13,7 @@ import { keptCommentDrafts } from './keptCommentDrafts.svelte';
 import { toasts } from './toast';
 import { withoutTextKept } from './draftKept';
 import { isChat, replyOf, sendable, sendUnsent } from '$lib/unsentCommentSend';
-import { unsentOutcome, unsentReason } from '$lib/unsentCommentOutcome';
+import { unsentOutcome, unsentReason, unsentRetryCode } from '$lib/unsentCommentOutcome';
 import { CommentSendRefused } from '$lib/chatCommentAnchors';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { CHAT_REPLY_SCOPE } from './commentDraftKeys';
@@ -20,7 +21,7 @@ import { CHAT_REPLY_SCOPE } from './commentDraftKeys';
 /** What a pressed comment's box, or a pressed reply's line, reads while it goes on its own. */
 export const SENDING = 'Sending…';
 /** A return to the app tries a draft again only this long after its last try, so quick tab switching does not resend it. */
-export const RETURN_THROTTLE_MS = 10_000;
+export const RETURN_THROTTLE_MS = SERVER_SAVE_MS;
 
 /** The draft being posted now, if any: one at a time. */
 let current: string | null = null;
@@ -100,7 +101,10 @@ async function attempt(key: string, again = false): Promise<void> {
 		posted(key, sent.text, sent.taggedAgentIds);
 	} catch (error) {
 		const outcome = unsentOutcome(error);
-		if (outcome === 'retry') return;
+		if (outcome === 'retry') {
+			console.warn('[comments] automatic retry deferred', unsentRetryCode(error));
+			return;
+		}
 		if (outcome === 'fresh' && !again && renewed(key)) return attempt(key, true);
 		stopped(key, unsentReason(error), outcome === 'earlier', error instanceof CommentSendRefused && error.final);
 	}

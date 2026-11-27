@@ -71,7 +71,7 @@ def _u16(s: str) -> int:
     return len(s.encode("utf-16-le")) // 2
 
 
-def _span16(text: str, start_cp: int, quote: str) -> tuple[int, int]:
+def span16(text: str, start_cp: int, quote: str) -> tuple[int, int]:
     """A code-point match start → ``(from_off, to_off)`` in UTF-16 code units."""
     frm = _u16(text[:start_cp])
     return frm, frm + _u16(quote)
@@ -223,7 +223,7 @@ def reanchor(
     if not quote:
         return None
     candidates = [
-        (start, *_span16(text, start, quote))
+        (start, *span16(text, start, quote))
         for start in _overlapping_occurrences(text, quote)
     ]
     if not candidates:
@@ -293,7 +293,7 @@ def resolve_quote(text: str, quote: str, near: str | None = None) -> tuple[int, 
 
     matches = _occurrences(text, quote)
     if len(matches) == 1:
-        return _span16(text, matches[0], quote)
+        return span16(text, matches[0], quote)
     if not matches:
         raise QuoteNotFound(
             f"quote not found in the doc: {quote!r} — re-read and re-anchor",
@@ -328,4 +328,4 @@ def resolve_quote(text: str, quote: str, near: str | None = None) -> tuple[int, 
             f"refine `near` (candidate lines: {match_lines})",
             match_lines,
         )
-    return _span16(text, closest[0], quote)
+    return span16(text, closest[0], quote)
