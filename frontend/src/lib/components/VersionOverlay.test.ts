@@ -8,6 +8,7 @@ vi.mock('$lib/version', async () => {
 
 import VersionOverlay from './VersionOverlay.svelte';
 import { coreSettings, type CoreSettings } from '$lib/stores/settings';
+import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -25,6 +26,7 @@ afterEach(() => {
 	component ? unmount(component) : null;
 	component = null;
 	coreSettings.set(null);
+	phoneNavOver.set(false);
 	host.remove();
 });
 
@@ -45,6 +47,17 @@ describe('VersionOverlay', () => {
 	it('renders the build stamp when the feature is on', () => {
 		withFeatures({ debug_version_overlay: true });
 		render();
+		expect(stamp()).not.toBeNull();
+	});
+
+	it('hides the build stamp while phone navigation is over the app and restores it afterward', () => {
+		withFeatures({ debug_version_overlay: true });
+		render();
+		phoneNavOver.set(true);
+		flushSync();
+		expect(stamp()).toBeNull();
+		phoneNavOver.set(false);
+		flushSync();
 		expect(stamp()).not.toBeNull();
 	});
 

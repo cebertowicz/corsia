@@ -390,8 +390,10 @@
 		:global(html[data-theme="light"]) .sidebar::before {
 			background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
 		}
+		/* Under a top inset the first rail row centres at the shared --top-row-centre: its centre is
+		   about 24px below this pad (the rail's 8px top padding and half its row). */
 		.shell-top-pad {
-			height: var(--safe-top);
+			height: max(var(--safe-top), calc(var(--top-row-centre) - var(--space-6)));
 		}
 	}
 </style>

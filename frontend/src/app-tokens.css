@@ -130,6 +130,14 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --header-bottom: calc(var(--header-height) + var(--safe-top));
+  /* How far below a top inset (the clock) a first row is centred: the phone header row's centre,
+     below the blur iOS 27 draws over the top of an installed app (to about safe-top + 34px). */
+  --top-row-clearance: 36px;
+  /* Where a first row at the top of the screen is centred: safe-top + the clearance on a phone with
+     a top inset, 0 anywhere else (a browser tab, a wider window, desktop). A surface places its
+     first row with `max(<its own top>, <top-row-centre less its row's offset>)`, so where this is 0
+     it keeps its own top. Set for phones below. */
+  --top-row-centre: 0px;
   --status-ready: #22c55e;
   --status-in-progress: #3b82f6;
   --status-planned: #f59e0b;
@@ -194,6 +202,11 @@
   --header-gradient-top: var(--glass-thin);
   --shadow-chip: 0 8px 32px rgba(0, 0, 0, 0.40);
   --shadow-focus: 0 0 0 3px var(--accent-wash);
+}
+
+@media (max-width: 768px) {
+  /* The `* 100` makes any inset large and min() caps it, so with no inset the centre stays 0. */
+  :root { --top-row-centre: min(calc(var(--safe-top) * 100), calc(var(--safe-top) + var(--top-row-clearance))); }
 }
 
 [data-theme="light"] {

@@ -335,10 +335,13 @@
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
 			height: var(--header-bottom);
-			/* The row is centred at safe-top + 36px: the box is 64px below the inset, the same as a tab.
-			   In an installed iOS 27 app the system blurs the top of the page down to about safe-top +
-			   34px; the 18px row is sharp from there on, and fully sharp at this centre. */
-			padding-top: calc(var(--safe-top) + 8px);
+			/* The row centre, set once: under a top inset the shared --top-row-centre (safe-top + the
+			   clearance), in a tab the clearance itself. In an installed iOS 27 app the system blurs the
+			   top of the page down to about safe-top + 34px; the 18px row is sharp from there on, and
+			   fully sharp at this centre. The padding centres the row box on it, and the fade stops
+			   below start from it. */
+			--h-row-centre: max(var(--top-row-clearance), var(--top-row-centre));
+			padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom));
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
@@ -360,11 +363,11 @@
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--safe-top) + 36px),
+				color-mix(in srgb, var(--header-top-base) 72%, transparent) var(--h-row-centre),
 				transparent 100%
 			);
-			-webkit-mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));
-			mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));
+			-webkit-mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));
+			mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));
 		}
 		.shell-header::after {
 			content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;

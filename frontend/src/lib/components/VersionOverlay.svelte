@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { coreSettings } from '$lib/stores/settings';
+	import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
 	import {
 		myBuild,
 		serverVersion,
@@ -36,7 +37,7 @@
 	const timeText = formatHHMM(myBuild.build_iso);
 </script>
 
-{#if visible}
+{#if visible && !$phoneNavOver}
 	<div class="version-overlay" class:stale aria-hidden="true">
 		{#if backendBehind}
 			<span class="seg">b {backendShort}<span class="arrow">⇢</span>{diskHeadShort}</span>
@@ -57,7 +58,10 @@
 <style>
 	.version-overlay {
 		position: fixed;
-		top: max(4px, calc(var(--safe-top) + 2px));
+		/* On a phone with a top inset the system blurs the page above the header row and the row holds
+		   the title, so the badge sits just below the header. The min() keeps that term 0 wherever
+		   the shared --top-row-centre is 0 (a tab, a wider window, desktop). */
+		top: max(4px, calc(var(--safe-top) + 2px), min(calc(var(--top-row-centre) * 100), calc(var(--header-bottom) + var(--space-px-2))));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: 11;

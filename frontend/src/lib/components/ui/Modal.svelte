@@ -259,7 +259,9 @@
 	}
 	@media (max-width: 480px) {
 		.modal-layer {
-			--modal-pad-top:    max(8px, var(--safe-top));
+			/* A card that fills the height puts its head row at the shared --top-row-centre under a top
+			   inset: the row is 31px into the card (1px border, 14px padding, half the 32px close). */
+			--modal-pad-top:    max(8px, var(--safe-top), calc(var(--top-row-centre) - 31px));
 			--modal-pad-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 			--modal-pad-x: 8px;
 		}

@@ -680,7 +680,7 @@ Two compensating patterns:
 1. **Body pinned to `--bg-primary` on mobile** (`app.css:218–220`). The
    transparent-body trick that lets desktop vibrancy through becomes a
    non-matching color behind the iOS status bar; pinning to primary keeps
-   the status-bar bg (driven by theme-color meta) seamless. The installed
+   the area behind the status bar seamless with the page. The installed
    iOS app uses `apple-mobile-web-app-status-bar-style=black-translucent`,
    so the page runs under the clock and content scrolls up behind it
    (`default` draws an opaque white bar above the page, white in dark mode
@@ -690,16 +690,28 @@ Two compensating patterns:
    iOS 27 draws its own soft blur over the top of the page, down to about
    `safe-top + 34px` in the installed app; anything placed there reads
    blurred. Keep a text row centred at `safe-top + 36px` or lower (the
-   phone header row sits exactly there).
+   phone header row sits exactly there). The 36px is one token,
+   `--top-row-clearance`, and the centre is another, `--top-row-centre`
+   (`app-tokens.css`): `safe-top + 36px` on a phone with a top inset, `0`
+   anywhere else (a browser tab, a wider window, desktop). Every surface
+   whose first row meets the top of the screen places it from that token,
+   never a clearance number of its own: `max(<its own top>,
+   <top-row-centre less its row's offset>)`, so where the centre is 0 it
+   keeps its own top. Users: the header (its padding and both fade stops),
+   the pane top, the sidebar's first row, the full-screen command palette,
+   the phone modal, the lightbox close button and the version badge (just
+   below the header under an inset).
 2. **One frosted surface on the phone header** (`Header.svelte` at
    `max-width: 768px`), from the top of the screen to the header bottom,
    fading out at the bottom over two stacked blur layers:
    ```css
+   /* .shell-header: --h-row-centre: max(var(--top-row-clearance), var(--top-row-centre)), set once;
+      padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom)) centres the row on it */
    /* ::before: full --glass-blur and the 72% tint, fading from the row centre */
    background-image: linear-gradient(180deg,
-     color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--safe-top) + 36px),
+     color-mix(in srgb, var(--header-top-base) 72%, transparent) var(--h-row-centre),
      transparent 100%);
-   mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));
+   mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));
    /* ::after: --glass-blur-soft, smoothing that fade to the bottom edge */
    mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
    ```

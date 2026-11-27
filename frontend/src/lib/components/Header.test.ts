@@ -356,9 +356,9 @@ describe('Header glass layers', () => {
 		// where it fades. The full blur and tint fade from the row centre to 6px above the bottom;
 		// a light blur on top runs to the bottom edge and smooths that fade.
 		const full = rule(phone, '.shell-header::before');
-		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--safe-top) + 36px)');
-		expect(full).toContain('-webkit-mask-image: linear-gradient(180deg, currentColor calc(var(--safe-top) + 36px), transparent calc(100% - 6px));');
-		expect(full).toMatch(/\n\t\t\tmask-image: linear-gradient\(180deg, currentColor calc\(var\(--safe-top\) \+ 36px\), transparent calc\(100% - 6px\)\);/);
+		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 72%, transparent) var(--h-row-centre)');
+		expect(full).toContain('-webkit-mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));');
+		expect(full).toMatch(/\n\t\t\tmask-image: linear-gradient\(180deg, currentColor var\(--h-row-centre\), transparent calc\(100% - 6px\)\);/);
 		const soft = rule(phone, '.shell-header::after');
 		expect(soft).toContain('backdrop-filter: var(--glass-blur-soft);');
 		expect(soft).toContain('-webkit-backdrop-filter: var(--glass-blur-soft);');
@@ -366,12 +366,14 @@ describe('Header glass layers', () => {
 		expect(soft).toContain('pointer-events: none;');
 	});
 
-	it('sizes the phone header and centres the row 36px below the safe-area inset', () => {
-		// The iOS 27 system blur covers the top of the page to about safe-top + 34px;
-		// an 18px row centred at safe-top + 36px is sharp.
+	it('sizes the phone header and centres the row at the shared top-row centre', () => {
+		// The iOS 27 system blur covers the top of the page to about safe-top + 34px; an 18px row
+		// centred at --top-row-centre (safe-top + 36px under an inset) is sharp. In a tab the
+		// centre stays 36px. The padding and both fade stops come from the one centre.
 		const phoneHeader = rule(phone, '.shell-header');
 		expect(phoneHeader).toContain('height: var(--header-bottom);');
-		expect(phoneHeader).toContain('padding-top: calc(var(--safe-top) + 8px);');
+		expect(phoneHeader).toContain('--h-row-centre: max(var(--top-row-clearance), var(--top-row-centre));');
+		expect(phoneHeader).toContain('padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom));');
 	});
 
 	it('makes the phone header solid when transparency is reduced', () => {

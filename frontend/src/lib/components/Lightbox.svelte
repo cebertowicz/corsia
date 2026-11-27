@@ -58,7 +58,9 @@
 		-webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
 	}
 	.lightbox-close {
-		position: absolute; top: var(--safe-top); right: 12px;
+		/* On a phone with a top inset the button centres at the shared --top-row-centre: its centre is
+		   32px below its top (12px margin and half its 40px height). */
+		position: absolute; top: max(var(--safe-top), calc(var(--top-row-centre) - var(--space-7))); right: 12px;
 		margin-top: 12px;
 		background: rgba(255,255,255,0.15); border: none; border-radius: var(--radius-circle);
 		width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;

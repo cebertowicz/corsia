@@ -200,7 +200,9 @@
 	.res-empty { padding: 6px 10px 4px; font-size: var(--text-subhead); color: var(--text-tertiary); }
 
 	@media (max-width: 768px) {
-		.palette { left: 0; right: 0; top: 0; transform: none; width: 100%; max-height: 100vh; height: 100%; border-radius: 0; padding-top: var(--safe-top); }
+		/* Under a top inset the search row centres at the shared --top-row-centre: its centre is about
+		   32px below the palette's padding edge (13px padding and half the 40px close button). */
+		.palette { left: 0; right: 0; top: 0; transform: none; width: 100%; max-height: 100vh; height: 100%; border-radius: 0; padding-top: max(var(--safe-top), calc(var(--top-row-centre) - var(--space-7))); }
 		.results { padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
 		.pal-close { width: 40px; height: 40px; }
 	}
