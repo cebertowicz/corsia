@@ -2,6 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { Spinner, Toggle } from '$lib/components/ui';
 	import { saveUpdateSchedule } from '$lib/update/schedule';
+	import { updateScreenView } from '$lib/update/screenStore';
 	import { updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
 	import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf } from '$lib/update/failureCopy';
 	import { changeList, currentOperation, elapsedSeconds, formatElapsed, formatInstalledAt, formatScheduleTime, isFailedOperation, releaseNotesFor, stepMessage } from '$lib/update/model';
@@ -15,6 +16,7 @@
 
 	const operation = $derived(currentOperation($updateOperation, $updateStatus));
 	const running = $derived($updateInFlight);
+	const message = $derived($updateScreenView?.operationId === operation?.operation_id && ($updateScreenView?.mode === 'progress' || $updateScreenView?.mode === 'longer') ? $updateScreenView.label : stepMessage(operation, $updateUnreachable));
 	// A verdict the client reached itself wins over whatever the latest operation says.
 	const failure = $derived($updateFailureVerdict ? failureFromVerdict($updateFailureVerdict) : isFailedOperation(operation) ? failureFromOperation(operation) : null);
 	const copy = $derived(failure ? failureCopy(failure, runningVersionOf($updateStatus, $updateUnreachable)) : null);
@@ -59,7 +61,7 @@
 				{#if scheduledTonight}<span class="state offer-state">· {formatScheduleTime(schedule?.time ?? '')} tonight</span>
 				{:else if copy}<span class="state failed-state">· {copy.title}</span>
 				{:else if offered && targetVersion}<span class="state offer-state">· {targetVersion} available</span>{/if}
-				{#if running}<span class="updating">· <Spinner size={12} />{stepMessage(operation, $updateUnreachable)}<span class="time">{elapsed}</span></span>{/if}
+				{#if running}<span class="updating">· <Spinner size={12} />{message}<span class="time">{elapsed}</span></span>{/if}
 			</span>
 			{#if installedLine}<span class="installed">{installedLine}</span>{/if}
 		</div>

@@ -88,7 +88,7 @@ function failedAfterRestart(operation: UpdateOperation | null | undefined): bool
 
 function httpStep(operation: UpdateOperation | null): StepId {
 	switch (operation?.phase) {
-		case 'restarting': return 'restarting';
+		case 'ready': case 'restarting': return 'restarting';
 		case 'resuming': return 'starting';
 		case 'verifying': return 'verifying';
 		default: return operation && !isInFlight(operation) ? 'verifying' : 'waiting';
@@ -173,7 +173,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		if (own && httpStep(own) === 'waiting') l.paused = agentsSafe(own);
 		if (own?.phase === 'draining' && typeof own.hard_cap_remaining === 'number' && Number.isFinite(own.hard_cap_remaining)) {
 			l.drainDeadline = now + Math.max(0, own.hard_cap_remaining) * 1_000;
-		} else if (own && ['restarting', 'resuming', 'verifying'].includes(own.phase ?? '')) l.drainDeadline = null;
+		} else if (own && ['ready', 'restarting', 'resuming', 'verifying'].includes(own.phase ?? '')) l.drainDeadline = null;
 	}
 	if (operation && operation.operation_id !== l.operationId && activeOperation(operation)) {
 		latch = null;
@@ -209,8 +209,10 @@ export function tickUpdateScreen(now = Date.now()): void {
 		updateScreenView.set({ operationId: l.operationId, mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true, startupProgressUnavailable: false });
 		return;
 	}
-	const restartSeen = own && ['restarting', 'resuming', 'verifying'].includes(own.phase ?? '');
-	const hold = unreachable && l.model.step === 'waiting' && !restartSeen && (l.drainDeadline === null || now < l.drainDeadline);
+	const restartSeen = own && ['ready', 'restarting', 'resuming', 'verifying'].includes(own.phase ?? '');
+	// Early startup phases are evidence of the replacement process; a late serving record can belong to the old one.
+	const startupSeen = shellInfo()?.mode === 'local' && file && ['starting', 'backing_up', 'migrating', 'validating'].includes(file.phase);
+	const hold = unreachable && l.model.step === 'waiting' && !restartSeen && !startupSeen && (l.drainDeadline === null || now < l.drainDeadline);
 	const { input, longer, estimated } = readSources(now, l, own, unreachable, file, progress?.readError ?? null, hold);
 	l.model.update(now, hold ? { step: 'waiting', count: drainCount(own?.drain_total, own?.blocking), alive: false, drainRemaining: own?.hard_cap_remaining ?? null } : input);
 	updateScreenView.set({ operationId: l.operationId, mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: hold ? false : estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable, startupProgressUnavailable: unreachable && progress?.readError === 'unavailable', paused: hold ? l.paused : null });
