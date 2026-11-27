@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
@@ -288,7 +290,7 @@ test('393 phone list: Go to text on the open card still takes the document to th
 
 // A short thread's reply and recipient line remain visible as the Agreed line enters the held sheet.
 for (const surface of [PHONE, NARROW]) {
-	for (const { delayed, reduced } of surface === PHONE ? [{ delayed: false, reduced: false }, { delayed: true, reduced: false }, { delayed: false, reduced: true }] : [{ delayed: false, reduced: false }]) {
+	for (const { delayed, reduced } of [{ delayed: false, reduced: false }, { delayed: true, reduced: false }, { delayed: false, reduced: true }]) {
 		test(`${surface.name}: Agree keeps the visible reply in view${delayed ? ' when the response is delayed' : ''}${reduced ? ' with reduced motion' : ''}`, async ({ page, request }, info) => {
 			only(surface, info); test.setTimeout(180_000);
 			if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -307,12 +309,13 @@ for (const surface of [PHONE, NARROW]) {
 			expect(before.fieldTop).toBeGreaterThanOrEqual(before.clipTop - 1);
 			expect(before.fieldBottom).toBeLessThanOrEqual(before.clipBottom + 1);
 			expect(before.lineBottom).toBeLessThanOrEqual(before.clipBottom + 1);
-			let release = () => {}, seen = () => {};
+			let release = () => {}, seen = () => {}, continued = () => {};
 			const gate = new Promise<void>((resolve) => { release = resolve; });
 			const requested = new Promise<void>((resolve) => { seen = resolve; });
+			const completed = new Promise<void>((resolve) => { continued = resolve; });
 			const route = async (intercept: import('@playwright/test').Route) => {
 				if (intercept.request().method() !== 'PATCH') { await intercept.continue(); return; }
-				seen(); await gate; await intercept.continue();
+				seen(); await gate; await intercept.continue(); continued();
 			};
 			if (delayed) await page.route('**/api/comments/*', route);
 			await page.getByRole('button', { name: 'Agree', exact: true }).locator('visible=true').first().tap();
@@ -320,7 +323,7 @@ for (const surface of [PHONE, NARROW]) {
 				await requested;
 				expect((await geometry()).lineBottom).toBeCloseTo(before.lineBottom, 0);
 				expect(await scroller.evaluate((node) => node.scrollTop)).toBeCloseTo(docBefore, 0);
-				release(); await page.unroute('**/api/comments/*', route);
+				release(); await completed; await page.unroute('**/api/comments/*', route);
 			}
 			await expect(card.locator('.ct-agreed')).toBeVisible();
 			await panel.evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))); });
@@ -333,9 +336,18 @@ for (const surface of [PHONE, NARROW]) {
 				const body = panel.locator('.drawer-body');
 				const bodyBefore = await body.evaluate((node) => node.scrollTop);
 				const agent = await createSession(request, 'Later reviewer');
-				const posted = await request.post('/api/delegation/docs/comments', { params, data: { as_session_id: agent, body: 'A later reply arrives after the agreement.', parent_id: seeded.root } });
-				expect(posted.ok()).toBeTruthy();
-				await expect(card.getByText('A later reply arrives after the agreement.')).toBeAttached();
+				const workspace = process.env.CORSIA_E2E_WORKSPACE, state = process.env.CORSIA_E2E_STATE_DIR, python = process.env.CORSIA_E2E_BACKEND_PYTHON;
+				if (!workspace || !state || !python || process.env.CORSIA_E2E_MOCK !== '1') throw new Error('Requires disposable mock environment');
+				// Seed a different author's later reply and reload it: this checks card growth, not live notification delivery.
+				execFileSync(python, ['-c', [
+					'import runpy, sys',
+					'runpy.run_path("frontend/e2e/support/focus-outcomes.py")["assert_disposable_roots"]()',
+					'from doceditor import comments',
+					'row, created = comments.create_with_status(sys.argv[1], body="A later reply arrives after the agreement.", author="Later reviewer", author_kind="agent", author_thread_id=sys.argv[3], parent_id=sys.argv[2], announce=False)',
+					'assert created and row["parent_id"] == sys.argv[2] and row["author_thread_id"] == sys.argv[3]',
+				].join('\n'), seeded.doc.artifactId, seeded.root, agent], { cwd: path.resolve(process.cwd(), '..'), env: { ...process.env, PYTHONPATH: 'backend', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state } });
+				await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), seeded.doc.artifactId);
+				await expect(card.getByText('A later reply arrives after the agreement.')).toBeVisible();
 				await panel.evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))); });
 				await settled(page);
 				expect(await body.evaluate((node) => node.scrollTop)).toBeCloseTo(bodyBefore, 0);
