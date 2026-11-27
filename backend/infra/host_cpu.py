@@ -16,13 +16,27 @@ from typing import Any
 
 import psutil
 
-# The first reading has no previous snapshot to compare against, so it measures a
-# short window itself. Callers run this off the event loop (asyncio.to_thread), which
-# is why the wait is affordable here and would not be in a request handler's own thread.
-FIRST_WINDOW_SECONDS = 0.1
+# cpu_times() counts 1/SC_CLK_TCK-second ticks per CPU. os.sysconf('SC_CLK_TCK') reads
+# 100 on this macOS arm64 host (and 100 USER_HZ is the usual Linux value), so a W-second
+# window on C logical cores holds about 100 * W * C ticks and the smallest move a
+# reading can show is 100 / (100 * W * C) percent. Both windows below keep that step at
+# or under 1% on a 4-core host.
+
+# With no previous snapshot the first reading measures a window itself: 0.25 s on 4
+# cores is 100 ticks, so that first figure still resolves 1% steps (0.1 s would show
+# only 40 ticks, a 2.5% step). Callers run this off the event loop (asyncio.to_thread),
+# so the wait is affordable here and would not be in a handler's own thread.
+FIRST_WINDOW_SECONDS = 0.25
+
+# Pages poll independently, so two readings can land milliseconds apart, and a window
+# with no ticks in it reads as a meaningless 0 or 100. 0.5 s on 4 cores is 200 ticks,
+# so an in-window repeat still costs at most a 0.5% step instead of that noise.
+MIN_WINDOW_SECONDS = 0.5
 
 _lock = threading.Lock()
 _prev_times: Any = None
+_prev_monotonic = 0.0
+_prev_pct = 0.0
 
 
 def _totals(times: Any) -> tuple[float, float]:
@@ -41,22 +55,8 @@ def _totals(times: Any) -> tuple[float, float]:
     return total, idle
 
 
-def usage_pct() -> float:
-    """Return the whole-host busy CPU share since the previous reading.
-
-    The window ends now and starts at the previous reading, whichever worker thread
-    took it. With no reading yet it samples FIRST_WINDOW_SECONDS of host activity.
-    """
-    global _prev_times
-    with _lock:
-        first = psutil.cpu_times()
-        if _prev_times is None:
-            time.sleep(FIRST_WINDOW_SECONDS)
-            current, previous = psutil.cpu_times(), first
-        else:
-            previous, current = _prev_times, first
-        _prev_times = current
-
+def _busy_pct(previous: Any, current: Any) -> float:
+    """Return the whole-host busy share between two cpu_times() snapshots."""
     prev_total, prev_idle = _totals(previous)
     total, idle = _totals(current)
     total -= prev_total
@@ -64,3 +64,28 @@ def usage_pct() -> float:
     if total <= 0:
         return 0.0
     return max(0.0, min(100.0, (total - idle) / total * 100))
+
+
+def usage_pct() -> float:
+    """Return the whole-host busy CPU share since the previous reading.
+
+    The window ends now and starts at the previous reading, whichever worker thread
+    took it. With no reading yet it samples FIRST_WINDOW_SECONDS of host activity.
+    A window shorter than MIN_WINDOW_SECONDS is too coarse to report, so the previous
+    figure is repeated and that window stays open rather than being replaced.
+    """
+    global _prev_times, _prev_monotonic, _prev_pct
+    with _lock:
+        now = time.monotonic()
+        if _prev_times is None:
+            previous = psutil.cpu_times()
+            time.sleep(FIRST_WINDOW_SECONDS)
+            current, now = psutil.cpu_times(), time.monotonic()
+        elif now - _prev_monotonic < MIN_WINDOW_SECONDS:
+            return _prev_pct
+        else:
+            previous, current = _prev_times, psutil.cpu_times()
+
+        pct = _busy_pct(previous, current)
+        _prev_times, _prev_monotonic, _prev_pct = current, now, pct
+        return pct

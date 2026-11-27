@@ -24,18 +24,28 @@ from fastapi.testclient import TestClient
 Scpu = namedtuple("Scpu", "user nice system idle iowait")
 SNAPSHOT_1 = Scpu(user=100.0, nice=0.0, system=50.0, idle=800.0, iowait=50.0)
 SNAPSHOT_2 = Scpu(user=150.0, nice=0.0, system=100.0, idle=850.0, iowait=50.0)
+# Nothing but idle time elapses after SNAPSHOT_2, so a window that opens on it reads 0.
+SNAPSHOT_3 = Scpu(user=150.0, nice=0.0, system=100.0, idle=1050.0, iowait=50.0)
 # 150 CPU seconds elapse, 50 of them idle -> 66.7% busy, 33.3% idle.
 EXPECTED = {"usage_pct": 66.7, "idle_pct": 33.3}
+
+
+def _cold_window(monkeypatch) -> None:
+    """Forget any previous reading, so a test really starts from nothing."""
+    from infra import host_cpu
+
+    monkeypatch.setattr(host_cpu, "_prev_times", None)
+    monkeypatch.setattr(host_cpu, "_prev_monotonic", 0.0)
+    monkeypatch.setattr(host_cpu, "_prev_pct", 0.0)
 
 
 @pytest.fixture
 def system_client(isolated_db, monkeypatch):
     """The system router with a cold status cache and a cold CPU window."""
     from api import system
-    from infra import host_cpu
 
     monkeypatch.setitem(system._system_cache, "data", None)
-    monkeypatch.setattr(host_cpu, "_prev_times", None)
+    _cold_window(monkeypatch)
     app = FastAPI()
     app.include_router(system.router)
     with TestClient(app) as client:
@@ -91,8 +101,10 @@ def test_cpu_needs_no_subprocess(system_client, monkeypatch):
     monkeypatch.setattr(host_cpu, "_prev_times", SNAPSHOT_1)
     monkeypatch.setattr(psutil, "cpu_times", lambda: SNAPSHOT_2)
 
+    cpu = _system_cpu(system_client)
+
     assert started == []
-    assert _system_cpu(system_client) == EXPECTED
+    assert cpu == EXPECTED
 
 
 def test_first_reading_measures_its_own_window(monkeypatch):
@@ -100,7 +112,7 @@ def test_first_reading_measures_its_own_window(monkeypatch):
     import psutil
     from infra import host_cpu
 
-    monkeypatch.setattr(host_cpu, "_prev_times", None)
+    _cold_window(monkeypatch)
     snapshots = iter([SNAPSHOT_1, SNAPSHOT_2])
     monkeypatch.setattr(psutil, "cpu_times", lambda: next(snapshots))
 
@@ -111,11 +123,55 @@ def test_first_reading_measures_its_own_window(monkeypatch):
     assert time.monotonic() - started >= host_cpu.FIRST_WINDOW_SECONDS * 0.9
 
 
+def test_rapid_polls_share_one_window(monkeypatch):
+    """Pages poll unsynchronized; a milliseconds-old window is tick noise."""
+    import psutil
+    from infra import host_cpu
+
+    class Clock:
+        """A clock that only moves when the code under test sleeps or is advanced."""
+
+        def __init__(self) -> None:
+            self.now = 1000.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def sleep(self, seconds: float) -> None:
+            self.now += seconds
+
+    clock = Clock()
+    snapshots = [SNAPSHOT_1, SNAPSHOT_2, SNAPSHOT_3]
+    taken: list[Scpu] = []
+
+    def cpu_times() -> Scpu:
+        snapshot = snapshots[len(taken)]
+        taken.append(snapshot)
+        return snapshot
+
+    _cold_window(monkeypatch)
+    monkeypatch.setattr(host_cpu, "time", clock)
+    monkeypatch.setattr(psutil, "cpu_times", cpu_times)
+
+    first = host_cpu.usage_pct()
+    clock.now += 0.01
+    second = host_cpu.usage_pct()
+
+    assert first == pytest.approx(200 / 3, abs=0.01)
+    assert second == first
+    assert taken == [SNAPSHOT_1, SNAPSHOT_2]  # no snapshot taken for the short window
+    assert host_cpu._prev_times is SNAPSHOT_2  # and the window stayed open
+
+    clock.now += host_cpu.MIN_WINDOW_SECONDS
+    assert host_cpu.usage_pct() == 0.0  # the reopened window reads on its own
+    assert taken == [SNAPSHOT_1, SNAPSHOT_2, SNAPSHOT_3]
+
+
 def test_reading_holds_across_worker_threads(monkeypatch):
     """The regression: a poll on a new thread used to read 0% busy."""
     from infra import host_cpu
 
-    monkeypatch.setattr(host_cpu, "_prev_times", None)
+    _cold_window(monkeypatch)
     stop = threading.Event()
     burners = [
         threading.Thread(target=_burn, args=(stop,), daemon=True) for _ in range(4)
@@ -124,7 +180,7 @@ def test_reading_holds_across_worker_threads(monkeypatch):
         burner.start()
     try:
         _in_fresh_thread(host_cpu.usage_pct)
-        time.sleep(0.4)
+        time.sleep(host_cpu.MIN_WINDOW_SECONDS + 0.2)  # long enough to reopen
         second = _in_fresh_thread(host_cpu.usage_pct)
     finally:
         stop.set()
