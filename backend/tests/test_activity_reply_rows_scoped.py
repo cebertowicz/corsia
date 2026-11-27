@@ -166,6 +166,29 @@ def test_no_statement_the_read_runs_scans_every_comment_or_every_batch():
     assert any('SEARCH batch_item USING INDEX idx_doc_feedback_batch_items_comment (comment_id=?)' in p for p in plans)
 
 
+def _plan_descends_from(row, ancestor_id, by_id):
+    parent = row['parent']
+    while parent in by_id:
+        if parent == ancestor_id:
+            return True
+        parent = by_id[parent]['parent']
+    return False
+
+
+def _assert_person_threads_plan(plan):
+    details = [row['detail'] for row in plan]
+    materialized = [row['id'] for row in plan if row['detail'] == 'MATERIALIZE person_threads']
+    assert len(materialized) == 1, details
+    by_id = {row['id']: row for row in plan}
+    reads = [row['detail'] for row in plan
+             if _plan_descends_from(row, materialized[0], by_id)
+             and (' doc_comments ' in f" {row['detail']} ")]
+    assert reads and all(detail.startswith('SEARCH doc_comments ') and 'INDEX' in detail
+                         and 'artifact_id=?' in detail for detail in reads), details
+    joins = [detail for detail in details if detail.startswith(('SEARCH pt ', 'SCAN pt '))]
+    assert joins and all(detail.startswith('SEARCH pt ') and 'INDEX' in detail for detail in joins), details
+
+
 def test_reply_qualification_does_not_rescan_person_replies_per_unread_row():
     db = _db()
     _cases(db)
@@ -174,9 +197,10 @@ def test_reply_qualification_does_not_rescan_person_replies_per_unread_row():
     activity_reply_rows._replies(db, 'u1', ('mixed',))
     db.set_trace_callback(None)
     sql = next(s for s in statements if 'WITH owner_candidates' in s)
-    plan = [row['detail'] for row in db.execute(f'EXPLAIN QUERY PLAN {sql}')]
-    assert not any('SEARCH person ' in detail for detail in plan), plan
-    assert any('MATERIALIZE person_threads' in detail for detail in plan), plan
+    plan = db.execute(f'EXPLAIN QUERY PLAN {sql}').fetchall()
+    details = [row['detail'] for row in plan]
+    assert not any('SEARCH person ' in detail for detail in details), details
+    _assert_person_threads_plan(plan)
 
 
 def test_multiple_person_replies_do_not_duplicate_qualified_replies():
