@@ -4,6 +4,7 @@ import { CAPTURE_FAILURE, SELECTION_LOST } from '$lib/stores/commentSelection';
 import { plainErrorText } from '$lib/plainError';
 import { POST_FAILED } from '$lib/docViewerOperations';
 import { DRAFT_KEPT } from '$lib/stores/draftKept';
+import { CommentConnectionError } from '$lib/api/boundedRequest';
 
 /** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
 export const DIAGRAM_CHANGED_MESSAGE = `Place the pin on the current diagram. ${DRAFT_KEPT}`;
@@ -29,8 +30,8 @@ function knownFailure(error: unknown): string | null {
 	if (!(error instanceof Error)) return POST_FAILED;
 	// A timed-out post may already be committed, and its reservation is released: asking to try again invites a duplicate.
 	if (error.name === 'PostTimeoutError') return `Couldn’t confirm the comment was posted. ${DRAFT_KEPT} Check the comments before you post it again.`;
-	// A lost connection (fetch's own TypeError text) and a server error ("500 <body>") carry wire text, not words for the reader.
-	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return POST_FAILED;
+	// A lost connection and a server error ("500 <body>") carry wire text, not words for the reader.
+	if (error instanceof TypeError || error instanceof CommentConnectionError || /^5\d{2}\b/.test(error.message)) return POST_FAILED;
 	if (/^\d{3}\b/.test(error.message)) return refusalMessage(error.message);
 	return null;
 }
