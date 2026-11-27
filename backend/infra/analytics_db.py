@@ -66,7 +66,6 @@ ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_bulk_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_bulk_ms DOUBLE;
-ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS worker_wait_ms DOUBLE;
 CREATE TABLE IF NOT EXISTS worker_wait_daily (
     day DATE NOT NULL,
     outcome VARCHAR NOT NULL,

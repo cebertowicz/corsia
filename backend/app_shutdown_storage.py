@@ -30,6 +30,11 @@ async def finish_storage_shutdown(logger, pending_cancel, *, run_cleanup_owner, 
         "documents", close_documents(), logger,
     )
     pending_cancel = pending_cancel or document_cancel
+    from infra.worker_wait_timing import shutdown as shutdown_worker_wait_timing
+    timing_failure, timing_cancel = await run_cleanup_owner(
+        "worker wait timing", shutdown_worker_wait_timing(), logger,
+    )
+    pending_cancel = pending_cancel or timing_cancel
     flush_product_events(logger)
     stop_runtime_logs(logger)
     storage_failure = _shutdown_storage(logger, shutdown_pool)
@@ -37,5 +42,7 @@ async def finish_storage_shutdown(logger, pending_cancel, *, run_cleanup_owner, 
         raise pending_cancel
     if document_failure is not None:
         raise document_failure
+    if timing_failure is not None:
+        raise timing_failure
     if storage_failure is not None:
         raise storage_failure

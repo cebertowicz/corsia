@@ -8,6 +8,8 @@ import struct
 import sys
 import time
 
+# Fixture-only protocol: cap memory at 1 MiB per frame; larger calls fail explicitly.
+# Future operations must size their payloads before using this boundary.
 MAX_FRAME = 1024 * 1024
 
 
@@ -19,13 +21,16 @@ def lower_priority() -> str:
             if not kernel.SetPriorityClass(kernel.GetCurrentProcess(), 0x00004000):
                 raise OSError("SetPriorityClass failed")
         else:
+            # Nice 10 makes workers lower priority than normally scheduled apps.
             os.nice(10)
         return "lowered"
     except OSError as exc:
-        logging.getLogger(__name__).warning("Could not lower worker priority (errno=%s): %s", exc.errno, exc)
+        detail = str(exc).replace("\n", " ").replace("\r", " ")[:512]
+        logging.getLogger(__name__).warning("Could not lower worker priority (errno=%s): %s", exc.errno, detail)
         return "permission_denied" if isinstance(exc, PermissionError) else "failed"
     except Exception as exc:
-        logging.getLogger(__name__).warning("Could not lower worker priority: %s", exc)
+        detail = str(exc).replace("\n", " ").replace("\r", " ")[:512]
+        logging.getLogger(__name__).warning("Could not lower worker priority: %s", detail)
         return "failed"
 
 
@@ -54,11 +59,11 @@ def write_frame(stream, value):
 
 
 def main() -> None:
-    priority = lower_priority()
-    # Keep work imports below the priority change. The only operation is a pure fixture.
-    write_frame(sys.stdout.buffer, {"version": 1, "type": "ready", "priority": priority})
-    while True:
-        try:
+    try:
+        priority = lower_priority()
+        # Keep work imports below the priority change. The only operation is a pure fixture.
+        write_frame(sys.stdout.buffer, {"version": 1, "type": "ready", "priority": priority})
+        while True:
             message = read_frame(sys.stdin.buffer)
             if message.get("version") == 1 and message.get("type") == "cancel":
                 return
@@ -77,8 +82,14 @@ def main() -> None:
                     time.sleep(float(payload["_test_delay"]))
             write_frame(sys.stdout.buffer, {"version": 1, "type": "result", "identity": identity, "payload": payload})
             # Wait for the next frame; the parent owns idle expiry.
-        except (EOFError, OSError, ValueError, TypeError, json.JSONDecodeError):
-            return
+    except (EOFError, OSError, ValueError, TypeError) as exc:
+        # One bounded line, even if an exception contains newlines or large data.
+        detail = str(exc).replace("\n", " ").replace("\r", " ")[:512]
+        try:
+            sys.stderr.write(f"worker error: {type(exc).__name__}: {detail}\n")
+            sys.stderr.flush()
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

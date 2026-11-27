@@ -2,6 +2,7 @@ import asyncio
 import errno
 import io
 import json
+import logging
 import os
 import struct
 import subprocess
@@ -26,7 +27,7 @@ class FramingTests(unittest.TestCase):
             with patch.object(os, 'cpu_count', return_value=cpus):
                 self.assertEqual(agent_pool.core_ceiling(), expected)
         with patch.dict(os.environ, {'SECRET_BEARER_TOKEN': 'secret'}):
-            self.assertNotIn('SECRET_BEARER_TOKEN', agent_pool._environment(1))
+            self.assertNotIn('SECRET_BEARER_TOKEN', agent_pool._environment())
 
     def test_unix_priority_success(self):
         if os.name == 'nt':
@@ -82,7 +83,7 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
             self.metrics.append(outcome)
             if outcome == 'assigned':
                 self.assigned.set()
-        self.metric_patch = patch('infra.request_timing.record_worker_wait', side_effect=record)
+        self.metric_patch = patch('infra.worker_wait_timing.record_worker_wait', side_effect=record)
         self.metric_patch.start()
 
     async def asyncTearDown(self):
@@ -100,14 +101,12 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(first, next(iter(self.pool._workers)))
         self.assertEqual(self.metrics, ['assigned', 'assigned'])
 
-    async def test_unexpected_idle_exit_discards_priority_and_replaces(self):
+    async def test_unexpected_idle_exit_is_reaped_and_replaced(self):
         await self.call('first')
         old = next(iter(self.pool._workers))
-        self.assertIn(old, self.pool._priorities)
         old.kill()
         await old.wait()
         self.assertEqual(await self.call('next'), 'next')
-        self.assertNotIn(old, self.pool._priorities)
         self.assertNotIn(old, self.pool._workers)
 
     async def test_cancel_when_child_stops_reading_stdin(self):
@@ -219,7 +218,6 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(probe.returncode, 0, probe.stderr)
         await self.call('priority')
         proc = next(iter(self.pool._workers))
-        self.assertEqual(self.pool._priorities[proc], 'lowered')
         self.assertGreater(os.getpriority(os.PRIO_PROCESS, proc.pid), os.getpriority(os.PRIO_PROCESS, 0))
 
     async def test_computed_ceiling_saturation(self):
@@ -294,7 +292,7 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
                 await task
         await asyncio.wait_for(self.pool.close(), 3)
         self.assertIsNotNone(proc.returncode)
-        self.assertFalse(self.pool._timer_tasks)
+        self.assertFalse(self.pool._workers)
 
     async def test_cancel_while_returning_worker_reaps_it(self):
         result_ready = asyncio.Event()
@@ -324,6 +322,64 @@ class PoolTests(unittest.IsolatedAsyncioTestCase):
         await self.pool.close()
         self.assertFalse(self.pool._workers)
         self.assertEqual(self.metrics, ['failed'])
+
+    async def test_child_protocol_failure_reaches_caller(self):
+        original = agent_pool._encode
+        def invalid_call(value):
+            if value.get('type') == 'call':
+                value = {**value, 'operation': 'invalid'}
+            return original(value)
+        with patch.object(agent_pool, '_encode', side_effect=invalid_call):
+            with self.assertRaisesRegex(agent_pool.WorkerFailed, 'ValueError: unknown operation'):
+                await self.call('x')
+        await self.pool.close()
+        self.assertFalse(self.pool._workers)
+
+    async def test_stderr_is_drained_with_bounded_capture(self):
+        reader = asyncio.StreamReader()
+        worker = agent_pool.Worker(SimpleNamespace(stderr=reader))
+        task = asyncio.create_task(agent_pool.capture_stderr(worker))
+        reader.feed_data(b'x' * 200000 + b'\nworker error: bad frame\n')
+        await asyncio.wait_for(worker.error_reported.wait(), 1)
+        self.assertEqual(worker.error_detail, 'worker error: bad frame')
+        reader.feed_eof()
+        await task
+
+    async def test_cause_arrives_while_stderr_remains_open(self):
+        real_spawn = asyncio.create_subprocess_exec
+        code = ("import json,struct,sys,time; "
+                "b=json.dumps({'version':1,'type':'ready','priority':'lowered'}).encode(); "
+                "sys.stdout.buffer.write(struct.pack('!I',len(b))+b); sys.stdout.buffer.flush(); "
+                "n=struct.unpack('!I',sys.stdin.buffer.read(4))[0]; sys.stdin.buffer.read(n); "
+                "sys.stderr.write('worker error: ValueError: kept open\\n'); sys.stderr.flush(); "
+                "sys.stdout.buffer.write(struct.pack('!I',1)+b'{'); sys.stdout.buffer.flush(); "
+                "time.sleep(30)")
+        async def spawn(*args, **kwargs):
+            return await real_spawn(sys.executable, '-c', code, **kwargs)
+        with patch.object(agent_pool.asyncio, 'create_subprocess_exec', side_effect=spawn):
+            with self.assertRaisesRegex(agent_pool.WorkerFailed, 'ValueError: kept open'):
+                await asyncio.wait_for(self.call('x'), 1)
+            proc = next(iter(self.pool._workers))
+            self.assertIsNone(proc.returncode)
+        await self.pool.close()
+        self.assertIsNotNone(proc.returncode)
+
+    async def test_priority_denial_warns_once_in_parent(self):
+        if os.name == 'nt':
+            self.skipTest('Unix priority path')
+        real_spawn = asyncio.create_subprocess_exec
+        code = ("import os; "
+                "os.nice=lambda n: (_ for _ in ()).throw(PermissionError(1, 'denied')); "
+                "from infra.agent_pool_child import main; main()")
+        async def spawn(*args, **kwargs):
+            return await real_spawn(sys.executable, '-c', code, **kwargs)
+        with patch.object(agent_pool.asyncio, 'create_subprocess_exec', side_effect=spawn), \
+             self.assertLogs('infra.agent_pool', level=logging.WARNING) as logs:
+            self.assertEqual(await self.call('ok'), 'ok')
+            await self.pool.close()
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn('errno=1', logs.output[0])
+        self.assertIn('denied', logs.output[0])
 
     async def test_parent_rejects_bad_frames(self):
         for raw in (struct.pack('!I', agent_pool.MAX_FRAME + 1), struct.pack('!I', 1) + b'{'):

@@ -55,7 +55,6 @@ Source: `backend/infra/analytics_db.py`.
 | `db_read_ms` | DOUBLE | No | No | — | — |
 | `dbq_bulk_ms` | DOUBLE | No | No | — | — |
 | `db_bulk_ms` | DOUBLE | No | No | — | — |
-| `worker_wait_ms` | DOUBLE | No | No | — | — |
 
 Indexes: None.
 

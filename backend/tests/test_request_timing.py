@@ -128,29 +128,6 @@ def test_request_over_five_seconds_is_logged_with_its_db_timing(caplog):
 
 
 @pytest.mark.asyncio
-async def test_worker_waits_attach_to_slow_http_request(monkeypatch):
-    monkeypatch.setattr(request_timing, "_SLOW_MS", -1)
-
-    async def app(scope, receive, send):
-        request_timing.record_worker_wait(0.02, "assigned")
-        request_timing.record_worker_wait(0.03, "timed_out")
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b""})
-
-    async def send(message):
-        pass
-
-    await request_timing.RequestTimingMiddleware(app)(
-        {"type": "http", "method": "GET", "route": SimpleNamespace(path="/x")}, None, send
-    )
-    http_row = next(row for row in request_timing._slow_requests if row.method == "GET")
-    assert http_row.worker_wait_ms == 50
-    assert {key[1]: value.count for key, value in request_timing._worker_waits.items()} == {
-        "assigned": 1, "timed_out": 1,
-    }
-
-
-@pytest.mark.asyncio
 async def test_websocket_passthrough():
     seen = []
 
