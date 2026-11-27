@@ -285,3 +285,20 @@ test('393 phone list: Go to text on the open card still takes the document to th
 	expect(Math.abs((await doc.evaluate((node) => node.scrollTop)) - before), 'the document did not go to the text').toBeGreaterThan(200);
 	await expectAnchorShown(page, PHONE);
 });
+
+// Agree in the phone sheet's header adds an "Agreed" line to the thread: the sheet keeps the height it had and the line scrolls inside it, as for earlier
+// replies, so the page and the Agree control stay where they are (the sheet used to grow, which carried the control up and moved the page).
+for (const surface of [PHONE, NARROW]) {
+	test(`${surface.name}: pressing Agree keeps the sheet's height, the page and the Agree control where they are`, async ({ page, request }, info) => {
+		only(surface, info); test.setTimeout(180_000);
+		const seeded = await seedThread(request, `${surface.mode} agree`, 'middle', 2);
+		await openThread(page, request, surface, seeded);
+		const agree = page.getByRole('button', { name: 'Agree', exact: true }).locator('visible=true').first();
+		await expect(agree).toHaveAttribute('aria-pressed', 'false');
+		const sheetBefore = await sheetState(page);
+		const moved = await pressAfterReading(page, surface, agree, 'body');
+		await expect(agree, 'the press did not register').toHaveAttribute('aria-pressed', 'true');
+		stays(moved);
+		expect(Math.abs((await sheetState(page)).sheetHeight - sheetBefore.sheetHeight), 'the sheet changed height').toBeLessThanOrEqual(1);
+	});
+}
