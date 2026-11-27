@@ -77,6 +77,49 @@ def test_omlx_get_settings_with_key_pulls_global_settings(monkeypatch):
     assert "max_process_memory" in out["settings"]
 
 
+def test_omlx_get_settings_never_returns_key_values(monkeypatch):
+    """oMLX's /global-settings carries its admin key, sub keys and third-party keys in plain text."""
+    admin, sub, brave, hf = "omlx-admin-0123456789", "omlx-sub-9876543210", "brave-abcdef012345", "hf_zyxwvu98765"
+    router = _Router({
+        ("GET", "/admin/api/global-settings"): _resp(200, {
+            "server": {"host": "0.0.0.0", "port": 8210},
+            "network": {
+                "http_proxy": "http://proxyuser:proxypass@proxy.example:3128",
+                "https_proxy": "proxyuser:proxypass@proxy.example:3128",
+                "no_proxy": "localhost,127.0.0.1",
+            },
+            "huggingface": {"endpoint": "https://hf.example", "hf_token": hf},
+            "sampling": {"max_tokens": 32768},
+            "auth": {
+                "api_key_set": True,
+                "api_key": admin,
+                "skip_api_key_verification": False,
+                "allow_unauthenticated_inference": True,
+                "sub_keys": [{"key": sub, "name": "Laptop", "created_at": "2026-11-17T00:00:00"}],
+            },
+            "integrations": {"web_search_brave_api_key": brave, "web_search_searxng_url": "https://searx.example"},
+        }),
+    })
+    _patch_httpx(monkeypatch, router)
+    out = asyncio.run(omlx.get_settings(CFG_WITH_KEY))
+    text = repr(out)
+    for secret in (admin, sub, brave, hf, "proxypass", "proxyuser"):
+        assert secret not in text
+    settings = out["settings"]
+    assert settings["auth"] == {
+        "api_key_set": True,
+        "skip_api_key_verification": False,
+        "allow_unauthenticated_inference": True,
+        "sub_keys": [{"name": "Laptop", "created_at": "2026-11-17T00:00:00"}],
+    }
+    assert settings["network"]["http_proxy"] == "http://proxy.example:3128"
+    assert settings["network"]["https_proxy"] == "proxy.example:3128"
+    assert settings["network"]["no_proxy"] == "localhost,127.0.0.1"
+    assert settings["sampling"]["max_tokens"] == 32768
+    assert settings["server"] == {"host": "0.0.0.0", "port": 8210}
+    assert settings["integrations"] == {"web_search_searxng_url": "https://searx.example"}
+
+
 def test_omlx_get_settings_without_key_returns_empty_readonly(monkeypatch):
     router = _Router({})
     _patch_httpx(monkeypatch, router)

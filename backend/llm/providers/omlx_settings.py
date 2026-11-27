@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
 
+from host_access.credential_sanitizer import is_credential_name
 from llm.model_metadata import extract_context_length
 from llm.providers.omlx_public_auth import public_headers
 from llm.providers.omlx_endpoints import (
@@ -18,8 +20,52 @@ from llm.providers.omlx_endpoints import (
 )
 
 
+_URL_USERINFO_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]*@")
+_BARE_USERINFO_RE = re.compile(r"^[^/@\s]+@(?=[^@\s]+$)")
+
+
+def _sub_key_label(entry: object) -> dict[str, Any]:
+    """A sub key's name and creation date; its value never leaves oMLX."""
+    if not isinstance(entry, dict):
+        return {}
+    return {k: entry[k] for k in ("name", "created_at") if k in entry}
+
+
+def _without_userinfo(key: str | None, value: str) -> str:
+    if "@" not in value:
+        return value
+    stripped = _URL_USERINFO_RE.sub(r"\g<scheme>", value)
+    if stripped == value and key and "proxy" in key.casefold():
+        stripped = _BARE_USERINFO_RE.sub("", value)
+    return stripped
+
+
+def display_safe(value: Any, key: str | None = None) -> Any:
+    """oMLX's settings without key, token or password values, for the person's screen and agents.
+
+    oMLX's /global-settings returns its admin key, every sub key and third-party keys in
+    plain text. This drops each credential-named field, keeps only a sub key's name and
+    date, and removes sign-in details from any URL such as a proxy.
+    """
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for name, item in value.items():
+            if is_credential_name(name) or str(name).casefold() == "key":
+                continue
+            if name == "sub_keys" and isinstance(item, list):
+                safe[name] = [_sub_key_label(entry) for entry in item]
+            else:
+                safe[name] = display_safe(item, str(name))
+        return safe
+    if isinstance(value, list):
+        return [display_safe(item, key) for item in value]
+    if isinstance(value, str):
+        return _without_userinfo(key, value)
+    return value
+
+
 async def get_settings(cfg: dict) -> dict[str, Any]:
-    """Read server-wide admin settings for display."""
+    """Read server-wide admin settings for display, with every key value removed."""
     try:
         resp = await admin_request(cfg, "GET", "/global-settings")
     except OmlxAdminError as e:
@@ -29,7 +75,7 @@ async def get_settings(cfg: dict) -> dict[str, Any]:
     except Exception as e:
         return {"ok": False, "message": str(e)}
     if resp.status_code == 200:
-        return {"ok": True, "settings": resp.json() or {}, "readonly": True}
+        return {"ok": True, "settings": display_safe(resp.json() or {}), "readonly": True}
     return {"ok": False, "message": f"HTTP {resp.status_code}"}
 
 
