@@ -21,7 +21,7 @@ async function tracePress(page: Page, selector: string) {
 		requestAnimationFrame(() => sample(0));
 	});
 	await page.locator(selector).filter({ visible: true }).first().tap();
-	await page.waitForTimeout(900);
+	await expect.poll(() => page.evaluate(() => (window as any).__sheetTops.length)).toBe(41);
 	const after = await page.evaluate(() => {
 		const panel = document.querySelector('.drawer-panel')!.getBoundingClientRect();
 		const pin = document.querySelector('[data-region-tag="1"]:not([inert])')!.getBoundingClientRect();
