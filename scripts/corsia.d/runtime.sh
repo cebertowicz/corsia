@@ -74,18 +74,6 @@ else:
 
 is_backend_running() { curl -sf --max-time "${1:-3}" "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
-backend_responds_for_drain() {
-    # The window was decided for this fix and is shorter than the 60-second drain cap.
-    local BACKEND_HEALTH_RETRY_WINDOW_SECONDS=30 started now remaining status
-    started="$(runtime_epoch_seconds)"
-    if is_backend_running 3; then return 0; else status=$?; fi
-    [ "$status" -eq 28 ] || return "$status"
-    now="$(runtime_epoch_seconds)"
-    remaining=$((started + BACKEND_HEALTH_RETRY_WINDOW_SECONDS - now))
-    [ "$remaining" -gt 0 ] || return 28
-    is_backend_running "$remaining"
-}
-
 # A healthy backend must publish readiness within one minute of its last visible
 # progress. Before the port binds, progress is the service's own startup-progress
 # file (backend/infra/startup_progress.py), which a schema migration keeps
@@ -880,7 +868,7 @@ start_server() {
 stop_direct_backend() {
     local drain_attempted=false
     require_port_served_by_this_checkout || return 1
-    if [ "$FORCE" = "false" ] && backend_responds_for_drain; then
+    if [ "$FORCE" = "false" ] && is_backend_running 30; then
         # Same guarantee as the managed stop: the drain is bounded courtesy,
         # the stop is the promise, and the hold is kept across the gap.
         drain_attempted=true
@@ -938,7 +926,7 @@ bounce_server() {
         require_port_served_by_this_checkout || return 1
         # Refuse a bad setup while the old backend is still serving.
         resolve_bind_host > /dev/null || return 1
-        if [ "$FORCE" = "false" ] && backend_responds_for_drain; then
+        if [ "$FORCE" = "false" ] && is_backend_running 30; then
             drain_attempted=true
             DRAIN_FAILURE_ACTION=hold drain_and_wait "restart" \
                 || warn "Drain did not complete; restarting anyway"
@@ -1402,7 +1390,7 @@ restart_prepared() {
         require_port_served_by_this_checkout || return 1
     fi
     if [ "$FORCE" = "false" ]; then
-        if ! backend_responds_for_drain; then
+        if ! is_backend_running 30; then
             reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
             fail "$reason"
             return 1
