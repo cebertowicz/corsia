@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from llm.providers import omlx
+from llm.providers import omlx, omlx_settings
 from omlx_provider_fixtures import CFG_PUBLIC, CFG_WITH_KEY, _patch_httpx, _resp, _Router
 
 
@@ -118,6 +118,24 @@ def test_omlx_get_settings_never_returns_key_values(monkeypatch):
     assert settings["sampling"]["max_tokens"] == 32768
     assert settings["server"] == {"host": "0.0.0.0", "port": 8210}
     assert settings["integrations"] == {"web_search_searxng_url": "https://searx.example"}
+
+
+@pytest.mark.parametrize("key,raw,shown", [
+    ("http_proxy", "  http://proxyuser:proxypass@proxy.example:3128", "http://proxy.example:3128"),
+    ("https_proxy", "\thttps://proxyuser:proxypass@proxy.example:3128/path?q=1", "https://proxy.example:3128/path?q=1"),
+    ("https_proxy", " proxyuser:proxypass@proxy.example:3128 ", "proxy.example:3128"),
+    ("http_proxy", "http://proxyuser:proxy@pass@proxy.example:3128", None),
+    ("http_proxy", "http://a@b:proxypass@proxy.example", None),
+    ("endpoint", "https://hf.example/models/name@rev", "https://hf.example/models/name@rev"),
+    ("no_proxy", "localhost,127.0.0.1", "localhost,127.0.0.1"),
+])
+def test_omlx_settings_url_sign_in_is_removed_or_value_omitted(key, raw, shown):
+    out = omlx_settings.display_safe({"network": {key: raw}})
+    if shown is None:
+        assert out == {"network": {}}
+    else:
+        assert out == {"network": {key: shown}}
+    assert "proxypass" not in repr(out)
 
 
 def test_omlx_get_settings_without_key_returns_empty_readonly(monkeypatch):

@@ -20,8 +20,9 @@ from llm.providers.omlx_endpoints import (
 )
 
 
-_URL_USERINFO_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]*@")
-_BARE_USERINFO_RE = re.compile(r"^[^/@\s]+@(?=[^@\s]+$)")
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_AUTHORITY_END_RE = re.compile(r"[/?#]")
+_OMIT = object()
 
 
 def _sub_key_label(entry: object) -> dict[str, Any]:
@@ -31,13 +32,26 @@ def _sub_key_label(entry: object) -> dict[str, Any]:
     return {k: entry[k] for k in ("name", "created_at") if k in entry}
 
 
-def _without_userinfo(key: str | None, value: str) -> str:
+def _without_userinfo(key: str | None, value: str) -> object:
+    """A URL without its user:password part; _OMIT when the sign-in part can't be told apart."""
     if "@" not in value:
         return value
-    stripped = _URL_USERINFO_RE.sub(r"\g<scheme>", value)
-    if stripped == value and key and "proxy" in key.casefold():
-        stripped = _BARE_USERINFO_RE.sub("", value)
-    return stripped
+    text = value.strip()
+    scheme = _SCHEME_RE.match(text)
+    if scheme:
+        prefix, rest = scheme.group(0), text[scheme.end():]
+    elif key and "proxy" in key.casefold():
+        prefix, rest = "", text
+    else:
+        return value
+    end = _AUTHORITY_END_RE.search(rest)
+    authority = rest[:end.start()] if end else rest
+    signs = authority.count("@")
+    if signs == 0:
+        return value
+    if signs > 1:
+        return _OMIT
+    return prefix + authority.split("@", 1)[1] + rest[len(authority):]
 
 
 def display_safe(value: Any, key: str | None = None) -> Any:
@@ -54,11 +68,13 @@ def display_safe(value: Any, key: str | None = None) -> Any:
                 continue
             if name == "sub_keys" and isinstance(item, list):
                 safe[name] = [_sub_key_label(entry) for entry in item]
-            else:
-                safe[name] = display_safe(item, str(name))
+                continue
+            shown = display_safe(item, str(name))
+            if shown is not _OMIT:
+                safe[name] = shown
         return safe
     if isinstance(value, list):
-        return [display_safe(item, key) for item in value]
+        return [shown for shown in (display_safe(item, key) for item in value) if shown is not _OMIT]
     if isinstance(value, str):
         return _without_userinfo(key, value)
     return value
