@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keepInView } from './keepInView';
+import { finishPreservingVisible, keepInView, preserveVisibleWhileGrowing } from './keepInView';
 
 // A sheet's scroller whose visible height can shrink while its content stays put, a card at the end of that content,
 // and the card's reply field. Geometry is in content pixels; the scroller's top sits at a fixed place on screen.
@@ -16,9 +16,11 @@ beforeEach(() => {
 	height = 497;
 	scrollTop = 0;
 	observers.clear();
+	vi.stubGlobal('innerHeight', 1200);
 	vi.stubGlobal('ResizeObserver', class {
 		constructor(private callback: () => void) {}
 		observe(target: Element) { observers.set(target, this.callback); }
+		unobserve(target: Element) { observers.delete(target); }
 		disconnect() {}
 	});
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
@@ -52,6 +54,58 @@ function sheet() {
 }
 
 describe('keepInView', () => {
+	it('preserves a visible field through its card growing, and stops after the transition', () => {
+		const { card, field, reveals } = sheet();
+		const line = document.createElement('div');
+		line.getBoundingClientRect = () => ({ top: onScreen(490), bottom: onScreen(497) }) as DOMRect;
+		card.append(line);
+		const action = keepInView(field, { enabled: false, whole: card });
+		preserveVisibleWhileGrowing(field, line);
+		expect(reveals).not.toHaveBeenCalled();
+		const original = card.getBoundingClientRect;
+		card.getBoundingClientRect = () => ({ ...original(), height: CARD.bottom - CARD.top + 20 }) as DOMRect;
+		observers.get(card)?.();
+		expect(reveals).toHaveBeenCalledTimes(1);
+		finishPreservingVisible(field);
+		observers.get(card)?.();
+		expect(reveals).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
+	it('cancels a pending preservation when the acknowledgement fails', () => {
+		const { card, field, reveals } = sheet();
+		const line = document.createElement('div');
+		line.getBoundingClientRect = () => ({ top: onScreen(490), bottom: onScreen(497) }) as DOMRect;
+		card.append(line);
+		const action = keepInView(field, { enabled: false, whole: card });
+		const cancel = preserveVisibleWhileGrowing(field, line);
+		cancel();
+		observers.get(card)?.();
+		finishPreservingVisible(field);
+		expect(reveals).not.toHaveBeenCalled();
+		action.destroy();
+	});
+
+	it('does not preserve an out-of-view field, or pull a reader back after their scroll', () => {
+		const { owner, card, field, reveals } = sheet();
+		const line = document.createElement('div');
+		line.getBoundingClientRect = () => ({ top: onScreen(490), bottom: onScreen(497) }) as DOMRect;
+		card.append(line);
+		const action = keepInView(field, { enabled: false, whole: card });
+		height = 300;
+		preserveVisibleWhileGrowing(field, line);
+		observers.get(card)?.();
+		expect(reveals).not.toHaveBeenCalled();
+		height = 497;
+		preserveVisibleWhileGrowing(field, line);
+		scrollTop = 10;
+		owner.dispatchEvent(new Event('scroll'));
+		observers.get(card)?.();
+		finishPreservingVisible(field);
+		expect(reveals).not.toHaveBeenCalled();
+		action.destroy();
+	});
+
 	it('gives up the room it leaves clear under a field only as far as the field itself needs it', () => {
 		const clearance = (room: number) => {
 			height = room;

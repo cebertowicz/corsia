@@ -47,7 +47,7 @@ export interface DocCommentSurfaceProps {
 	onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[], draftKey: string) => Promise<void>;
 	/** With `wait` the comment changes only once the request is answered; the promise says whether it was taken. */
 	onResolve: (id: string, resolved: boolean, wait?: boolean) => void | Promise<boolean>;
-	onAgree: (id: string, agreed: boolean) => void;
+	onAgree: (id: string, agreed: boolean) => void | Promise<boolean>;
 	onViewed?: (id: string, replyId: string) => Promise<void>;
 	target: DocViewerTarget | null;
 	/** The commented document's path for comment links, used only when there is no `target` (the image lightbox). */

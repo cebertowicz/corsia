@@ -1,3 +1,14 @@
+/** A field action can temporarily preserve the visible reply while its card grows. */
+const growthPreservers = new WeakMap<HTMLElement, { arm: (end: HTMLElement) => () => void; finish: () => void }>();
+
+export function preserveVisibleWhileGrowing(field: HTMLElement, end: HTMLElement): () => void {
+	return growthPreservers.get(field)?.arm(end) ?? (() => {});
+}
+
+export function finishPreservingVisible(field: HTMLElement): void {
+	growthPreservers.get(field)?.finish();
+}
+
 /** The nearest ancestor that scrolls on its own, or null when the page itself is the scroller. */
 export function scroller(node: HTMLElement): HTMLElement | null {
 	for (let parent = node.parentElement; parent; parent = parent.parentElement) {
@@ -81,8 +92,10 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	let held = 0;
 	/** Where this action's own last reveal left the scroller. */
 	let revealedTop: number | null = null;
+	let preserving = false, growthChanged = false, growthHeight = 0, preservedTop = 0, generation = 0;
 	const topOf = () => owner?.scrollTop ?? window.scrollY;
 	const readShown = () => {
+		if (preserving && topOf() !== preservedTop) disarm();
 		if (topOf() === revealedTop) return;
 		revealedTop = null;
 		const end = node.getBoundingClientRect().bottom;
@@ -90,7 +103,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		endShown = end >= view.top && end <= view.bottom - held + 1;
 	};
 	const reveal = () => {
-		if (!enabled) return;
+		if (!enabled && !preserving) return;
 		const room = owner ? roomOf(owner) + held : window.visualViewport?.height ?? window.innerHeight;
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= room;
 		const target = fits ? whole! : node;
@@ -115,6 +128,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		}
 		endShown = true;
 		revealedTop = topOf();
+		if (preserving) preservedTop = revealedTop;
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
@@ -155,7 +169,40 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		window.addEventListener('resize', keyboard);
 	}
 	// The node growing is the person typing into it; the scroller or viewport changing size is not.
-	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
+	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+		if (!preserving || !whole) { schedule(); return; }
+		const height = whole.getBoundingClientRect().height;
+		if (height !== growthHeight) { growthHeight = height; growthChanged = true; schedule(); }
+	}) : null;
+	const disarm = () => {
+		preserving = false;
+		generation++;
+		if (whole) grown?.unobserve(whole);
+		cancelAnimationFrame(frame);
+	};
+	growthPreservers.set(node, {
+		arm(end) {
+			disarm();
+			if (!owner || !whole || !grown) return () => {};
+			const box = owner.getBoundingClientRect(), field = node.getBoundingClientRect(), line = end.getBoundingClientRect();
+			const viewport = window.visualViewport;
+			const top = Math.max(box.top, viewport?.offsetTop ?? 0);
+			const bottom = Math.min(box.bottom, viewport ? viewport.offsetTop + viewport.height : window.innerHeight);
+			if (field.top < top || field.bottom > bottom || line.top < top || line.bottom > bottom) return () => {};
+			preserving = true;
+			growthChanged = false;
+			growthHeight = whole.getBoundingClientRect().height;
+			preservedTop = topOf();
+			const current = generation;
+			grown.observe(whole);
+			return () => { if (current === generation) disarm(); };
+		},
+		finish() {
+			if (!preserving) return;
+			if (growthChanged || (whole && whole.getBoundingClientRect().height !== growthHeight)) reveal();
+			disarm();
+		},
+	});
 	const ownerResized = !reading && typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
 	if (owner) ownerResized?.observe(owner);
 	grown?.observe(node);
@@ -179,6 +226,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			}
 			node.removeEventListener('input', typed);
 			(owner ?? window).removeEventListener('scroll', readShown);
+			growthPreservers.delete(node);
 			grown?.disconnect();
 			ownerResized?.disconnect();
 		},

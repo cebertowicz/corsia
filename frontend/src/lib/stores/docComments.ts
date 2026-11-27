@@ -219,8 +219,8 @@ export function resolveComment(artifactId: string, commentId: string, resolved =
 	return patchFlag(artifactId, commentId, 'resolved', resolved, wait);
 }
 
-export function ackComment(artifactId: string, commentId: string, acked = true) {
-	patchFlag(artifactId, commentId, 'acked', acked);
+export function ackComment(artifactId: string, commentId: string, acked = true): Promise<boolean> {
+	return patchFlag(artifactId, commentId, 'acked', acked);
 }
 
 const dirty = new Map<string, Set<string>>();

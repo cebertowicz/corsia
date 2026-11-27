@@ -8,6 +8,7 @@ vi.mock('$lib/stores/docComments', () => ({
 }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
+import * as keepInView from '$lib/actions/keepInView';
 
 /**
  * Agree keeps the thread sheet's height, so its new line scrolls inside it and neither the sheet nor the page moves, as when earlier replies are shown.
@@ -15,12 +16,12 @@ import DocCommentSurface from './DocCommentSurface.svelte';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const target = { instanceId: 'tab-1', path: 'notes.md', name: 'Notes', projectId: 'project-1', threadId: 'thread-1', artifactId: 'artifact-1' };
-const comment = { id: 'comment-1', anchor: 'some text', author: 'agent-1', authorKind: 'agent' as const, text: 'Is this ring confirmed?', at: 'now', resolved: false, replies: [] };
+const comment = { id: 'comment-1', anchor: 'some text', author: 'agent-1', authorKind: 'agent' as const, text: 'Is this ring confirmed?', at: 'now', resolved: false, replies: [], replyGoesTo: [{ id: 'agent-1', name: 'Reviewer' }] };
 const SHEET_HEIGHT = 410, CAP = 734;
 
-function openThreadSheet() {
+function openThreadSheet(onAgree = vi.fn()) {
 	host = document.body.appendChild(document.createElement('div'));
-	const onAgree = vi.fn(), onResolve = vi.fn();
+	const onResolve = vi.fn();
 	component = mount(DocCommentSurface, {
 		target: host,
 		props: {
@@ -50,6 +51,21 @@ describe('the thread sheet keeps its height when Agree is pressed', () => {
 		document.querySelector<HTMLButtonElement>('button[title="Agree"]')!.click();
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe(`${SHEET_HEIGHT}px`);
 		expect(onAgree).toHaveBeenCalledWith(comment.id, true);
+	});
+
+	it('keeps preservation armed for a delayed acknowledgement and cancels it on failure', async () => {
+		let answer!: (accepted: boolean) => void;
+		const pending = new Promise<boolean>((resolve) => { answer = resolve; });
+		const cancel = vi.fn();
+		const arm = vi.spyOn(keepInView, 'preserveVisibleWhileGrowing').mockReturnValue(cancel);
+		openThreadSheet(vi.fn(() => pending));
+		document.querySelector<HTMLButtonElement>('button[title="Agree"]')!.click();
+		expect(arm).toHaveBeenCalledOnce();
+		expect(cancel).not.toHaveBeenCalled();
+		answer(false);
+		await pending;
+		await Promise.resolve();
+		expect(cancel).toHaveBeenCalledOnce();
 	});
 
 	it('leaves a sheet that has no cap as it is', () => {

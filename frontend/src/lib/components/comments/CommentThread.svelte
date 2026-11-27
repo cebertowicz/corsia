@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
+	import { finishPreservingVisible } from '$lib/actions/keepInView';
 	import { fade, slide } from 'svelte/transition';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
@@ -317,7 +318,7 @@
 
 		{@render failure?.()}
 		{#if !isSuggestion && agreedBy && !comment.resolved}
-			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
+			<div class="ct-agreed" transition:agreeTransition onintroend={() => { const field = el?.querySelector<HTMLElement>('.ct-input'); if (field) finishPreservingVisible(field); }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
 			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} posting={chatSurface && (replyPosting || replyPending)} sending={replySending} onSend={postReply} goesTo={comment.replyGoesTo} />

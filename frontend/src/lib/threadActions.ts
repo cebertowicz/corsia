@@ -50,6 +50,6 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 			commentCreated();
 		},
 		resolve(id: string, resolved: boolean, wait = false): Promise<boolean> { const artifact = artifactId(); return artifact ? resolveComment(artifact, id, resolved, wait) : Promise.resolve(false); },
-		agree(id: string, agreed: boolean) { const artifact = artifactId(); if (artifact) ackComment(artifact, id, agreed); },
+		agree(id: string, agreed: boolean) { const artifact = artifactId(); return artifact ? ackComment(artifact, id, agreed) : Promise.resolve(false); },
 	};
 }

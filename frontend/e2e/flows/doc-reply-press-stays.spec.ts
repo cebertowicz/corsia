@@ -286,6 +286,64 @@ test('393 phone list: Go to text on the open card still takes the document to th
 	await expectAnchorShown(page, PHONE);
 });
 
+// A short thread's reply and recipient line remain visible as the Agreed line enters the held sheet.
+for (const surface of [PHONE, NARROW]) {
+	for (const { delayed, reduced } of surface === PHONE ? [{ delayed: false, reduced: false }, { delayed: true, reduced: false }, { delayed: false, reduced: true }] : [{ delayed: false, reduced: false }]) {
+		test(`${surface.name}: Agree keeps the visible reply in view${delayed ? ' when the response is delayed' : ''}${reduced ? ' with reduced motion' : ''}`, async ({ page, request }, info) => {
+			only(surface, info); test.setTimeout(180_000);
+			if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
+			const seeded = await seedThread(request, `${surface.mode} short agree ${delayed} ${reduced}`, 'middle', 1);
+			const { card, scroller } = await openThread(page, request, surface, seeded);
+			const panel = page.locator('.drawer-panel:visible').last();
+			const reply = card.locator('.ct-input'), line = card.locator('.ct-goes');
+			await expect(line).toBeVisible();
+			const geometry = () => panel.evaluate((element) => {
+				const body = element.querySelector('.drawer-body')!.getBoundingClientRect();
+				const field = element.querySelector('.ct-input')!.getBoundingClientRect();
+				const recipient = element.querySelector('.ct-goes')!.getBoundingClientRect();
+				return { top: element.getBoundingClientRect().top, clipTop: body.top, clipBottom: Math.min(body.bottom, innerHeight), fieldTop: field.top, fieldBottom: field.bottom, lineBottom: recipient.bottom };
+			});
+			const before = await geometry(), docBefore = await scroller.evaluate((node) => node.scrollTop);
+			expect(before.fieldTop).toBeGreaterThanOrEqual(before.clipTop - 1);
+			expect(before.fieldBottom).toBeLessThanOrEqual(before.clipBottom + 1);
+			expect(before.lineBottom).toBeLessThanOrEqual(before.clipBottom + 1);
+			let release = () => {}, seen = () => {};
+			const gate = new Promise<void>((resolve) => { release = resolve; });
+			const requested = new Promise<void>((resolve) => { seen = resolve; });
+			const route = async (intercept: import('@playwright/test').Route) => {
+				if (intercept.request().method() !== 'PATCH') { await intercept.continue(); return; }
+				seen(); await gate; await intercept.continue();
+			};
+			if (delayed) await page.route('**/api/comments/*', route);
+			await page.getByRole('button', { name: 'Agree', exact: true }).locator('visible=true').first().tap();
+			if (delayed) {
+				await requested;
+				expect((await geometry()).lineBottom).toBeCloseTo(before.lineBottom, 0);
+				expect(await scroller.evaluate((node) => node.scrollTop)).toBeCloseTo(docBefore, 0);
+				release(); await page.unroute('**/api/comments/*', route);
+			}
+			await expect(card.locator('.ct-agreed')).toBeVisible();
+			await panel.evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))); });
+			await expect.poll(async () => (await geometry()).lineBottom - (await geometry()).clipBottom).toBeLessThanOrEqual(1);
+			const after = await geometry();
+			expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(STEADY);
+			expect(Math.abs((await scroller.evaluate((node) => node.scrollTop)) - docBefore)).toBeLessThanOrEqual(STEADY);
+			await expect(reply).toBeVisible();
+			if (reduced) {
+				const body = panel.locator('.drawer-body');
+				const bodyBefore = await body.evaluate((node) => node.scrollTop);
+				const agent = await createSession(request, 'Later reviewer');
+				const posted = await request.post('/api/delegation/docs/comments', { params, data: { as_session_id: agent, body: 'A later reply arrives after the agreement.', parent_id: seeded.root } });
+				expect(posted.ok()).toBeTruthy();
+				await expect(card.getByText('A later reply arrives after the agreement.')).toBeAttached();
+				await panel.evaluate(async (element) => { await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))); });
+				await settled(page);
+				expect(await body.evaluate((node) => node.scrollTop)).toBeCloseTo(bodyBefore, 0);
+			}
+		});
+	}
+}
+
 // Agree in the phone sheet's header adds an "Agreed" line to the thread: the sheet keeps the height it had and the line scrolls inside it, as for earlier
 // replies, so the page and the Agree control stay where they are (the sheet used to grow, which carried the control up and moved the page).
 for (const surface of [PHONE, NARROW]) {

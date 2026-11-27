@@ -4,6 +4,7 @@
 	import { documentHalfSheetRoom } from '$lib/actions/documentHalfSheetRoom';
 	import { documentFooterRoom } from '$lib/actions/documentFooterRoom';
 	import { documentThreadChromeRoom } from '$lib/actions/documentThreadChromeRoom';
+	import { preserveVisibleWhileGrowing } from '$lib/actions/keepInView';
 	import { createMentionSelection } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
@@ -26,7 +27,7 @@
 	import { createListThreadView } from './docCommentThreadView.svelte';
 	import DocCommentThreadBack from './DocCommentThreadBack.svelte';
 	import { holdReadingLine } from '$lib/docMarginHold.svelte';
-	import { holdSheetHeight } from '$lib/sheetClearance';
+	import { holdSheetHeight, sheetRaised } from '$lib/sheetClearance';
 	import { isShellControl } from '$lib/stores/paneCollapsed';
 	import { createFormHandoff, settledCanvasWidth } from '$lib/docFormHandoff.svelte';
 	import { createSuggestionDecisions } from '$lib/docSuggestionDecisions.svelte';
@@ -221,7 +222,17 @@
 	// In the margin Escape lets a picked card go and focus goes back to where it came from (the caret, from the text); the column stays.
 	function escapeColumn() { if (!margin) { closeDrawer(); return; } onRelease?.(); restoreFocus(); }
 	/** Agree keeps the thread sheet's height before adding its line, so the change scrolls inside it as when earlier replies are shown. */
-	function agree(id: string, agreed: boolean) { holdSheetHeight(draftSheet); onAgree(id, agreed); }
+	function agree(id: string, agreed: boolean) {
+		const card = !isImage && sheet.state?.kind === 'thread' && agreed && draftSheet?.style.getPropertyValue('--drawer-text-cap') && !sheetRaised(draftSheet)
+			? [...(draftSheet?.querySelectorAll<HTMLElement>('[data-thread-id]') ?? [])].find((item) => item.dataset.threadId === id)
+			: undefined;
+		const field = card?.querySelector<HTMLElement>('.ct-input');
+		const line = card?.querySelector<HTMLElement>('.ct-goes');
+		const cancel = field && line && !card?.querySelector('.ct-agreed') ? preserveVisibleWhileGrowing(field, line) : () => {};
+		holdSheetHeight(draftSheet);
+		const result = onAgree(id, agreed);
+		if (result) void result.then((ok) => { if (!ok) cancel(); }, cancel);
+	}
 	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5; in the margin the card leaves the column by itself and the column stays up), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so through this opening's card errors, which reset with the decisions' when the surface reopens.
 	function resolveThread(id: string, resolved: boolean): Promise<unknown> {
 		if (!(resolved && (margin || (surfaceState?.kind === 'thread' && surfaceState.id === id)) && comments.find((item) => item.id === id)?.decision)) return Promise.resolve(onResolve(id, resolved));
