@@ -2,13 +2,14 @@ import { tick } from 'svelte';
 import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
-import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf, type FailureCopy } from './failureCopy';
-import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
+import type { FailureCopy } from './failureCopy';
+import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateOperation } from './model';
+import { copyFor, currentFailure, type ScreenFailure } from './screenFailure';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
 import type { ScreenHandoff } from './shellHandoff';
 import { startupProgress, type StartupProgress } from './startupProgress';
-import { updateConfirmed, updateFailureVerdict, updateStatus, updateUnreachable } from './store';
+import { updateConfirmed, updateFailureVerdict, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 
 export type ScreenMode = 'progress' | 'longer' | 'start_failed' | 'failed' | 'done';
 
@@ -52,9 +53,11 @@ interface Latch {
 	lastPid: number | null;
 	lateReading: { pid: number; seq: number } | null;
 	estimateFrom: number | null;
-	failure: { code: UpdateFailureCode | null; detail: string | null; verdict: boolean } | null;
+	failure: ScreenFailure | null;
 	doneAt: number | null;
 	usualSeconds: number | null;
+	drainDeadline: number | null;
+	lastStatus: UpdateStatus | null;
 }
 
 let latch: Latch | null = null;
@@ -90,7 +93,7 @@ function httpStep(operation: UpdateOperation | null): StepId {
 	}
 }
 
-function readSources(now: number, l: Latch, operation: UpdateOperation | null, unreachable: boolean, file: StartupProgress | null, readError: 'unavailable' | null): { input: ProgressInput; longer: boolean; estimated: boolean } {
+function readSources(now: number, l: Latch, operation: UpdateOperation | null, unreachable: boolean, file: StartupProgress | null, readError: 'unavailable' | null, hold: boolean): { input: ProgressInput; longer: boolean; estimated: boolean } {
 	const usual = get(updateStatus)?.usual_seconds;
 	if (typeof usual === 'number' && Number.isFinite(usual) && usual > 0) l.usualSeconds = usual;
 	if (!unreachable) {
@@ -109,7 +112,7 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: now - l.downAt >= NO_HISTORY_LONGER_MS, estimated: false };
 		l.estimateFrom ??= l.model.shown;
 		const elapsed = now - l.downAt;
-		l.model.lift(remoteEstimate(l.estimateFrom, elapsed));
+		if (!hold) l.model.lift(remoteEstimate(l.estimateFrom, now - Math.max(l.downAt, l.drainDeadline ?? l.downAt)));
 		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= l.usualSeconds * 2_000, estimated: true };
 	}
 	// A still-running old service can report serving as HTTP goes away. Its PID is valid, but it says nothing about
@@ -140,23 +143,6 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 	return { input: { step: 'restarting', count: null, alive: now - since < NO_PROCESS_WINDOW_MS }, longer: now - since >= NO_PROCESS_WINDOW_MS, estimated: false };
 }
 
-function currentFailure(l: Latch, operation: UpdateOperation | null): Latch['failure'] {
-	if (operation?.operation_id === dismissedFailureOperationId) return null;
-	const verdict = get(updateFailureVerdict);
-	if (verdict?.kind === 'version_mismatch') return { code: null, detail: verdict.message, verdict: true };
-	if (operation && isFailedOperation(operation) && !isResolvedFailure(operation)) {
-		return { code: operation.failure_code ?? null, detail: operation.failure_detail ?? null, verdict: false };
-	}
-	return l.failure;
-}
-
-function copyFor(failure: NonNullable<Latch['failure']>, operation: UpdateOperation | null, serviceDown: boolean): FailureCopy {
-	const source = failure.verdict ? failureFromVerdict({ kind: 'version_mismatch', message: failure.detail ?? '' })
-		: operation && isFailedOperation(operation) ? failureFromOperation(operation)
-			: { code: failure.code, detail: failure.detail, summary: null, conductorTold: false, log: null };
-	return failureCopy(source, runningVersionOf(get(updateStatus), serviceDown));
-}
-
 /** Recompute from the existing update operation, current PID-validated file, and confirmed-version cue. */
 export function tickUpdateScreen(now = Date.now()): void {
 	const status = get(updateStatus);
@@ -175,10 +161,17 @@ export function tickUpdateScreen(now = Date.now()): void {
 			fromVersion: status?.current_version ?? null, toVersion: operation.target_version ?? status?.target_version ?? null,
 			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, lateReading: null, estimateFrom: null, failure: null, doneAt: null,
 				usualSeconds: typeof status?.usual_seconds === 'number' && Number.isFinite(status.usual_seconds) && status.usual_seconds > 0 ? status.usual_seconds : null,
+			drainDeadline: null, lastStatus: null,
 		};
 	}
 	const l = latch;
 	const own = operation && operation.operation_id === l.operationId ? operation : null;
+	if (status !== l.lastStatus) {
+		l.lastStatus = status;
+		if (own?.phase === 'draining' && typeof own.hard_cap_remaining === 'number' && Number.isFinite(own.hard_cap_remaining)) {
+			l.drainDeadline = now + Math.max(0, own.hard_cap_remaining) * 1_000;
+		} else if (own && ['restarting', 'resuming', 'verifying'].includes(own.phase ?? '')) l.drainDeadline = null;
+	}
 	if (operation && operation.operation_id !== l.operationId && activeOperation(operation)) {
 		latch = null;
 		if (exitTimer !== null) clearTimeout(exitTimer);
@@ -194,7 +187,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 	l.toVersion = own?.target_version ?? l.toVersion;
 	// The progress file's schema and version fields are intentionally never used as app-version labels.
 
-	l.failure = currentFailure(l, own);
+	l.failure = currentFailure(l.failure, own, dismissedFailureOperationId);
 	if (l.failure && !currentConfirmation) {
 		updateScreenView.set({ operationId: l.operationId, mode: 'failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: copyFor(l.failure, own, unreachable), serviceDown: unreachable, startupProgressUnavailable: false });
 		return;
@@ -213,9 +206,11 @@ export function tickUpdateScreen(now = Date.now()): void {
 		updateScreenView.set({ operationId: l.operationId, mode: 'start_failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: true, startupProgressUnavailable: false });
 		return;
 	}
-	const { input, longer, estimated } = readSources(now, l, own, unreachable, file, progress?.readError ?? null);
-	l.model.update(now, input);
-	updateScreenView.set({ operationId: l.operationId, mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable, startupProgressUnavailable: unreachable && progress?.readError === 'unavailable' });
+	const restartSeen = own && ['restarting', 'resuming', 'verifying'].includes(own.phase ?? '');
+	const hold = unreachable && l.model.step === 'waiting' && !restartSeen && (l.drainDeadline === null || now < l.drainDeadline);
+	const { input, longer, estimated } = readSources(now, l, own, unreachable, file, progress?.readError ?? null, hold);
+	l.model.update(now, hold ? { step: 'waiting', count: drainCount(own?.drain_total, own?.blocking), alive: false, drainRemaining: own?.hard_cap_remaining ?? null } : input);
+	updateScreenView.set({ operationId: l.operationId, mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: hold ? false : estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable, startupProgressUnavailable: unreachable && progress?.readError === 'unavailable' });
 }
 
 /** Dismiss a terminal service-up update failure without letting stale status polls remount it. */
@@ -244,7 +239,7 @@ function adoptHandoff(operation: UpdateOperation | null): void {
 		fromVersion: screen.fromVersion, toVersion: screen.toVersion,
 		downAt: screen.downAt, seqChangedAt: screen.seqChangedAt, lastSeq: screen.lastSeq, lastPid: screen.lastPid,
 		lateReading: null, estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
-		doneAt: null, usualSeconds: screen.usualSeconds,
+		doneAt: null, usualSeconds: screen.usualSeconds, drainDeadline: screen.drainDeadline ?? null, lastStatus: null,
 	};
 }
 
@@ -260,7 +255,7 @@ export function handOverScreen(theme: ScreenHandoff['theme'], route: string): Sc
 	const failure = latch.failure && { code: latch.failure.code, verdict: latch.failure.verdict };
 	return {
 		v: 1, operationId: latch.operationId, model: latch.model.snapshot(), fromVersion: latch.fromVersion, toVersion: latch.toVersion,
-		usualSeconds: latch.usualSeconds, downAt: latch.downAt, seqChangedAt: latch.seqChangedAt, lastSeq: latch.lastSeq, lastPid: latch.lastPid,
+		usualSeconds: latch.usualSeconds, drainDeadline: latch.drainDeadline, downAt: latch.downAt, seqChangedAt: latch.seqChangedAt, lastSeq: latch.lastSeq, lastPid: latch.lastPid,
 		failure, theme, route,
 	};
 }

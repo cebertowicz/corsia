@@ -64,6 +64,93 @@ afterEach(() => {
 });
 
 describe('update screen store', () => {
+	it.each(['local', 'remote'])('keeps the drain share during intermittent slow reads on %s', async (mode) => {
+		(window as ShellWindow).__CORSIA_SHELL__ = mode === 'remote' ? { mode, name: 'Paired computer' } : { mode };
+		const draining = status({ ...inFlight(), phase: 'draining', drain_total: 26, blocking: 25, hard_cap_remaining: 300 });
+		let reads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.startsWith('/api/version')) return { ok: true, json: async () => ({}) };
+			reads++;
+			if (reads > 1 && reads % 2 === 0) {
+				await new Promise((resolve) => setTimeout(resolve, 8_000));
+				throw new Error('slow read');
+			}
+			return { ok: true, json: async () => draining };
+		}));
+		await loadUpdateStatus();
+		for (let seconds = 0; seconds < 180; seconds++) {
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(get(updateScreenView)).toMatchObject({ step: 'waiting', mode: 'progress' });
+			expect(get(updateScreenView)!.percent).toBeLessThan(90);
+		}
+		expect(reads).toBeGreaterThan(10);
+		expect(get(updateFailureVerdict)).toBeNull();
+	});
+	it('holds until the last drain cap expires, then estimates and confirms recovery', async () => {
+		(window as ShellWindow).__CORSIA_SHELL__ = { mode: 'remote', name: 'Paired computer' };
+		const operation = { ...inFlight(), phase: 'draining' as const, drain_total: 26, blocking: 25, hard_cap_remaining: 10 };
+		let online = true;
+		let complete = false;
+		const hash = 'a'.repeat(40);
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (!online) throw new Error('offline');
+			if (url.startsWith('/api/version')) return { ok: true, json: async () => ({ frontend: { full_hash: hash }, backend: { full_hash: hash, current_head: { full_hash: hash } } }) };
+			if (url.includes('/outcome-seen')) return { ok: true, json: async () => ({}) };
+			return { ok: true, json: async () => status(complete ? { ...operation, status: 'complete', phase: 'verifying' } : operation) };
+		}));
+		await loadUpdateStatus();
+		online = false;
+		await loadUpdateStatus();
+		const held = get(updateScreenView)!.percent;
+		await vi.advanceTimersByTimeAsync(9_000);
+		expect(get(updateScreenView)).toMatchObject({ step: 'waiting', percent: held, estimated: false });
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(get(updateScreenView)).toMatchObject({ step: 'restarting', estimated: true });
+		online = true;
+		complete = true;
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'done', percent: 100 });
+	});
+
+	it('keeps reader-unavailable feedback while the drain bar holds', async () => {
+		updateStatus.set(status({ ...inFlight('hold-reader'), phase: 'draining', hard_cap_remaining: 300 }));
+		updateUnreachable.set(true);
+		const held = get(updateScreenView)!.percent;
+		readerFails = true;
+		await refreshStartupProgress();
+		expect(get(updateScreenView)).toMatchObject({ step: 'waiting', percent: held, startupProgressUnavailable: true });
+	});
+
+	it('keeps taking-longer feedback on schedule while the drain bar holds', () => {
+		updateStatus.set(status({ ...inFlight('hold-longer'), phase: 'draining', hard_cap_remaining: 300 }));
+		updateUnreachable.set(true);
+		const held = get(updateScreenView)!.percent;
+		vi.advanceTimersByTime(29_000);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', step: 'waiting', percent: held });
+		vi.advanceTimersByTime(1_000);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', step: 'waiting', percent: held });
+	});
+
+	it('holds preparation without a drain cap and retains the cap across a shell handoff', () => {
+		updateStatus.set(status({ ...inFlight('handoff-cap'), phase: 'steering' }));
+		updateUnreachable.set(true);
+		vi.advanceTimersByTime(180_000);
+		expect(get(updateScreenView)).toMatchObject({ step: 'waiting', percent: 0 });
+		updateUnreachable.set(false);
+		updateStatus.set(status({ ...inFlight('handoff-cap'), phase: 'draining', hard_cap_remaining: 10 }));
+		updateUnreachable.set(true);
+		const held = get(updateScreenView)!.percent;
+		const handoff = handOverScreen('light', '/');
+		stopUpdateScreen();
+		continueHandedOverScreen(handoff!, true);
+		vi.advanceTimersByTime(9_000);
+		tickUpdateScreen();
+		expect(get(updateScreenView)).toMatchObject({ step: 'waiting', percent: held });
+		vi.advanceTimersByTime(1_000);
+		tickUpdateScreen();
+		expect(get(updateScreenView)?.step).toBe('restarting');
+	});
+
 	it('keeps a replacement visible when the previous operation had finished', () => {
 		updateStatus.set(status(inFlight('a')));
 		updateConfirmed.set({ operationId: 'a', version: '2026.10.13' });

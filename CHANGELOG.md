@@ -43,6 +43,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
 - The Send button on comment replies is the app's standard button and is easier to tap on a phone.
+- The update progress bar no longer immediately moves into restart when a status check fails while agents are still finishing.
 - Pressing Show earlier replies in a document's comment sheet on a phone no longer makes the sheet grow or the page scroll: the sheet keeps its height and the earlier replies scroll inside it.
 - Email drafts have Send now and Don’t send buttons: one click sends the draft exactly as you see it.
 - Agents send a saved email, invite or text draft themselves, without waiting for a reply from you in chat; a draft changed since it was saved still isn't sent.
