@@ -49,6 +49,11 @@ describe('UpdateScreen waiting progress', () => {
 		expect(document.body.textContent).toContain('Your agents will resume where they left off after the update.');
 	});
 
+	it.each(['progress', 'longer'] as const)('keeps the last paused count while the status is unavailable (%s)', (mode) => {
+		showRemote({ operationId: 'update-1', mode, step: 'waiting', label: 'Waiting for agents to finish', percent: 12, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true, paused: { safe: 1, total: 26 } });
+		expect(document.body.textContent).toContain('1 of 26 agents paused');
+	});
+
 	it('shows reassurance on completion', () => {
 		showLocal({ operationId: 'update-1', mode: 'done', step: 'verifying', label: 'Checking the new version', percent: 100, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: false });
 		expect(document.body.textContent).toContain('Your agents will resume where they left off after the update.');

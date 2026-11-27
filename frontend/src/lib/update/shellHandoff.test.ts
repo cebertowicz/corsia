@@ -18,7 +18,8 @@ afterEach(() => history.replaceState(null, '', '/'));
 
 describe('the update screen handoff', () => {
 	it('round-trips the whole screen through a fragment well inside the bound', () => {
-		const handoff = screen({ drainDeadline: NOW + 30_000 });
+		const handoff = screen({ drainDeadline: NOW + 30_000, paused: { safe: 1, total: 26 } });
+		expect(readHandoff(`#${encodeHandoff(screen({ paused: { safe: 27, total: 26 } }))}`, NOW)).toBeNull();
 		const fragment = `#${encodeHandoff(handoff)}`;
 		expect(fragment.length).toBeLessThan(HANDOFF_MAX_CHARS / 2);
 		expect(readHandoff(fragment, NOW)).toEqual(handoff);

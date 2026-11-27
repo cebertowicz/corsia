@@ -12,7 +12,7 @@ An issue is a contract for future attention. A vague one costs the owner a round
 1. Read the tracker's templates (for GitHub, `.github/ISSUE_TEMPLATE/`). Their fields are the minimum. If the tracker has none, use the table below.
 2. Search open and closed items by the reported words and underlying concept. Link or reopen rather than create.
 3. Verify the current relevant artifact, source or deployed surface. If source already contains a fix but the affected deployment does not, record that distinction.
-4. For anything called a defect, establish intent as skill `engineering-standards` describes for code, or the equivalent for documents or processes: documentation, tests or checks asserting it, and the introducing change or requirement. Deliberate behavior may be a design disagreement; compare it with the current approved requirement before classifying it.
+4. For anything called a defect, establish intent: documentation, tests or checks asserting it, and the introducing change or requirement. Deliberate behavior may be a design disagreement; compare it with the current approved requirement before classifying it.
 5. Find the owner and label from the live roster or the project's routing. Filing under a label routes; it does not authorize work.
 
 ## Classify
@@ -21,7 +21,7 @@ An issue is a contract for future attention. A vague one costs the owner a round
 |---|---|---|
 | Bug | Behavior contradicts approved or clearly expected behavior and can be reproduced | Expected vs observed, reproduction, surface, severity, environment and build |
 | Enhancement | Small refinement to something that exists | User job now vs after, objective served, success signal |
-| Feature | New or multi-slice capability | Summary of the product chain (skill `product-thinking`) |
+| Feature | New or multi-slice capability | The problem, who has it, the alternatives and the smallest slice |
 | Discussion | Open question without a decided outcome | The question, options so far, who must decide |
 | Measurement proposal | A behavior to measure, not ship | Behavior, scenario, pass bar, owner |
 

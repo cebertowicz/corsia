@@ -131,6 +131,17 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', step: 'waiting', percent: held });
 	});
 
+	it('retains the last paused count during a hold and across shell handoff', () => {
+		updateStatus.set(status({ ...inFlight('held-count'), phase: 'draining', drain_total: 26, blocking: 25, hard_cap_remaining: 300 }));
+		updateUnreachable.set(true);
+		expect(get(updateScreenView)).toMatchObject({ step: 'waiting', paused: { safe: 1, total: 26 } });
+		const handoff = handOverScreen('light', '/');
+		stopUpdateScreen();
+		updateStatus.set(null);
+		continueHandedOverScreen(handoff!, true);
+		expect(get(updateScreenView)).toMatchObject({ step: 'waiting', paused: { safe: 1, total: 26 } });
+	});
+
 	it('holds preparation without a drain cap and retains the cap across a shell handoff', () => {
 		updateStatus.set(status({ ...inFlight('handoff-cap'), phase: 'steering' }));
 		updateUnreachable.set(true);

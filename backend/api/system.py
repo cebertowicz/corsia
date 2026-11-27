@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import psutil
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.setup import _trusted_json_post, _trusted_request
@@ -19,6 +20,7 @@ from infra import bulletins, config
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
+from infra.host_cpu import usage_pct as host_cpu_usage_pct
 from infra.platform_paths import app_bundle_root
 from infra.settings import (
     delete_agent_default,
@@ -334,13 +336,9 @@ async def system_status(user: dict = Depends(require_user)):
             "network_setup": _network_setup(),
         }
 
-    import psutil
-
     GIB = 1024**3
 
     def _collect_system_stats():
-        import subprocess
-
         result = {}
         try:
             vm = psutil.virtual_memory()
@@ -363,24 +361,13 @@ async def system_status(user: dict = Depends(require_user)):
             result["memory"] = {"error": str(e)}
 
         try:
-            top = subprocess.run(
-                ["top", "-l", "1", "-n", "0"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            for line in top.stdout.split("\n"):
-                if "CPU usage" in line:
-                    parts = line.split(",")
-                    for part in parts:
-                        if "idle" in part:
-                            idle = float(part.strip().split("%")[0])
-                            result["cpu"] = {
-                                "usage_pct": round(100 - idle, 1),
-                                "idle_pct": idle,
-                            }
-                            break
-                    break
+            # Busy share of the window since the previous reading, whichever worker
+            # thread took that one.
+            usage = host_cpu_usage_pct()
+            result["cpu"] = {
+                "usage_pct": round(usage, 1),
+                "idle_pct": round(100 - usage, 1),
+            }
         except Exception as e:
             result["cpu"] = {"error": str(e)}
 

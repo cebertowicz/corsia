@@ -27,6 +27,7 @@ export interface ScreenHandoff {
 	usualSeconds: number | null;
 	/** Earliest point at which the last observed drain cap can have expired. */
 	drainDeadline?: number | null;
+	paused?: { safe: number; total: number } | null;
 	downAt: number | null;
 	seqChangedAt: number | null;
 	lastSeq: number | null;
@@ -97,6 +98,8 @@ export function parseHandoff(raw: unknown, now = Date.now()): ScreenHandoff | nu
 	const route = safeReturnRoute(raw.route);
 	const { operationId, fromVersion, toVersion, usualSeconds, downAt, seqChangedAt, lastSeq, lastPid, theme } = raw;
 	const drainDeadline = raw.drainDeadline ?? null;
+	const paused = raw.paused ?? null;
+	if (paused !== null && (!isRecord(paused) || !whole(paused.safe) || !whole(paused.total) || paused.total === 0 || paused.safe > paused.total)) return null;
 	if (!model || failure === undefined || route === null) return null;
 	if (typeof operationId !== 'string' || !/^[\w-]{1,128}$/.test(operationId)) return null;
 	if (!version(fromVersion) || !version(toVersion)) return null;
@@ -104,7 +107,7 @@ export function parseHandoff(raw: unknown, now = Date.now()): ScreenHandoff | nu
 	if (!clock(downAt, now) || !clock(seqChangedAt, now) || !clock(drainDeadline, now)) return null;
 	if ((lastSeq !== null && !whole(lastSeq)) || (lastPid !== null && !whole(lastPid))) return null;
 	if (theme !== 'light' && theme !== 'dark') return null;
-	return { v: 1, operationId, model, fromVersion, toVersion, usualSeconds, drainDeadline, downAt, seqChangedAt, lastSeq, lastPid, failure, theme, route };
+	return { v: 1, operationId, model, fromVersion, toVersion, usualSeconds, drainDeadline, ...(raw.paused === undefined ? {} : { paused: paused as ScreenHandoff['paused'] }), downAt, seqChangedAt, lastSeq, lastPid, failure, theme, route };
 }
 
 export function encodeHandoff(handoff: ScreenHandoff): string {

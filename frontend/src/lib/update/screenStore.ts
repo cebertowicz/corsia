@@ -3,7 +3,7 @@ import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
 import type { FailureCopy } from './failureCopy';
-import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateOperation } from './model';
+import { agentsSafe, isFailedOperation, isInFlight, isResolvedFailure, type UpdateOperation } from './model';
 import { copyFor, currentFailure, type ScreenFailure } from './screenFailure';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
@@ -28,6 +28,7 @@ export interface UpdateScreenView {
 	serviceDown: boolean;
 	/** The desktop shell cannot currently read the PID-validated local progress record. */
 	startupProgressUnavailable?: boolean;
+	paused?: { safe: number; total: number } | null;
 }
 
 /** After the new version is confirmed the screen stays this long at 100%, then leaves. */
@@ -58,6 +59,7 @@ interface Latch {
 	usualSeconds: number | null;
 	drainDeadline: number | null;
 	lastStatus: UpdateStatus | null;
+	paused: { safe: number; total: number } | null;
 }
 
 let latch: Latch | null = null;
@@ -161,13 +163,14 @@ export function tickUpdateScreen(now = Date.now()): void {
 			fromVersion: status?.current_version ?? null, toVersion: operation.target_version ?? status?.target_version ?? null,
 			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, lateReading: null, estimateFrom: null, failure: null, doneAt: null,
 				usualSeconds: typeof status?.usual_seconds === 'number' && Number.isFinite(status.usual_seconds) && status.usual_seconds > 0 ? status.usual_seconds : null,
-			drainDeadline: null, lastStatus: null,
+			drainDeadline: null, lastStatus: null, paused: null,
 		};
 	}
 	const l = latch;
 	const own = operation && operation.operation_id === l.operationId ? operation : null;
 	if (status !== l.lastStatus) {
 		l.lastStatus = status;
+		if (own && httpStep(own) === 'waiting') l.paused = agentsSafe(own);
 		if (own?.phase === 'draining' && typeof own.hard_cap_remaining === 'number' && Number.isFinite(own.hard_cap_remaining)) {
 			l.drainDeadline = now + Math.max(0, own.hard_cap_remaining) * 1_000;
 		} else if (own && ['restarting', 'resuming', 'verifying'].includes(own.phase ?? '')) l.drainDeadline = null;
@@ -210,7 +213,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 	const hold = unreachable && l.model.step === 'waiting' && !restartSeen && (l.drainDeadline === null || now < l.drainDeadline);
 	const { input, longer, estimated } = readSources(now, l, own, unreachable, file, progress?.readError ?? null, hold);
 	l.model.update(now, hold ? { step: 'waiting', count: drainCount(own?.drain_total, own?.blocking), alive: false, drainRemaining: own?.hard_cap_remaining ?? null } : input);
-	updateScreenView.set({ operationId: l.operationId, mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: hold ? false : estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable, startupProgressUnavailable: unreachable && progress?.readError === 'unavailable' });
+	updateScreenView.set({ operationId: l.operationId, mode: longer ? 'longer' : 'progress', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: hold ? false : estimated, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: null, serviceDown: unreachable, startupProgressUnavailable: unreachable && progress?.readError === 'unavailable', paused: hold ? l.paused : null });
 }
 
 /** Dismiss a terminal service-up update failure without letting stale status polls remount it. */
@@ -239,7 +242,7 @@ function adoptHandoff(operation: UpdateOperation | null): void {
 		fromVersion: screen.fromVersion, toVersion: screen.toVersion,
 		downAt: screen.downAt, seqChangedAt: screen.seqChangedAt, lastSeq: screen.lastSeq, lastPid: screen.lastPid,
 		lateReading: null, estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
-		doneAt: null, usualSeconds: screen.usualSeconds, drainDeadline: screen.drainDeadline ?? null, lastStatus: null,
+		doneAt: null, usualSeconds: screen.usualSeconds, drainDeadline: screen.drainDeadline ?? null, lastStatus: null, paused: screen.paused ?? null,
 	};
 }
 
@@ -255,7 +258,7 @@ export function handOverScreen(theme: ScreenHandoff['theme'], route: string): Sc
 	const failure = latch.failure && { code: latch.failure.code, verdict: latch.failure.verdict };
 	return {
 		v: 1, operationId: latch.operationId, model: latch.model.snapshot(), fromVersion: latch.fromVersion, toVersion: latch.toVersion,
-		usualSeconds: latch.usualSeconds, drainDeadline: latch.drainDeadline, downAt: latch.downAt, seqChangedAt: latch.seqChangedAt, lastSeq: latch.lastSeq, lastPid: latch.lastPid,
+		usualSeconds: latch.usualSeconds, drainDeadline: latch.drainDeadline, paused: latch.paused, downAt: latch.downAt, seqChangedAt: latch.seqChangedAt, lastSeq: latch.lastSeq, lastPid: latch.lastPid,
 		failure, theme, route,
 	};
 }
