@@ -9,7 +9,7 @@ import { forgetDraft, timed, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
-import { findPlace, uniquePlaceOf, type KeptPlace } from '$lib/keptPlace';
+import { findPlace, uniquePlaceOf } from '$lib/keptPlace';
 import { unsentComments } from '$lib/stores/unsentComments.svelte';
 import { unsentOutcome } from '$lib/unsentCommentOutcome';
 import { DRAFT_KEPT } from '$lib/stores/draftKept';
@@ -45,7 +45,7 @@ export { liveFailureMessage, postFailureMessage };
 // Once Comment is pressed the post goes on whether or not its composer is still open: closing it, another card, another
 // tab or the viewer going away never aborts it. Only Cancel does (`discardCommentDraft`), and a reconnect, whose old
 // session can no longer place the comment (the composer says so).
-async function postLiveComment(draft: CommentDraft, text: string, context: Context, press: { clientId: string; again: boolean; place: KeptPlace | null | undefined }, taggedAgentIds: string[], threadId: string | null, mentions: MentionOccurrence[]): Promise<string> {
+async function postLiveComment(draft: CommentDraft, text: string, context: Context, press: { clientId: string; again: boolean }, taggedAgentIds: string[], threadId: string | null, mentions: MentionOccurrence[]): Promise<string> {
 	const selection = draft.selection!;
 	cancelCommentCapture(draft.scope);
 	const controller = new AbortController(), sequence = (draft.sequence ?? 0) + 1;
@@ -54,7 +54,7 @@ async function postLiveComment(draft: CommentDraft, text: string, context: Conte
 	const version = { body: text, tagged_agent_ids: taggedAgentIds };
 	const attempt = (again: boolean) => postLive({ selection, clientId: press.clientId, again, seq: sequence, signal: controller.signal, version }, (captured) => {
 		if (controller.signal.aborted) throw aborted();
-		return addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId, taggedAgentIds, threadId, mentions, press.again, press.place);
+		return addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId, taggedAgentIds, threadId, mentions, press.again);
 	});
 	try {
 		return await attempt(press.again);
@@ -161,13 +161,13 @@ export function createViewerCommentDraft(context: Context) {
 		const mine = (update: (value: CommentDraft) => CommentDraft | null) => commentDraft.update(value => value && value.identity === draft.identity ? update(value) : value);
 		keptCommentDrafts.clearError(key);
 		mine(value => ({ ...value, error: undefined }));
-		// Its passage as it is at the press, when it can be told apart: kept with the draft, and its sides go with the post.
+		// Keep the passage as it is at the press, when it can be told apart, for an automatic resend.
 		const range = draft.selection ? selectionRange(draft.selection) : { from: draft.from, to: draft.to, quote: draft.text };
 		const place = draft.unplaced ? undefined : range && uniquePlaceOf(draft.selection?.session.text.toString() ?? context.text(), range.from, range.to, range.quote);
 		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice. From the
 		// press, a draft with a place goes on its own if this post does not (`unsentComments`), until it posts, is refused or is edited.
 		const live = draft.selection && { artifactId: draft.selection.session.artifactId, threadId };
-		const press = { ...keptCommentDrafts.claim(key, text, tags, draft.origin, live || undefined), place };
+		const press = keptCommentDrafts.claim(key, text, tags, draft.origin, live || undefined);
 		const pressed = keptCommentDrafts.get(key);
 		if (pressed && place !== undefined) keptCommentDrafts.keep(key, pressed.body, pressed.mentionSelection, place);
 		let waits = false;
@@ -177,7 +177,7 @@ export function createViewerCommentDraft(context: Context) {
 				const artifactId = await timed(press.clientId, 'ens', () => context.ensureArtifactId());
 				if (!artifactId) throw new Error('Document artifact is unavailable.');
 				if (pressed) keptCommentDrafts.sends(key, press.clientId, pressed.body, { artifactId, threadId });
-				return await addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, press.clientId, taggedAgentIds, threadId, mentions, press.again, place);
+				return await addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, press.clientId, taggedAgentIds, threadId, mentions, press.again);
 			} catch (error) {
 				// A failure that passes, on a draft that goes on its own, is not told: its box reads "Sending…", and it is tried
 				// again when the document opens, the connection comes back or the person returns. Any other failure is told as before.

@@ -84,6 +84,20 @@ function setup(inWidget: boolean, label?: string, shown = 'alpha beta') {
 let current: ReturnType<typeof setup> | undefined;
 afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); keptCommentDrafts.reset(); });
 
+it('posts a non-live first press without the kept sides the server would refuse', async () => {
+	current = setup(false, undefined, 'alpha beta');
+	current.controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0 });
+	current.controller.start();
+	commentDraft.update(draft => draft && { ...draft, selection: undefined }); flushSync();
+	// The server would reject stale kept sides; without them it uses the existing first-press path.
+	vi.mocked(addComment).mockImplementationOnce(async (...args) => {
+		if (args.length > 12) throw new Error('409 passage_gone');
+		return 'posted';
+	});
+	expect(await current.controller.submit('body')).toBe('posted');
+	expect(vi.mocked(addComment).mock.calls.at(-1)).toHaveLength(12);
+});
+
 describe('a posted widget comment keeps its pending mark', () => {
 	it('until its placed mark is drawn', async () => {
 		current = setup(true, 'The whole table');
@@ -276,6 +290,8 @@ describe('a post that lands or fails after its composer closed and another opene
 		const [earlier, again] = vi.mocked(addComment).mock.calls;
 		expect(again[7]).toBe(earlier[7]);
 		expect(again[11]).toBe(true);
+		expect(earlier).toHaveLength(12);
+		expect(again).toHaveLength(12);
 	});
 
 	it('lands after its viewer closed, and the reopened press fails: the next press reuses the same id, so the server holds one comment', async () => {
@@ -305,6 +321,8 @@ describe('a post that lands or fails after its composer closed and another opene
 		const [earlier, failed, again] = vi.mocked(addComment).mock.calls;
 		expect(failed[7]).toBe(earlier[7]);
 		expect(again[7]).toBe(earlier[7]);
+		expect(failed).toHaveLength(12);
+		expect(again).toHaveLength(12);
 		expect(stored.size).toBe(1);
 		expect(keptCommentDrafts.get(keyOf('one'))).toBeUndefined();
 	});
