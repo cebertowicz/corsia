@@ -73,6 +73,7 @@ Pack: `documents`
 
 | Tool | Description |
 |---|---|
+| `approval_record` | Read the approved document versions tied to a pull request (Quality Gate's stage script) |
 | `doc_comment_create` | Comment on, review or reply in a document |
 | `doc_comment_update` | Resolve, acknowledge or edit a document comment |
 | `doc_comments_list` | List a document's comments |

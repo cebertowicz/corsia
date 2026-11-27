@@ -34,9 +34,10 @@ STALE = "This review request has ended."
 class AnswerRefused(ValueError):
     """The verdict cannot be recorded; ``code`` is the typed reason a client branches on."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, cause: str | None = None):
         super().__init__(message)
         self.code = code
+        self.cause = cause
 
 
 @dataclass(frozen=True)

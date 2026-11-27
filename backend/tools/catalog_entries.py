@@ -296,6 +296,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Resume this turn after the pending system restart",
         activity="Resuming after restart",
     ),
+    "approval_record": _Entry(
+        "documents", status="substrate",
+        summary="Read the approved document versions tied to a pull request (Quality Gate's stage script)",
+        activity="Reading approved versions",
+    ),
     "doc_comments_list": _Entry(
         "documents", status="substrate", summary="List a document's comments",
         activity="Reading comments",

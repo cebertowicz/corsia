@@ -80,6 +80,22 @@ Source: `backend/infra/activity_ranking_schema.py`.
 
 Indexes: `sqlite_autoindex_activity_ranks_1` (user_id, scope, item_key, unique).
 
+### `artifact_approvals`
+
+Source: `backend/infra/approval_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `artifact_id` | TEXT | No | Yes | — | — |
+| `node_id` | TEXT | No | No | — | — |
+| `source` | TEXT | No | Yes | — | — |
+| `source_id` | TEXT | No | No | — | — |
+| `doc_sha256` | TEXT | No | Yes | — | — |
+| `images` | TEXT | No | Yes | — | — |
+| `at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_artifact_approvals_artifact_at` (artifact_id, at), `idx_artifact_approvals_doc_sha` (doc_sha256), `idx_artifact_approvals_node` (node_id).
+
 ### `plan_ask_deferrals`
 
 Source: `backend/infra/plan_schema.py`.

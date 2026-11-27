@@ -7,6 +7,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from doceditor.document_save import DocumentSaveError
+from doceditor.document_scope import UI_THREAD
 from doceditor.live_document import LiveDocument
 from doceditor.live_publication_record import Publication, WriteActor
 from registry.shared_documents import resolve_shared_target
@@ -72,7 +73,8 @@ class SharedLivePolicy:
             )
         decision = Publication.decision_for(self.live.path, shared, authority)
         return Publication(actor.thread_id, actor.origin, actor.description, mirror.state, decision,
-                           suggestion_accept=actor.suggestion_accept)
+                           suggestion_accept=actor.suggestion_accept, direct_user=actor.direct_user or actor.thread_id == UI_THREAD,
+                           project_id=actor.project_id)
 
     def _check_failure(self) -> None:
         failure, _ = self.owner.setup_state(self.live.path)

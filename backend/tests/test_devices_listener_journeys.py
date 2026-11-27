@@ -9,6 +9,7 @@ admits it. The listener's own session gate runs for real (a seeded person sessio
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -67,7 +68,10 @@ def _request(call: dict, ids: dict, headers: dict, *, signed: bool):
     elif key == ("POST", "/api/artifacts/{artifact}/comments"):
         kwargs = {"json": {"body": "Looks right.", "delivery_policy": "immediate"}}
     elif key == ("POST", "/api/attention/{artifact}/clear"):
-        kwargs = {"json": {"token": OWNER_SESSION_TOKEN, "outcome": "answer", "verdict": "approved", "note": None, "hold_ids": []}}
+        # The bar sends the hash of the document it shows with every approval.
+        doc_sha256 = hashlib.sha256(Path(ids["path"]).read_bytes()).hexdigest()
+        kwargs = {"json": {"token": OWNER_SESSION_TOKEN, "outcome": "answer", "verdict": "approved", "note": None,
+                           "hold_ids": [], "doc_sha256": doc_sha256}}
     elif key == ("PUT", "/api/system/update-schedule"):
         kwargs = {"json": {"automatic": False}}
     elif key == ("PATCH", "/api/settings"):

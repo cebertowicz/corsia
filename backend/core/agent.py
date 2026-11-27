@@ -279,10 +279,12 @@ def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:
         DocCommentsListTool,
         DocCommentUpdateTool,
     )
+    from tools.approval_record import ApprovalRecordTool
     from tools.document_feedback import DocFeedbackSendTool
     from tools.document_open import DocumentOpenTool
     from tools.document_reviews import DocReviewRequestTool
 
+    agent.tools.register(ApprovalRecordTool())
     agent.tools.register(DocCommentsListTool(workspace=workspace))
     agent.tools.register(DocCommentCreateTool(workspace=workspace))
     agent.tools.register(DocCommentUpdateTool())

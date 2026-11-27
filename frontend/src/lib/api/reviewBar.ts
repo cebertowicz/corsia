@@ -40,7 +40,7 @@ export interface ReviewAnswer { verdict: ReviewVerdict; note: string | null; fee
 
 /** The server's typed refusal of an answer; `code` is what the bar branches on. */
 export class ReviewRefusal extends Error {
-	constructor(readonly code: string, message: string) { super(message); }
+	constructor(readonly code: string, message: string, readonly cause?: string) { super(message); }
 }
 
 // The review read has the review requests' own limit (REVIEW_REQUEST_TIMEOUT_MS), not the comment post's, which
@@ -57,11 +57,11 @@ export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead>
  * The session also rides in the Authorization header: the Devices listener admits an `/api` request only by its
  * header or query credential, so a body-only token is refused there before the route reads it.
  */
-export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string, holdIds: string[]): Promise<ReviewAnswer> {
+export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string, holdIds: string[], docSha256?: string): Promise<ReviewAnswer> {
 	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds }),
+		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds, doc_sha256: docSha256 }),
 	}, REVIEW_REQUEST_TIMEOUT_MS);
 	if (response.ok) {
 		const body = await response.json();
@@ -69,7 +69,7 @@ export async function answerReview(artifactId: string, verdict: ReviewVerdict, n
 	}
 	const detail = await response.json().then((body) => body?.detail, () => undefined);
 	if (detail && typeof detail === 'object' && typeof detail.code === 'string') {
-		throw new ReviewRefusal(detail.code, String(detail.message ?? ''));
+		throw new ReviewRefusal(detail.code, String(detail.message ?? ''), typeof detail.cause === 'string' ? detail.cause : undefined);
 	}
 	throw new Error(`${response.status}`);
 }

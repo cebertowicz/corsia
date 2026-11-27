@@ -37,6 +37,9 @@ class Publication:
     decision: dict
     ranges: dict[str, tuple[int, int]] | None = None
     suggestion_accept: bool = False
+    direct_user: bool = False
+    project_id: str | None = None
+    accepted: tuple[str, ...] = ()
 
     @staticmethod
     def decision_for(path: Path, shared: SharedTarget | None, authority: WriteAuthority | None = None) -> dict:
@@ -75,6 +78,7 @@ class Publication:
             return None
         data = json.loads(value)
         data["prior_mirror"] = base64.b64decode(data["prior_mirror"], validate=True)
+        data["accepted"] = tuple(data.get("accepted", ()))
         return cls(**data)
 
 

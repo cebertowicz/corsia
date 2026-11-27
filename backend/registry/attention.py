@@ -180,7 +180,7 @@ def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
     hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
-    drives: list[str] | None = None,
+    drives: list[str] | None = None, approved_version=None,
 ) -> AttentionResult:
     """Clear attention through one of the public user/system outcomes.
 
@@ -198,7 +198,7 @@ def clear_attention(
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
         verdict=verdict, note=note, hold_ids=hold_ids, require_hold_ids=require_hold_ids,
-        db=db, drives=drives,
+        db=db, drives=drives, approved_version=approved_version,
     )
 
 
@@ -213,7 +213,7 @@ def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
     hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
-    drives: list[str] | None = None,
+    drives: list[str] | None = None, approved_version=None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -240,6 +240,13 @@ def _clear_attention(
         answer = None
         if verdict is not None:
             answer = review_bar.answer(_db, str(row["id"]), verdict, note)
+        if approved_version is not None:
+            for ask in plans_public.raised_asks(_db, str(row["id"])):
+                plans_public.record_artifact_approval(
+                    _db, artifact_id=str(row["id"]), node_id=str(ask["node_id"]),
+                    source="bar", source_id=str(ask["hold_id"]),
+                    doc_sha256=approved_version.doc_sha256, images=approved_version.images, prepared=approved_version,
+                )
         defer_condition = None
         if outcome == "defer":
             defer_condition = validate_defer_condition(condition)
