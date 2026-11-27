@@ -72,7 +72,38 @@ else:
     return 0
 }
 
-is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
+is_backend_running() { curl -sf --max-time "${1:-3}" "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
+
+# Share the approved retry window across health checks in this command.
+backend_responds_for_drain() {
+    local BACKEND_HEALTH_RETRY_WINDOW_SECONDS=30 started now remaining timeout status
+    started="$(runtime_epoch_seconds)"
+    timeout=3
+    if [ -n "${_corsia_health_retry_deadline:-}" ]; then
+        remaining=$((_corsia_health_retry_deadline - started))
+        if [ "$remaining" -gt 0 ] && [ "$remaining" -lt "$timeout" ]; then
+            timeout="$remaining"
+        fi
+    fi
+    if is_backend_running "$timeout"; then return 0; else status=$?; fi
+    [ "$status" -eq 28 ] || return "$status"
+    # Share one deadline across checks in this command, starting at the first
+    # timed-out probe. A later check still gets its ordinary three-second probe.
+    if [ -z "${_corsia_health_retry_deadline:-}" ]; then
+        _corsia_health_retry_deadline=$((started + BACKEND_HEALTH_RETRY_WINDOW_SECONDS))
+    fi
+    while :; do
+        now="$(runtime_epoch_seconds)"
+        remaining=$((_corsia_health_retry_deadline - now))
+        [ "$remaining" -gt 0 ] || return 28
+        # A ten-second probe accommodates a busy event loop while leaving room
+        # for retries within the shared window and the existing drain cap.
+        timeout=10
+        [ "$remaining" -ge "$timeout" ] || timeout="$remaining"
+        if is_backend_running "$timeout"; then return 0; else status=$?; fi
+        [ "$status" -eq 28 ] || return "$status"
+    done
+}
 
 # A healthy backend must publish readiness within one minute of its last visible
 # progress. Before the port binds, progress is the service's own startup-progress
@@ -868,7 +899,7 @@ start_server() {
 stop_direct_backend() {
     local drain_attempted=false
     require_port_served_by_this_checkout || return 1
-    if [ "$FORCE" = "false" ] && is_backend_running; then
+    if [ "$FORCE" = "false" ] && backend_responds_for_drain; then
         # Same guarantee as the managed stop: the drain is bounded courtesy,
         # the stop is the promise, and the hold is kept across the gap.
         drain_attempted=true
@@ -926,7 +957,7 @@ bounce_server() {
         require_port_served_by_this_checkout || return 1
         # Refuse a bad setup while the old backend is still serving.
         resolve_bind_host > /dev/null || return 1
-        if [ "$FORCE" = "false" ] && is_backend_running; then
+        if [ "$FORCE" = "false" ] && backend_responds_for_drain; then
             drain_attempted=true
             DRAIN_FAILURE_ACTION=hold drain_and_wait "restart" \
                 || warn "Drain did not complete; restarting anyway"
@@ -1390,7 +1421,7 @@ restart_prepared() {
         require_port_served_by_this_checkout || return 1
     fi
     if [ "$FORCE" = "false" ]; then
-        if ! is_backend_running; then
+        if ! backend_responds_for_drain; then
             reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
             fail "$reason"
             return 1

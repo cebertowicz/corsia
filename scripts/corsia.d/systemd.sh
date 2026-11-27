@@ -150,7 +150,7 @@ service_stop() {
         fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"
         return 1
     }
-    if [ "$FORCE" = false ] && is_backend_running; then
+    if [ "$FORCE" = false ] && backend_responds_for_drain; then
         require_loaded_service_owns_port || return 1
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service stop" "$BACKEND_PORT" || warn "Drain did not complete; stopping anyway"

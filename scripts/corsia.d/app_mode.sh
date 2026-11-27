@@ -272,7 +272,7 @@ app_mode_service_restart() {
     fi
     require_owned_service_definition || return 1
     if [ "$FORCE" = "false" ] \
-        && { is_backend_running || [ -n "$(backend_pids)" ]; }; then
+        && { backend_responds_for_drain || [ -n "$(backend_pids)" ]; }; then
         require_loaded_service_owns_port || return 1
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait "restart" "$BACKEND_PORT" \
@@ -371,7 +371,7 @@ app_mode_swap_staged_update() {
         return 1
     fi
     if [ "$FORCE" = "false" ]; then
-        if ! is_backend_running; then
+        if ! backend_responds_for_drain; then
             reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The staged update was kept at $staged; recover the running service, or explicitly use --force if interruption is intended."
             fail "$reason"
             return 1

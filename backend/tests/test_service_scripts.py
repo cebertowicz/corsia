@@ -3407,6 +3407,105 @@ def test_unhealthy_backend_retains_prepared_release_before_drain(tmp_path: Path)
     assert "drain ownership cannot be proven" in trace.read_text()
 
 
+def _run_update_health_probe(tmp_path: Path, responses: str):
+    trace = tmp_path / "health-probe-trace"
+    result = _run_bash(
+        """
+fail() { printf 'FAIL:%s\\n' "$*" >> "$TRACE"; }
+warn() { :; }
+source scripts/corsia.d/runtime.sh
+SELF_CHECKOUT="$CHECKOUT"
+BACKEND_PORT=1
+FORCE=false
+service_installed() { return 1; }
+require_port_served_by_this_checkout() { return 0; }
+curl() {
+    printf 'probe:%s\\n' "$*" >> "$TRACE"
+    count=$(grep -c '^probe:' "$TRACE")
+    response=$(printf '%s' "$RESPONSES" | cut -d, -f "$count")
+    return "$response"
+}
+drain_and_wait() { printf 'drain\\n' >> "$TRACE"; }
+bounce_server() { printf 'bounce\\n' >> "$TRACE"; }
+restart_prepared
+""",
+        env={"CHECKOUT": str(tmp_path), "TRACE": str(trace), "RESPONSES": responses},
+    )
+    return result, trace.read_text().splitlines()
+
+
+def test_update_retries_timed_out_health_probe_before_drain(tmp_path: Path) -> None:
+    result, trace = _run_update_health_probe(tmp_path, "28,28,0")
+
+    assert result.returncode == 0, result.stderr
+    assert sum(line.startswith("probe:") for line in trace) == 3
+    assert "drain" in trace
+    assert trace.index("drain") > 2
+
+
+def test_update_refuses_connection_failure_without_retry(tmp_path: Path) -> None:
+    result, trace = _run_update_health_probe(tmp_path, "7")
+
+    assert result.returncode != 0
+    assert sum(line.startswith("probe:") for line in trace) == 1
+    assert "drain" not in trace
+    assert any("drain ownership cannot be proven" in line for line in trace)
+
+
+def test_health_retry_window_is_shared_across_checks(tmp_path: Path) -> None:
+    clock = tmp_path / "clock"
+    trace = tmp_path / "trace"
+    clock.write_text("0")
+    result = _run_bash(
+        """
+source scripts/corsia.d/runtime.sh
+runtime_epoch_seconds() { command cat "$CLOCK"; }
+is_backend_running() {
+    local timeout="${1:-3}" now count
+    now=$(command cat "$CLOCK")
+    printf '%s\\n' "$timeout" >> "$TRACE"
+    count=$(wc -l < "$TRACE")
+    if [ "$count" -eq 2 ]; then
+        printf '%s' "$((now + 1))" > "$CLOCK"
+        return 0
+    fi
+    printf '%s' "$((now + timeout))" > "$CLOCK"
+    return 28
+}
+backend_responds_for_drain || exit 1
+backend_responds_for_drain && exit 2
+backend_responds_for_drain && exit 3
+exit 0
+""",
+        env={"CLOCK": str(clock), "TRACE": str(trace)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert trace.read_text().splitlines() == ["3", "10", "3", "10", "10", "3", "3"]
+    assert clock.read_text() == "33"
+
+
+def test_health_retry_last_probe_respects_remaining_window(tmp_path: Path) -> None:
+    clock = tmp_path / "clock"
+    trace = tmp_path / "trace"
+    clock.write_text("29")
+    result = _run_bash(
+        """
+source scripts/corsia.d/runtime.sh
+_corsia_health_retry_deadline=30
+runtime_epoch_seconds() { command cat "$CLOCK"; }
+is_backend_running() {
+    printf '%s\\n' "$1" >> "$TRACE"
+    printf '30' > "$CLOCK"
+    return 28
+}
+backend_responds_for_drain && exit 1
+""",
+        env={"CLOCK": str(clock), "TRACE": str(trace)},
+    )
+    assert result.returncode == 28, result.stderr
+    assert trace.read_text().splitlines() == ["1"]
+
+
 def test_failed_drain_still_completes_the_update(
     tmp_path: Path,
 ) -> None:
