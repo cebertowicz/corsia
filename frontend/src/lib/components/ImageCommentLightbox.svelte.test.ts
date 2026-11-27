@@ -29,8 +29,9 @@ import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/
 import { docComments } from '$lib/stores/docComments';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
-import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { imageDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 import { user } from '$lib/stores/auth';
+import { unsentComments } from '$lib/stores/unsentComments.svelte';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
@@ -612,6 +613,23 @@ describe('a kept draft on the image comes back in its box on its area when the i
 	const button = () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((el) => /Sending…|Comment|Posting…/.test(el.textContent ?? '') && el.classList.contains('submit'));
 	beforeEach(() => { vi.mocked(postComment).mockReset(); user.set({ id: 'person-1', name: 'person-1' } as never); });
 	afterEach(() => { user.set(null); });
+
+	it('resumes pressed replies for the opened image, leaving unpressed replies alone', async () => {
+		user.set(null);
+		const pressed = replyDraftKey(key, 'first'), typed = replyDraftKey(key, 'second');
+		const tags = createMentionSelection('reply');
+		keptCommentDrafts.keepReply(pressed, 'reply', tags);
+		keptCommentDrafts.claim(pressed, 'reply', tags, undefined, { artifactId: 'art-img', threadId: null });
+		keptCommentDrafts.keepReply(typed, 'reply', tags);
+		const open = vi.spyOn(unsentComments, 'open').mockImplementation(() => {});
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+		expect(open).toHaveBeenCalledWith(pressed);
+		expect(open).not.toHaveBeenCalledWith(typed);
+		expect(keptCommentDrafts.get(typed)?.body).toBe('reply');
+		keptCommentDrafts.forget(pressed);
+		keptCommentDrafts.forget(typed);
+		open.mockRestore();
+	});
 
 	it('pressed before a reload: it reads Sending… with its words, and posts on its area under its press’s id', async () => {
 		const selection = createMentionSelection('Label this arrow');

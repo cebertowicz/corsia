@@ -9,7 +9,7 @@ import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { toasts } from '$lib/stores/toast';
-import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { documentDraftKey, keptCommentDrafts, replyDraftKey } from '$lib/stores/keptCommentDrafts.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { unsentComments } from '$lib/stores/unsentComments.svelte';
 import { createMentionSelection } from '$lib/components/comments/mentionSelection';
@@ -477,6 +477,20 @@ describe('a failed post says why in one place, decided as it fails', () => {
 		expect(get(commentDraft)?.error).toBeUndefined();
 		expect(keptCommentDrafts.get(keyOf('one'))?.error).toBe(REASON);
 	});
+});
+
+it('resumes pressed replies for the opened document, leaving unpressed replies alone', () => {
+	const pressed = replyDraftKey(keyOf('one'), 'root'), typed = replyDraftKey(keyOf('one'), 'other');
+	const tags = createMentionSelection('reply');
+	keptCommentDrafts.keepReply(pressed, 'reply', tags);
+	keptCommentDrafts.claim(pressed, 'reply', tags, undefined, { artifactId: 'a', threadId: null });
+	keptCommentDrafts.keepReply(typed, 'reply', tags);
+	const open = vi.spyOn(unsentComments, 'open').mockImplementation(() => {});
+	current = setup(false); current.set({ ready: true });
+	expect(open).toHaveBeenCalledWith(pressed);
+	expect(open).not.toHaveBeenCalledWith(typed);
+	expect(keptCommentDrafts.get(typed)?.body).toBe('reply');
+	open.mockRestore();
 });
 
 describe('a kept draft with a passage comes back in its box once its document is shown', () => {

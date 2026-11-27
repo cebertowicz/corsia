@@ -16,6 +16,7 @@
 	import { createImageComments } from '$lib/imageComments.svelte';
 	import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 	import { unsentComments } from '$lib/stores/unsentComments.svelte';
+	import { replyOf } from '$lib/unsentCommentSend';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
@@ -167,6 +168,14 @@
 		else if (initialLoadDone) revealed = true;
 	});
 
+	// Resend this image's pressed replies when it opens, independently of a new comment's draft.
+	$effect(() => {
+		const key = draftKey;
+		if (!loaded || !key) return;
+		untrack(() => {
+			for (const reply of keptCommentDrafts.pressed()) if (replyOf(reply)?.scope === key) unsentComments.open(reply);
+		});
+	});
 	// A kept draft drawn on this image comes back in its box on its area once the image has drawn: sending if it was
 	// pressed (`unsentComments`), else with its words. Opened on a comment, that comment's card shows instead.
 	let resumed = '';

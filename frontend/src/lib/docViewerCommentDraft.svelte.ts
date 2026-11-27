@@ -11,6 +11,7 @@ import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
 import { findPlace, uniquePlaceOf } from '$lib/keptPlace';
 import { unsentComments } from '$lib/stores/unsentComments.svelte';
+import { replyOf } from '$lib/unsentCommentSend';
 import { unsentOutcome } from '$lib/unsentCommentOutcome';
 import { DRAFT_KEPT } from '$lib/stores/draftKept';
 import type { SelectionOffer } from '$lib/cm/widget-selection-types';
@@ -211,6 +212,14 @@ export function createViewerCommentDraft(context: Context) {
 		if (open() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
 		return open() ? id : null;
 	}
+	// Resend this document's pressed replies when its text is shown, independently of a new comment's draft.
+	$effect(() => {
+		const key = keepKey();
+		if (!key || !context.ready()) return;
+		untrack(() => {
+			for (const reply of keptCommentDrafts.pressed()) if (replyOf(reply)?.scope === key) unsentComments.open(reply);
+		});
+	});
 	// A kept draft that knows its passage, or was pressed, opens in its box once its document is shown: on its passage when
 	// that is found as kept (`findPlace`), sending if it was pressed; otherwise on no text, with why, and it is not sent until
 	// the person selects where it goes. One typed on a passage that could not be told apart waits for a selection, as before.
