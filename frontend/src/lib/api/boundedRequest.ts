@@ -1,5 +1,18 @@
 import { apiFetch, type ApiInit } from './request';
 
+/** A rejected fetch for a comment request, distinguished from errors in application code. */
+export class CommentConnectionError extends Error {
+	constructor() { super('Comment connection unavailable'); }
+}
+
+/** Mark a browser fetch rejection at the request boundary, before application code reads the response. */
+export function commentFetch(input: string, init: ApiInit): Promise<Response> {
+	return apiFetch(input, init).catch((error: unknown) => {
+		if (error instanceof TypeError) throw new CommentConnectionError();
+		throw error;
+	});
+}
+
 export class PostTimeoutError extends Error {
 	constructor(ms: number) {
 		super(`request timed out after ${ms}ms (may have committed server-side)`);
@@ -64,7 +77,7 @@ export async function readWithin<T>(input: string, init: ApiInit, ms: number, re
 		timer = setTimeout(() => { ctrl.abort(); reject(new PostTimeoutError(ms)); }, ms);
 	});
 	try {
-		return await Promise.race([apiFetch(input, { ...init, signal: ctrl.signal }).then(read), expired]);
+		return await Promise.race([commentFetch(input, { ...init, signal: ctrl.signal }).then(read), expired]);
 	} catch (e) {
 		if (e instanceof DOMException && e.name === 'AbortError') throw new PostTimeoutError(ms);
 		throw e;

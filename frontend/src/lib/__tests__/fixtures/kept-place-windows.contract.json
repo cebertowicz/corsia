@@ -1,0 +1,74 @@
+[
+ {
+  "name": "plain",
+  "text": "An opening paragraph long enough to fill a side.\n\nThe launch moves to Friday.\nNotes follow on the next line too.\n",
+  "from": 70,
+  "to": 76,
+  "quote": "Friday",
+  "prefix": "ll a side.\n\nThe launch moves to ",
+  "suffix": ".\nNotes follow on the next line "
+ },
+ {
+  "name": "at start",
+  "text": "Title words then more text to fill well past a side.\n",
+  "from": 0,
+  "to": 5,
+  "quote": "Title",
+  "prefix": "",
+  "suffix": " words then more text to fill we"
+ },
+ {
+  "name": "at end",
+  "text": "A short paragraph whose last word is the end",
+  "from": 41,
+  "to": 44,
+  "quote": "end",
+  "prefix": "aragraph whose last word is the ",
+  "suffix": ""
+ },
+ {
+  "name": "emoji inside sides",
+  "text": "Party 🎉🎉🎉 starts at noon 🎂 with cake and 🎈 balloons 🎉 for all.",
+  "from": 23,
+  "to": 27,
+  "quote": "noon",
+  "prefix": "Party 🎉🎉🎉 starts at ",
+  "suffix": " 🎂 with cake and 🎈 balloons 🎉 fo"
+ },
+ {
+  "name": "pair on the prefix edge",
+  "text": "x🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉mark🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂",
+  "from": 81,
+  "to": 85,
+  "quote": "mark",
+  "prefix": "🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉",
+  "suffix": "🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂"
+ },
+ {
+  "name": "pair on the suffix edge",
+  "text": "🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂émarké🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉y",
+  "from": 63,
+  "to": 67,
+  "quote": "mark",
+  "prefix": "🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂🎂é",
+  "suffix": "é🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉"
+ },
+ {
+  "name": "table cell",
+  "text": "| Plan | Ready |\n| --- | --- |\n| Alpha | Yes |\n| Beta | Yes |\n| Gamma | No |\n",
+  "from": 56,
+  "to": 59,
+  "quote": "Yes",
+  "prefix": " --- |\n| Alpha | Yes |\n| Beta | ",
+  "suffix": " |\n| Gamma | No |\n"
+ },
+ {
+  "name": "cjk",
+  "text": "日本語のテキストがここにあります。会議は金曜日に移動します。詳細は次の行にあります。",
+  "from": 20,
+  "to": 23,
+  "quote": "金曜日",
+  "prefix": "日本語のテキストがここにあります。会議は",
+  "suffix": "に移動します。詳細は次の行にあります。"
+ }
+]

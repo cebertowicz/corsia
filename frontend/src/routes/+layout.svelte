@@ -9,6 +9,8 @@
 	import { installLinkTargetResolver } from '$lib/linkTargetResolver';
 	import { theme } from '$lib/stores/theme';
 	import { ACCENT_ROLE_TOKENS, accentRoles, type AccentRoles } from '$lib/utils/projectColors';
+	// Comments pressed and not yet posted go on their own from the app's first connection, whatever is open.
+	import '$lib/stores/unsentComments.svelte';
 
 	let { children } = $props();
 

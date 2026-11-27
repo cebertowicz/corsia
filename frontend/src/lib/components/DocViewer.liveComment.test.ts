@@ -11,7 +11,9 @@ import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { commentDraft, discardCommentDraft } from '$lib/stores/commentDraft';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
+import { posting } from '$lib/stores/commentPostTiming';
 import { ANSWER_ALLOWANCE_MS, RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
+import { PostTimeoutError } from '$lib/api/boundedRequest';
 import { toasts } from '$lib/stores/toast';
 import { docComments } from '$lib/stores/docComments';
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn(), postComment: vi.fn() }));
@@ -62,15 +64,20 @@ afterEach(async () => {
 	host?.remove(); stop(); server?.destroy(); clearDraft(target); discardCommentDraft(); keptCommentDrafts.reset(); docComments.set({}); wire.frames.length = 0;
 	vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const fn of Object.values(api)) fn.mockReset();
 });
-async function open() {
+/**
+ * A document whose `beta` (6-10) cannot be told apart: its other copy has the same text after it, so a comment on it keeps
+ * no place and does not go on its own. A failure that passes is told in its box as before, with Retry.
+ */
+const REPEATED = 'alpha beta gamma and the rest of this line. alpha beta gamma and the rest of this line.';
+async function open(shown = 'alpha beta gamma') {
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(DocViewer, { target: host, props: { target } }); flushSync();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_open')!;
-	server = new Y.Doc(); server.getText('text').insert(0, 'alpha beta gamma');
+	server = new Y.Doc(); server.getText('text').insert(0, shown);
 	emit('doc_opened', { type: 'doc_opened', live: true, writable: true, artifact_id: 'artifact', store_id: 'store',
 		request_id: ask.request_id, update: encodeUpdate(Y.encodeStateAsUpdate(server)), vector: encodeUpdate(Y.encodeStateVector(server)), pending: false, held: null });
-	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('alpha beta gamma'));
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe(shown));
 	emit('doc_ack', { type: 'doc_ack', artifact_id: 'artifact', store_id: 'store', message_ids: wire.frames.flatMap(frame => frame.message_id ? [frame.message_id] : []) });
 }
 async function select(from = 6, to = 10) {
@@ -276,7 +283,7 @@ it.each([
 	['a document-not-open error', { kind: 'not_open' }],
 	['a frame-handler refusal', { kind: 'refused', store_id: 'store', message: 'refused for test' }],
 ])('keeps the draft and re-enables Comment without posting when a reservation reports %s', async (_name, fields) => {
-	await open(); await select(); await compose();
+	await open(REPEATED); await select(); await compose();
 	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 	submit.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
@@ -293,7 +300,7 @@ it.each([
 });
 it('after a store mismatch, reopening the composer and submitting sends one reservation and one post carrying the draft', async () => {
 	phone.store!.set(true);
-	await open(); await select(); await compose();
+	await open(REPEATED); await select(); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const refused = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
@@ -323,7 +330,7 @@ it('after a store mismatch, reopening the composer and submitting sends one rese
 	expect(released()).toEqual([expect.objectContaining({ client_id: refused.reserve.client_id })]);
 });
 it('keeps the draft and re-enables Comment without posting when a reservation reply times out', async () => {
-	await open(); await select(); await compose();
+	await open(REPEATED); await select(); await compose();
 	vi.useFakeTimers();
 	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 	submit.click();
@@ -388,7 +395,7 @@ it.each([
 	['a refusal with a non-JSON body', new Error('400 <html>Bad request</html>'), TRY_AGAIN],
 	['a refusal whose body has no reason', new Error('422 {"detail":[{"msg":"bad"}]}'), TRY_AGAIN],
 ])('tells the user a live comment failed in plain words after %s, and keeps the draft', async (_name, failure, message) => {
-	await open(); await select(); await compose();
+	await open(REPEATED); await select(); await compose();
 	api.postComment.mockRejectedValueOnce(failure);
 	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
 	submit.click();
@@ -415,7 +422,7 @@ it('logs a refused live comment post\'s status and raw reason once, as the share
 	logged.mockRestore();
 });
 it('keeps the body and enabled Comment after an HTTP refusal that a second capture does not fix, then dismisses its toast on retry success', async () => {
-	await open(); await select(); await compose();
+	await open(REPEATED); await select(); await compose();
 	const refusal = new Error('409 {"detail":"The document changed. Try Comment again; your draft is kept."}');
 	api.postComment.mockRejectedValueOnce(refusal).mockRejectedValueOnce(refusal);
 	const dismiss = vi.spyOn(toasts, 'dismiss');
@@ -443,6 +450,59 @@ it('keeps the body and enabled Comment after an HTTP refusal that a second captu
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(dismiss).toHaveBeenCalledWith('refusal');
 	expect(get(commentDraft)).toBeNull();
+});
+// A comment on a passage it can be told by goes again on its own: a failure that passes says nothing, and its box reads
+// "Sending…" until the next open, connection or return to the app sends it. Only a refusal says why.
+it.each([
+	['a temporarily unavailable server', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new Error('503 synthetic comment failure')); return answer(ask); }],
+	['a timeout', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new PostTimeoutError(100)); return answer(ask); }],
+	['a 409 that names no kind, twice', async (ask: Record<string, any>) => {
+		api.postComment.mockRejectedValue(new Error('409 {"detail":"The document changed. Try Comment again; your draft is kept."}'));
+		await answer(ask);
+		// The refusal captures the still-tracked selection once more first.
+		await vi.waitFor(() => expect(wire.frames.filter(frame => frame.type === 'doc_positions')).toHaveLength(2));
+		await answer(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+	}],
+	['a reservation store mismatch', (ask: Record<string, any>) => emit('doc_error', { type: 'doc_error', artifact_id: 'artifact', request_id: ask.request_id, kind: 'store_mismatch', store_id: 'other' })],
+])('a pressed comment whose post fails after %s reads "Sending…", with no reason and no toast', async (_name, fail) => {
+	await open(); await select(); await compose();
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.click();
+	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
+	await fail(ask);
+	// The press is over: what shows now is what stays until the next open, connection or return sends it.
+	await vi.waitFor(() => expect(posting(ask.reserve.client_id)).toBe(false));
+	flushSync();
+	expect(submit.textContent).toBe('Sending…');
+	expect(submit.disabled).toBe(true);
+	expect(document.querySelector('.composer [role="alert"]')).toBeNull();
+	expect(toasts.show).not.toHaveBeenCalled();
+	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
+});
+it.each([
+	['a server error', (ask: Record<string, any>) => { api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure')); return answer(ask); }],
+])('a pressed comment after %s keeps its text and waits for the person', async (_name, fail) => {
+	await open(); await select(); await compose();
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.click();
+	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+	await fail(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+	await vi.waitFor(() => expect(submit.textContent).toBe('Retry'));
+	expect(submit.disabled).toBe(false);
+	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
+	expect(document.querySelector('.composer [role="alert"]')).not.toBeNull();
+});
+it('a pressed comment the server refuses says why in its box and waits for the person', async () => {
+	await open(); await select(); await compose();
+	api.postComment.mockRejectedValueOnce(new Error('404 {"detail":"This document is no longer shared."}'));
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.click();
+	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+	await answer(wire.frames.findLast(frame => frame.type === 'doc_positions')!);
+	await vi.waitFor(() => expect(document.querySelector('.composer [role="alert"]')?.textContent).toBe('Couldn’t post the comment: This document is no longer shared. Your draft is kept.'));
+	expect(submit.disabled).toBe(false);
+	expect(submit.textContent).toBe('Retry');
 });
 it('returns focus to the editor without scrolling when the comment popover is dismissed', async () => {
 	// A bare element focus() makes WebKit scroll to the start of the document when the DOM selection is gone;
@@ -566,7 +626,7 @@ describe('a typed comment is never lost', () => {
 		expect((await reopen()).value).toBe('');
 	});
 	it('path 4: when the post a click outside left running fails, the reason shows and the text comes back with it', async () => {
-		await open(); await select(); await compose();
+		await open(REPEATED); await select(); await compose();
 		api.postComment.mockRejectedValueOnce(new Error('500 synthetic comment failure'));
 		await postAfterOutsideClick();
 		await vi.waitFor(() => expect(toasts.show).toHaveBeenCalledWith(TRY_AGAIN, 'error'));
@@ -577,7 +637,7 @@ describe('a typed comment is never lost', () => {
 		// jsdom lays nothing out: the selected text, the document and the composer report a place inside the window, as they
 		// have on a page, so the composer's Popover is placed and shows it.
 		vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
-		await open();
+		await open(REPEATED);
 		host.querySelector<HTMLElement>('.doc')!.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 700);
 		await select(); await compose();
 		document.querySelector<HTMLElement>('.composer')!.getBoundingClientRect = () => new DOMRect(20, 100, 300, 160);

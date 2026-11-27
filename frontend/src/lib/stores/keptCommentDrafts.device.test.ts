@@ -227,6 +227,45 @@ describe('a draft this device does not keep', () => {
 		expect(page.drafts.keptCommentDrafts.get(other)?.body).toBe('another draft');
 	});
 
+	it.each([
+		['document', (page: Page) => documentKey(page)],
+		['image', (page: Page) => page.drafts.imageDraftKey('artifact-7')],
+		['reply', (page: Page) => page.drafts.replyDraftKey(documentKey(page), 'comment-1')],
+		['chat', (page: Page) => page.drafts.chatDraftKey('thread-1', 'message-1', { from_off: 0, to_off: 4 })],
+		['chat reply', (page: Page) => page.drafts.replyDraftKey(page.drafts.CHAT_REPLY_SCOPE, 'comment-1')],
+	])('%s: a press that cannot be kept is never queued for automatic sending', async (_surface, keyOf) => {
+		const page = await open();
+		const key = keyOf(page), body = 'x'.repeat(200_001), tags = page.tags.createMentionSelection(body);
+		page.drafts.keptCommentDrafts.keep(key, body, tags);
+		const press = page.drafts.keptCommentDrafts.claim(key, body, tags, undefined, { artifactId: 'artifact-7', threadId: 'thread-1' });
+		expect(page.drafts.keptCommentDrafts.notKept(key)).not.toBe('');
+		expect(page.drafts.keptCommentDrafts.get(key)?.clientId).toBe(press.clientId);
+		expect(page.drafts.keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(page.drafts.keptCommentDrafts.pressed()).not.toContain(key);
+	});
+
+	it('clears the not-kept warning when a pressed draft is emptied', async () => {
+		const page = await open(), key = documentKey(page), body = 'x'.repeat(200_001);
+		const tags = page.tags.createMentionSelection(body);
+		page.drafts.keptCommentDrafts.keep(key, body, tags);
+		const press = page.drafts.keptCommentDrafts.claim(key, body, tags);
+		expect(page.drafts.keptCommentDrafts.notKept(key)).not.toBe('');
+		page.drafts.keptCommentDrafts.keep(key, '', page.tags.createMentionSelection());
+		expect(page.drafts.keptCommentDrafts.get(key)?.clientId).toBe(press.clientId);
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
+	});
+
+	it('a send added after the press that crosses the storage cap is not queued', async () => {
+		const page = await open(), key = documentKey(page), body = 'x'.repeat(199_700);
+		const tags = page.tags.createMentionSelection(body);
+		page.drafts.keptCommentDrafts.keep(key, body, tags);
+		const press = page.drafts.keptCommentDrafts.claim(key, body, tags);
+		expect(page.drafts.keptCommentDrafts.notKept(key)).toBe('');
+		page.drafts.keptCommentDrafts.sends(key, press.clientId, body, { artifactId: 'artifact-7', threadId: 'thread-1', name: 'n'.repeat(500) });
+		expect(page.drafts.keptCommentDrafts.get(key)?.send).toBeUndefined();
+		expect(page.drafts.keptCommentDrafts.pressed()).not.toContain(key);
+	});
+
 	it('the line goes once a later change is kept, and when the draft leaves this page', async () => {
 		const page = await open();
 		const key = documentKey(page), huge = 'x'.repeat(200_001);

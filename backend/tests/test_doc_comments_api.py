@@ -241,6 +241,8 @@ def test_cross_artifact_client_id_returns_409(integration_client, artifact_id, s
     assert r2.status_code == 409, (
         f"Expected 409 for cross-artifact id replay, got {r2.status_code}: {r2.text}"
     )
+    # A draft sent again on its own reads this kind to go once more under a new id.
+    assert r2.json()["kind"] == "client_id_clash"
     body_text = r2.text
     assert artifact_id not in body_text, "Response must not leak artifact A's id"
     assert "Comment on artifact A" not in body_text, "Response must not leak artifact A's body"

@@ -82,7 +82,10 @@ export function needsAttention(comment: ChatComment): boolean {
 	return unsentSends(comment).some(send => send.delivery.failed);
 }
 
-/** A reply typed in this comment's thread is on its way to the server. */
+/**
+ * A reply typed in this comment's thread is on its way to the server, or was pressed and goes on its own. Read from the
+ * kept draft, not `unsentComments`, which reaches this file back through `composerSend`.
+ */
 export function replySending(comment: ChatComment): boolean {
-	return !!chatCommentDrafts.reply(comment.id)?.posting;
+	return !!chatCommentDrafts.reply(comment.id)?.posting || chatCommentDrafts.replyPressed(comment.id);
 }

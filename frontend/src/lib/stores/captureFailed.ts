@@ -4,7 +4,7 @@
 
 /**
  * Each code is one way a capture ends. Every code fits the server's pattern for a short code, `[a-z][a-z_]{0,31}`
- * (`_CODE_CHARS` in backend/api/comment_post_timing.py); the longest, `unanswered`, is 10.
+ * (`_CODE_CHARS` in backend/api/comment_post_timing.py); the longest, `store_mismatch`, is 14.
  * - `unanswered`: its ask got no answer within the server's allowance.
  * - `changed`: the time budget ran out on a document that kept moving, or the server refused the range after it.
  * - `offline`: the connection was lost, or the ask could not be sent.
@@ -12,9 +12,10 @@
  * - `lost`: the selected text is gone.
  * - `identity`: the server already holds something under the comment's id.
  * - `refused`: the server refused the ask with an error.
+ * - `store_mismatch`: the live store was replaced before the reservation.
  * - `hash`: the browser could not check the selection's text.
  */
-export type CaptureCode = 'unanswered' | 'changed' | 'offline' | 'settling' | 'lost' | 'identity' | 'refused' | 'hash';
+export type CaptureCode = 'unanswered' | 'changed' | 'offline' | 'settling' | 'lost' | 'identity' | 'refused' | 'store_mismatch' | 'hash';
 
 export class CaptureFailed extends Error {
 	constructor(readonly code: CaptureCode, message: string) {

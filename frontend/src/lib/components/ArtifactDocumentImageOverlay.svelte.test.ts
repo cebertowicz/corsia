@@ -19,7 +19,7 @@ afterEach(() => { if (component) unmount(component); component = null; });
 async function showDiagram() {
 	openTabDocumentImage(HOST, TAB, DRAWN);
 	const comments = {
-		artifactId: 'art', projectId: null, readOnly: false, post: vi.fn(),
+		artifactId: 'art', projectId: null, readOnly: false, post: vi.fn(), placeOf: () => null,
 		refreshDiagram: vi.fn(async () => ({ ...DRAWN, src: 'blob:new', diagramSource: 'new' })),
 	};
 	const host = document.createElement('div');

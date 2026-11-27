@@ -48,11 +48,12 @@ async function dropFirstAnswer(page: Page, artifactId: string) {
 	return { answer: () => { state.blocking = false; }, posted: () => state.posts };
 }
 
-/** The press failed: the box still holds the text and says it didn't post, in the box only, since the box is on screen. */
+/** The failed press stays in its box, sending without a failure notice. */
 async function expectFailedPress(page: Page, text: string) {
-	await expect(page.locator('.composer [role="alert"]').filter({ hasText: /post/i }), 'the box says why').toBeVisible({ timeout: 30_000 });
+	await expect(page.locator('.composer').getByRole('button', { name: 'Sending…' })).toBeVisible({ timeout: 30_000 });
 	await expect(composer(page)).toHaveValue(text);
-	await expect(page.locator('.toast').filter({ hasText: /post/i }), 'no toast tells it a second time').toHaveCount(0);
+	await expect(page.locator('.composer [role="alert"]'), 'no failure while retrying').toHaveCount(0);
+	await expect(page.locator('.toast').filter({ hasText: /post/i }), 'no failure toast while retrying').toHaveCount(0);
 }
 
 const DOC = '# Retry once\n\nThe router decides where an inbound event goes.\n\nA second paragraph to keep the margin honest.\n';
@@ -80,7 +81,7 @@ test.describe('@flow:document-comments a comment pressed again after an unanswer
 		await expectFailedPress(page, 'Name the fallback route');
 		expect(await bodies(request, document.artifactId), 'the first press was stored').toEqual(['Name the fallback route']);
 		wire.answer();
-		await press(page);
+		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 		await expect(composer(page)).toHaveCount(0);
 		expect(await bodies(request, document.artifactId), 'one comment for one draft').toEqual(['Name the fallback route']);
 	});

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocComment } from '$lib/stores/docComments';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
+import { CommentConnectionError } from '$lib/api/boundedRequest';
+import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 
 const imageRequestAt = vi.fn();
 const remapTabDocumentImage = vi.fn();
@@ -19,7 +21,7 @@ const TARGET: DocViewerTarget = { instanceId: 'tab-1', path: 'doc.md', name: 'do
 const batch = { pendingCount: 0 } as unknown as DocFeedback;
 const DRAWN = { src: '/ws/a.png', alt: 'Mock', from: 10, to: 24, scrollTop: 0, top: 0 };
 
-function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null; imageCacheKey?: string; tabThreadId?: string | null } = {}) {
+function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null; imageCacheKey?: string; tabThreadId?: string | null; session?: LiveDocumentSession } = {}) {
 	const onOpenImage = overrides.onOpenImage === undefined ? vi.fn() : overrides.onOpenImage;
 	const showInText = vi.fn();
 	const imageCacheKey = { value: overrides.imageCacheKey ?? 'open-1' };
@@ -27,7 +29,7 @@ function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; 
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage ?? undefined, root: () => document.createElement('div'), comments: () => comments,
 		artifactId: () => (overrides.artifactId === undefined ? 'a1' : overrides.artifactId), target: () => (overrides.target === undefined ? TARGET : overrides.target), tabThreadId: () => (overrides.tabThreadId === undefined ? 't1' : overrides.tabThreadId), readOnly: () => false,
-		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch, showInText,
+		text: () => '', session: () => overrides.session, accent: () => null, feedback: () => batch, showInText,
 		imageCacheKey: () => imageCacheKey.value,
 	});
 	return { images, onOpenImage, showInText, imageCacheKey };
@@ -56,7 +58,12 @@ describe('opening a document image from its comments', () => {
 		const failure = viewer().images.comments()!.failure!;
 		expect(failure(new Error('400 {"detail":"the image shots/a.png couldn’t be found.","kind":"region_target"}')))
 			.toBe('Couldn’t post the comment: the image shots/a.png couldn’t be found. Your draft is kept.');
-		expect(failure(new TypeError('Failed to fetch'))).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+		expect(failure(new CommentConnectionError())).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
+	});
+
+	it('a live image comment with a lost connection says the draft is kept', () => {
+		const failure = viewer({ session: {} as LiveDocumentSession }).images.comments()!.failure!;
+		expect(failure(new CommentConnectionError())).toBe('Couldn’t post the comment. Your draft is kept. Try again.');
 	});
 
 	it('uses the current document cache key for a comment thumbnail', () => {

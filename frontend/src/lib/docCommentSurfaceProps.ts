@@ -35,7 +35,7 @@ export interface DocCommentSurfaceProps {
 	/** The thread whose text is under the pointer: its card wears the focused ring and nothing more; only the pick (`focusedId`) opens, places or reads a card. */
 	ringId?: string | null;
 	/** `label` names what a non-text comment is on, in place of the quote. */
-	draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection>; error?: string } | null;
+	draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection>; error?: string; unplaced?: boolean } | null;
 	draftReason?: string;
 	onDraftBody?: (text: string) => void;
 	onCancelDraft?: () => void;

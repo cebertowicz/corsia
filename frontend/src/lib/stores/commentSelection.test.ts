@@ -155,7 +155,7 @@ it('rejects and releases when the server reports a reservation store mismatch', 
 	await value.asked(1);
 	const ask = value.asks()[0];
 	value.session.handle({ type: 'doc_error', kind: 'store_mismatch', artifact_id: 'artifact', store_id: 'other', request_id: String(ask.request_id) });
-	await endedAs(request, 'refused', 'document changed');
+	await endedAs(request, 'store_mismatch', 'document changed');
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 });
 it('rejects and releases when the server reports the document is not open', async () => {

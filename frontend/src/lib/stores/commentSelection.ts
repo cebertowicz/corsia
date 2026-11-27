@@ -94,6 +94,7 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 			if (requestId === null || frame.request_id !== requestId) return;
 			if (frame.type === 'doc_error') {
 				if (frame.kind === 'identity_in_use') { finish(undefined, new IdentityInUseError()); return; }
+				if (frame.kind === 'store_mismatch') { finish(undefined, failed('store_mismatch', CHANGED)); return; }
 				finish(undefined, failed('refused', (frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
 				return;
 			}

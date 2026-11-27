@@ -24,7 +24,7 @@ from doceditor.image_label import image_label
 from doceditor.image_regions import (
     checked_image, comment_image, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
 )
-from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context, reanchor
+from doceditor.quote_anchor import _cp_at_u16, span16, anchor_context, reanchor
 
 
 # One inline image: alt text without unescaped brackets, then a destination that
@@ -83,7 +83,7 @@ def widen_to_image(text: str, from16: int, to16: int) -> tuple[str, int, int, st
     for match in _IMAGE.finditer(text):
         if match.start() <= start and end <= match.end():
             quote = match.group(0)
-            image_from, image_to = _span16(text, match.start(), quote)
+            image_from, image_to = span16(text, match.start(), quote)
             prefix, suffix = anchor_context(text, image_from, image_to, quote) or (None, None)
             return quote, image_from, image_to, prefix, suffix
         if match.start() > end:
