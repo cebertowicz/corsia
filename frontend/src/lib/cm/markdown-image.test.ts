@@ -6,12 +6,13 @@ import { forceParsing } from '@codemirror/language';
 import { GFM } from '@lezer/markdown';
 import { cursorCharLeft, cursorCharRight, deleteCharBackward, deleteCharForward } from '@codemirror/commands';
 import { commentMarks, setCommentRanges } from './comment-marks';
+import { PORTRAIT_IMAGE } from './markdown-image-portrait';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
 import { installLinkTargetResolver } from '$lib/linkTargetResolver';
 import { placeTop } from '$lib/documentReadingPlace';
 import {
-	drawImage, FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, PORTRAIT_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
+	drawImage, FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
 	type ImageContext, type OpenImageRequest,
 } from './markdown-image';
 
