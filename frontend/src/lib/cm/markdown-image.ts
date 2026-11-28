@@ -65,6 +65,14 @@ export function renderableImage(state: EditorState, node: SyntaxNode): boolean {
 	return context !== null && imageSource(node, state.doc, context.docPath).path !== null;
 }
 
+/** The class a standalone document image carries once it has loaded and is taller than it is wide; theme.ts caps only those. */
+export const PORTRAIT_IMAGE = 'cm-md-image-portrait';
+
+/** Marks `wrap` portrait when its loaded image is taller than wide; a square or landscape image, or one not loaded yet, is left unmarked. */
+export function markPortrait(wrap: HTMLElement, img: HTMLImageElement): void {
+	wrap.classList.toggle(PORTRAIT_IMAGE, img.naturalHeight > img.naturalWidth && img.naturalWidth > 0);
+}
+
 /**
  * Draws a workspace image into `wrap`, as the document does standalone or in a table cell. A failed load shows the
  * alt text and why, from the server's answer to the same request: the file is missing (404), refused as outside this
@@ -74,6 +82,8 @@ export function drawImage(wrap: HTMLElement, alt: string, src: string): HTMLElem
 	const img = document.createElement('img');
 	img.alt = alt;
 	img.decoding = 'async';
+	// Only the document's own image widget is capped when tall; an image in a table cell is not, drawn or while its cell is open.
+	if (wrap.classList.contains('cm-md-image')) img.addEventListener('load', () => { if (!wrap.closest(CELL_EDITOR)) markPortrait(wrap, img); });
 	img.addEventListener('error', async () => {
 		const reason = await imageFailureReason(src);
 		const note = document.createElement('div');

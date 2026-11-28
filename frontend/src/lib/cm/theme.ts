@@ -114,6 +114,9 @@ export const docTheme = EditorView.theme({
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },
 	'.cm-md-image img': { display: 'block', maxWidth: '100%', height: 'auto' },
+	// A portrait image (marked once it loads, `markPortrait`) is also held to a height that fits the view, its width following to keep
+	// its shape; svh so a phone keyboard does not resize it. Landscape and square images are never capped.
+	'.cm-md-image-portrait img': { maxHeight: 'min(60svh, 640px)' },
 	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
 	// A cell image or diagram is a tab stop that Enter or Space opens (`widget-open.ts`), ringed as the selected image is.

@@ -11,7 +11,7 @@ import { markdownLivePreview } from './markdown-live';
 import { installLinkTargetResolver } from '$lib/linkTargetResolver';
 import { placeTop } from '$lib/documentReadingPlace';
 import {
-	FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
+	drawImage, FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, PORTRAIT_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
 	type ImageContext, type OpenImageRequest,
 } from './markdown-image';
 
@@ -398,6 +398,57 @@ describe('markdown images in the live preview', () => {
 		const doc = ['```', '![code](a.png)', '```', '', '| a |', '| - |', '| ![cell](b.png) |', ''].join('\n');
 		const view = mount(doc, doc.length);
 		expect(view.dom.querySelector('.cm-md-image')).toBeNull();
+	});
+});
+
+describe('a portrait image in the live preview', () => {
+	const loaded = (selector: string, view: EditorView, size?: { width: number; height: number }) => {
+		const img = view.dom.querySelector<HTMLImageElement>(selector)!;
+		if (size) {
+			Object.defineProperty(img, 'naturalWidth', { value: size.width, configurable: true });
+			Object.defineProperty(img, 'naturalHeight', { value: size.height, configurable: true });
+		}
+		img.dispatchEvent(new Event('load'));
+		return img.closest<HTMLElement>('.cm-md-image, .cm-md-cell-image')!;
+	};
+
+	it('is marked once it has loaded taller than wide, and a landscape, square or unloaded one is not', () => {
+		expect(loaded('.cm-md-image img', mount(DOC), { width: 1032, height: 2237 }).classList.contains(PORTRAIT_IMAGE)).toBe(true);
+		expect(loaded('.cm-md-image img', mount(DOC), { width: 3780, height: 2625 }).classList.contains(PORTRAIT_IMAGE)).toBe(false);
+		expect(loaded('.cm-md-image img', mount(DOC), { width: 500, height: 500 }).classList.contains(PORTRAIT_IMAGE)).toBe(false);
+		// Before the image loads (no natural size yet), and when it loads at no size, it renders as it always did.
+		expect(mount(DOC).dom.querySelector('.cm-md-image')!.classList.contains(PORTRAIT_IMAGE)).toBe(false);
+		expect(loaded('.cm-md-image img', mount(DOC), { width: 0, height: 0 }).classList.contains(PORTRAIT_IMAGE)).toBe(false);
+	});
+
+	it('follows the image when its file is replaced and loads again, and keeps the mark when the widget is reused', () => {
+		const view = mount(DOC);
+		const wrap = loaded('.cm-md-image img', view, { width: 786, height: 1704 });
+		expect(wrap.classList.contains(PORTRAIT_IMAGE)).toBe(true);
+		view.dispatch({ selection: { anchor: 0 } });
+		expect(view.dom.querySelector('.cm-md-image')).toBe(wrap);
+		expect(wrap.classList.contains(PORTRAIT_IMAGE)).toBe(true);
+		expect(loaded('.cm-md-image img', view, { width: 1600, height: 1000 }).classList.contains(PORTRAIT_IMAGE)).toBe(false);
+	});
+
+	it('is never marked in an open table cell’s editor, so the same image is not a different size open and drawn', () => {
+		const cellEditor = document.createElement('div');
+		cellEditor.className = 'cm-md-cell-editor';
+		const wrap = document.createElement('div');
+		wrap.className = 'cm-md-image';
+		cellEditor.append(wrap);
+		document.body.append(cellEditor);
+		const img = drawImage(wrap, 'A phone', '/api/files/content?path=/ws/a.png').querySelector('img')!;
+		Object.defineProperty(img, 'naturalWidth', { value: 786 });
+		Object.defineProperty(img, 'naturalHeight', { value: 1704 });
+		img.dispatchEvent(new Event('load'));
+		expect(wrap.classList.contains(PORTRAIT_IMAGE)).toBe(false);
+		cellEditor.remove();
+	});
+
+	it('is never marked in a table cell', () => {
+		const view = mount('| Phone |\n| - |\n| ![A phone](img/a.png) |\n', 0);
+		expect(loaded('.cm-md-table td img', view, { width: 786, height: 1704 }).classList.contains(PORTRAIT_IMAGE)).toBe(false);
 	});
 });
 
