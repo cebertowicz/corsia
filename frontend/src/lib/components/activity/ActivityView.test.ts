@@ -39,6 +39,7 @@ import paneSource from './ActivityItemPane.svelte?raw';
 import documentBarSource from './ActivityDocumentBar.svelte?raw';
 import listSource from './ActivityList.svelte?raw';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 import { activityOpenRequest, openActivity } from '$lib/stores/activityOpen';
 import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 import { closeArtifactTab, consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
@@ -114,6 +115,7 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	emailDraftHeaders.set({});
 	vi.unstubAllGlobals();
 });
 
@@ -1413,6 +1415,19 @@ describe('a document row in Notifications', () => {
 		rows()[0].click();
 		await settle();
 	}
+
+	it('shows the current email subject in the phone header, falling back to the document title', async () => {
+		served = [];
+		mobile.store!.set(true);
+		await openNotifications();
+		const fallback = get(activityPhoneItem)!.artifact!.title;
+		flushSync(() => emailDraftHeaders.set({ 'art-plan-pane': { id: 'draft', header: { text: 'Subject: First subject', recipients: [] } } }));
+		expect(get(activityPhoneItem)!.artifact!.title).toBe('First subject');
+		flushSync(() => emailDraftHeaders.set({ 'art-plan-pane': { id: 'draft', header: { text: 'Subject: Updated subject', recipients: [] } } }));
+		expect(get(activityPhoneItem)!.artifact!.title).toBe('Updated subject');
+		flushSync(() => emailDraftHeaders.set({}));
+		expect(get(activityPhoneItem)!.artifact!.title).toBe(fallback);
+	});
 
 	it('opens the top row when switching to a populated tab with nothing open on desktop', async () => {
 		served = [];

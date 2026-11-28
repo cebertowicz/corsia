@@ -4,6 +4,8 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { createActivityQueue } from '$lib/stores/activityQueue.svelte';
 	import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { emailTabTitle } from '$lib/emailDraft';
 	import { activityOpenRequest } from '$lib/stores/activityOpen';
 	import { threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveTab } from '$lib/stores/artifactWorkspace';
 	import ArtifactTabSheet from '$lib/components/ArtifactTabSheet.svelte';
@@ -14,7 +16,6 @@
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
 	import { EMPTY_LINE, documentDetailOf, documentOf, followerOf, keepInPlace, matchingDocumentRows, readThrough, settledArtifact, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
-
 	/**
 	 * Activity: two lists beside the pane the chat uses. Your tasks holds everything waiting on the person, ranked by
 	 * the scope's conductor (CORSIA in the workspace); Notifications holds documents where agents answered the person's
@@ -41,7 +42,6 @@
 
 	const store = createActivityQueue(() => projectId);
 	const workspaceKey = $derived(activityWorkspaceKey(projectId));
-
 	/** The item open in the pane; on a phone, the item marked in the list until it is tapped open. */
 	let openKey = $state<string | null>(null);
 	/** Phone only: the item is on screen instead of the list. */
@@ -304,7 +304,7 @@
 					void tick().then(() => { if (listScroll) listScroll.scrollTop = scrolls[tab]; });
 				},
 				...(tabForItem ? { artifact: {
-					title: tabForItem.title, tabCount: workspace.tabs.length,
+					title: emailTabTitle(tabForItem.artifactId ? $emailDraftHeaders[tabForItem.artifactId] : undefined, tabForItem.title), tabCount: workspace.tabs.length,
 					anyChanged: hasChangedTab(workspace), onTabs: () => { phoneTabsOpen = !phoneTabsOpen; },
 				} } : {}),
 			}
