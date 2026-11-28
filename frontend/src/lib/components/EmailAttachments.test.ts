@@ -26,6 +26,25 @@ describe('EmailAttachments', () => {
 		expect(chips.map((chip) => chip.textContent)).toEqual([expect.stringContaining('2 KB'), expect.stringContaining('4 KB')]);
 	});
 
+	it('offers separate removal for unavailable and available chips, including duplicates', async () => {
+		const removed: Array<[number, string]> = [];
+		const attachments: EmailAttachment[] = [
+			{ name: 'map.pdf', path: '/w/map.pdf', size: 2048, type: 'document', unavailable: true },
+			{ name: 'map.pdf', path: '/w/map.pdf', size: 2048, type: 'document' },
+		];
+		host = document.body.appendChild(document.createElement('div'));
+		component = mount(EmailAttachments, { target: host, props: {
+			attachments, threadId: 'thread-1', removable: true,
+			onremove: async (index: number, path: string) => { removed.push([index, path]); },
+		} });
+		flushSync();
+		const buttons = host.querySelectorAll<HTMLButtonElement>('button[aria-label="Remove map.pdf"]');
+		expect(buttons).toHaveLength(2);
+		buttons[1].click();
+		await Promise.resolve();
+		expect(removed).toEqual([[1, '/w/map.pdf']]);
+	});
+
 	it('still shows every chip when the server could not place the files (no paths)', () => {
 		const attachments: EmailAttachment[] = [
 			{ name: 'map.png', path: '', size: 2048, type: 'image', unavailable: true },

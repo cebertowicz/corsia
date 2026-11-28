@@ -354,3 +354,78 @@ async def test_only_the_draft_record_makes_a_file_an_email_draft(mail):
     loaded = read_document(str(path), user, None, mail.thread)
     assert loaded["email_draft"]["state"] == "sent" and loaded["writable"] is False
     assert (await draft_context(_artifact(saved), _owner(mail.thread)))["state"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_remove_requires_a_person_session():
+    from fastapi import FastAPI
+    from api.email_drafts import router
+
+    app = FastAPI()
+    app.include_router(router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.request("DELETE", "/api/email-drafts/unknown/attachments/0", json={"path": "x"})
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_remove_attachment_preserves_duplicate_target_and_live_text(mail):
+    from api.email_drafts import RemoveAttachment, remove_attachment
+    from tools.reviewed_drafts import working_root
+
+    root = working_root(mail.thread)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "map.pdf").write_bytes(b"example")
+    saved = await _draft(mail, attachments=["map.pdf", "map.pdf"])
+    artifact = _artifact(saved)
+    before = _row(saved["draft_id"])
+    target = json.loads(before["target_json"])
+    text = (config.WORKSPACE / saved["path"]).read_bytes()
+    path = (await draft_context(artifact, _owner(mail.thread)))["attachments"][0]["path"]
+    result = await remove_attachment(artifact, 0, RemoveAttachment(path=path), _owner(mail.thread))
+    assert len(result["attachments"]) == 1
+    after = _row(saved["draft_id"])
+    updated = json.loads(after["target_json"])
+    assert updated == {**target, "attachments": target["attachments"][1:]}
+    assert (config.WORKSPACE / saved["path"]).read_bytes() == text
+    assert (await draft_context(artifact, _owner(mail.thread)))["attachments"] == result["attachments"]
+
+
+@pytest.mark.asyncio
+async def test_remove_refuses_wrong_owner_stale_and_closed_draft(mail):
+    from api.email_drafts import RemoveAttachment, remove_attachment
+    from tools.reviewed_drafts import working_root
+
+    root = working_root(mail.thread)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "map.pdf").write_bytes(b"example")
+    saved = await _draft(mail, attachments=["map.pdf"])
+    artifact = _artifact(saved)
+    owner = _owner(mail.thread)
+    before = _row(saved["draft_id"])["target_json"]
+    plain = root / "plain.md"
+    plain.write_text("ordinary document")
+    plain_artifact = register_write(mail.thread, str(plain), notify=False)["id"]
+    with pytest.raises(HTTPException) as wrong_type:
+        await remove_attachment(plain_artifact, 0, RemoveAttachment(path="bad"), owner)
+    assert wrong_type.value.status_code == 404
+    for who, index, path, status in [
+        ({"id": "someone-else"}, 0, "bad", 404),
+        (owner, 1, "bad", 409),
+        (owner, -1, "bad", 409),
+        (owner, 0, "bad", 409),
+    ]:
+        with pytest.raises(HTTPException) as error:
+            await remove_attachment(artifact, index, RemoveAttachment(path=path), who)
+        assert error.value.status_code == status
+        assert _row(saved["draft_id"])["target_json"] == before
+    db = get_db()
+    try:
+        db.execute("UPDATE action_drafts SET state='sent' WHERE id=?", (saved["draft_id"],))
+        db.commit()
+    finally:
+        db.close()
+    with pytest.raises(HTTPException) as error:
+        await remove_attachment(artifact, 0, RemoveAttachment(path="bad"), owner)
+    assert error.value.status_code == 409 and error.value.detail == {"state": "sent"}
+    assert _row(saved["draft_id"])["target_json"] == before

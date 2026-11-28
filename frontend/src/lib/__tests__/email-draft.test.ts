@@ -3,7 +3,17 @@ import {
 	currentRecipients, emailTabTitle, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, refusedEntries, repliedToId, senderAddress, senderName,
 	type EmailMessage, type ServerHeader,
 } from '$lib/emailDraft';
-import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
+import { fetchEmailDraftContext, removeEmailAttachment } from '$lib/api/emailDrafts';
+
+describe('removing an attachment', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	it('returns the server attachment list and target version', async () => {
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ attachments: [], target_version: 'new-target' }), { status: 200 }));
+		vi.stubGlobal('fetch', fetchMock);
+		expect(await removeEmailAttachment('a/1', 2, '/work/file')).toEqual({ state: 'removed', attachments: [], targetVersion: 'new-target' });
+		expect(fetchMock).toHaveBeenCalledWith('/api/email-drafts/a%2F1/attachments/2', expect.objectContaining({ method: 'DELETE', body: JSON.stringify({ path: '/work/file' }) }));
+	});
+});
 
 const message = (id: string, sender: string, date: string): EmailMessage => ({ id, sender, date, body: `${id} body` });
 const MARCUS = message('n-1', 'Marcus Obi <marcus.obi@example.com>', '2026-11-05T17:40:00Z');

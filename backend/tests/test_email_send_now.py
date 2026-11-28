@@ -137,6 +137,114 @@ async def test_an_agent_save_during_a_send_waits_and_the_file_stays_what_was_sen
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stale", [False, True], ids=["returned-version", "old-version"])
+async def test_remove_then_send_uses_the_remaining_attachment_list(mail, monkeypatch, stale):
+    from api.email_drafts import RemoveAttachment, draft_context, remove_attachment
+    from tools.reviewed_drafts import working_root
+
+    monkeypatch.setattr("events.delivery.deliver_to_thread", AsyncMock(return_value=True))
+    root = working_root(mail.thread)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "one.txt").write_text("one")
+    (root / "two.txt").write_text("two")
+    saved = await _draft(mail, attachments=["one.txt", "two.txt"])
+    artifact, owner = _artifact(saved), _owner(mail.thread)
+    shown = await draft_context(artifact, owner)
+    removed = await remove_attachment(artifact, 0, RemoveAttachment(path=shown["attachments"][0]["path"]), owner)
+    text = (mail.workspace / saved["path"]).read_text()
+    if stale:
+        with pytest.raises(HTTPException) as error:
+            await send_now(artifact, SendNow(text=text, target_version=shown["target_version"]), owner)
+        assert error.value.status_code == 409 and error.value.detail["state"] == "changed"
+        assert not mail.sends
+    else:
+        assert await send_now(artifact, SendNow(text=text, target_version=removed["target_version"]), owner) == {"state": "sent"}
+        assert [part.get_filename() for part in _mime(mail.sends[0]).iter_attachments()] == ["two.txt"]
+
+
+@pytest.mark.asyncio
+async def test_remove_waits_for_inflight_send_and_refuses_after_sent(mail, monkeypatch):
+    from api.email_drafts import RemoveAttachment, draft_context, remove_attachment
+    from tools.reviewed_drafts import working_root
+    import api.email_drafts as route
+
+    monkeypatch.setattr("events.delivery.deliver_to_thread", AsyncMock(return_value=True))
+    root = working_root(mail.thread)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "one.txt").write_text("one")
+    saved = await _draft(mail, attachments=["one.txt"])
+    artifact, owner = _artifact(saved), _owner(mail.thread)
+    item = (await draft_context(artifact, owner))["attachments"][0]
+    before = _row(saved["draft_id"])["target_json"]
+    entered, release, real = asyncio.Event(), asyncio.Event(), route.send_approved
+
+    async def held(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(route, "send_approved", held)
+    send = asyncio.create_task(send_now(artifact, _shown(saved, (mail.workspace / saved["path"]).read_text()), owner))
+    await entered.wait()
+    removing = asyncio.create_task(remove_attachment(artifact, 0, RemoveAttachment(path=item["path"]), owner))
+    await asyncio.sleep(0.05)
+    assert not removing.done()
+    release.set()
+    assert await send == {"state": "sent"}
+    with pytest.raises(HTTPException) as error:
+        await removing
+    assert error.value.status_code == 409 and error.value.detail == {"state": "sent"}
+    assert _row(saved["draft_id"])["target_json"] == before
+    assert [part.get_filename() for part in _mime(mail.sends[0]).iter_attachments()] == ["one.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("save_first", [True, False])
+async def test_remove_and_agent_save_serialize_with_documented_list(mail, save_first):
+    from api.email_drafts import RemoveAttachment, draft_context, remove_attachment
+    from tools.google_email import EmailDraftTool
+    from tools.reviewed_drafts import draft_lock, working_root
+
+    root = working_root(mail.thread)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "one.txt").write_text("one")
+    saved = await _draft(mail, attachments=["one.txt"])
+    artifact, owner = _artifact(saved), _owner(mail.thread)
+    item = (await draft_context(artifact, owner))["attachments"][0]
+
+    async def agent_save():
+        return await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account,
+            draft_id=saved["draft_id"], to=["sam@example.com"], subject="Lunch", body="Noon works?",
+            attachments=["one.txt"])
+
+    if save_first:
+        lock = draft_lock(saved["draft_id"])
+        await lock.acquire()
+        saving = asyncio.create_task(agent_save())
+        await asyncio.sleep(0.05)
+        removing = asyncio.create_task(remove_attachment(artifact, 0, RemoveAttachment(path=item["path"]), owner))
+        await asyncio.sleep(0.05)
+        assert not saving.done() and not removing.done()
+        lock.release()
+        assert not (await saving).startswith("Error")
+        assert (await removing)["attachments"] == []
+        assert (await draft_context(artifact, owner))["attachments"] == []
+    else:
+        # Both wait on the same lock, removal first. A save already in progress can restore the file.
+        lock = draft_lock(saved["draft_id"])
+        await lock.acquire()
+        removing = asyncio.create_task(remove_attachment(artifact, 0, RemoveAttachment(path=item["path"]), owner))
+        await asyncio.sleep(0.05)
+        saving = asyncio.create_task(agent_save())
+        await asyncio.sleep(0.05)
+        assert not removing.done() and not saving.done()
+        lock.release()
+        assert (await removing)["attachments"] == []
+        assert not (await saving).startswith("Error")
+        assert [entry["name"] for entry in (await draft_context(artifact, owner))["attachments"]] == ["one.txt"]
+
+
+@pytest.mark.asyncio
 async def test_another_person_cannot_send(mail):
     saved = await _draft(mail)
     with pytest.raises(HTTPException) as caught:
