@@ -121,7 +121,7 @@
 			{/each}
 		{/if}
 	</div>
-	{#if jumpTarget}<div class="jump"><DocJumpControl count={jumpTarget.count} direction={jumpTarget.direction} label={`Go to ${jumpTarget.count} new repl${jumpTarget.count === 1 ? 'y' : 'ies'} ${jumpTarget.direction}`} onJump={() => jumpTarget?.element.scrollIntoView({ block: 'center', behavior: 'smooth' })} /></div>{/if}
+	{#if jumpTarget}<div class="jump"><DocJumpControl count={jumpTarget.count} direction={jumpTarget.direction} label={`${jumpTarget.count} new, next ${jumpTarget.direction}`} onJump={() => jumpTarget?.element.scrollIntoView({ block: 'center', behavior: 'smooth' })} /></div>{/if}
 </div>
 
 <style>

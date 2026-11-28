@@ -45,7 +45,32 @@ it.each([1, 3])('names the jump control for %i unread replies', async (count) =>
 	}] }), { status: 200 })));
 	component = mount(ActivityChatPane, { target: host, props: { item: row, detail: row.detail as ActivityChatDetail, onDone: vi.fn(), onOpenChat: vi.fn(), onClose: vi.fn() } });
 	await vi.waitFor(() => expect(host.querySelector('[data-doc-jump] button')?.getAttribute('aria-label'))
-		.toBe(`Go to ${count} new ${count === 1 ? 'reply' : 'replies'} below`));
+		.toBe(`${count} new, next below`));
+});
+
+it.each([
+	['above and below', (id: string) => id.endsWith(':a0'), '3 new, next below'],
+	['only above', () => true, '3 new, next above'],
+])('names the total and the next direction when unread replies lie %s', async (_layout, isAbove, expected) => {
+	// The name carries the count the button shows (every unseen reply) and says only which way the next one is, as the document pane's does.
+	const answers = [0, 1, 2].map(i => ({
+		author_kind: 'agent', text: `Answer ${i}`, created_at: '2026-11-25T12:00:00Z', unread: true,
+		user_message_id: 'u', cid: 'c1', assistant_message_id: `a${i}`,
+	}));
+	const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+	vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+		if (this.classList.contains('scroll')) return rect(100, 200);
+		const id = (this as HTMLElement).dataset?.unreadAnswerText;
+		return id && isAbove(id) ? rect(0, 50) : rect(300, 350);
+	});
+	vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ messages: [{
+		id: 'm', seq: 1, content: 'text', created_at: '2026-11-24T12:00:00Z',
+		chat_comments: [{ id: 'one', cid: 'c1', user_message_id: 'u', from_off: 0, to_off: 0,
+			quote: '', note: 'Why?', created_at: '2026-11-24T12:01:00Z', answers }],
+	}] }), { status: 200 })));
+	component = mount(ActivityChatPane, { target: host, props: { item: row, detail: row.detail as ActivityChatDetail, onDone: vi.fn(), onOpenChat: vi.fn(), onClose: vi.fn() } });
+	await vi.waitFor(() => expect(host.querySelector('[data-doc-jump] button')?.getAttribute('aria-label')).toBe(expected));
+	vi.restoreAllMocks();
 });
 
 it('renders threads with the same comment id from different messages', async () => {
