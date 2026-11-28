@@ -688,36 +688,55 @@ Two compensating patterns:
    layout viewport can be shorter, so the shell sizes to `100dvh` under
    `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
    iOS 27 draws its own soft blur over the top of the page, down to about
-   `safe-top + 34px` in the installed app; anything placed there reads
-   blurred. Keep a text row centred at `safe-top + 36px` or lower (the
-   phone header row sits exactly there). The 36px is one token,
-   `--top-row-clearance`, and the centre is another, `--top-row-centre`
-   (`app-tokens.css`): `safe-top + 36px` on a phone with a top inset, `0`
-   anywhere else (a browser tab, a wider window, desktop). Every surface
-   whose first row meets the top of the screen places it from that token,
-   never a clearance number of its own: `max(<its own top>,
+   `safe-top + 34px` in the installed app; a row centred above that reads
+   soft. A first row is centred `--top-row-clearance` (36px) below the top
+   inset, and the centre is another token, `--top-row-centre`
+   (`app-tokens.css`): `safe-top + --top-row-clearance` on a phone with a top
+   inset, `0` anywhere else (a browser tab, a wider window, desktop). Every
+   surface whose first row meets the top of the screen places it from that
+   token, never a clearance number of its own: `max(<its own top>,
    <top-row-centre less its row's offset>)`, so where the centre is 0 it
-   keeps its own top. Users: the header (its padding and both fade stops),
-   the pane top, the sidebar's first row, the full-screen command palette,
-   the phone modal, the lightbox close button and the version badge (just
-   below the header under an inset).
+   keeps its own top. Users: the pane top, the sidebar's first row, the
+   full-screen command palette, the phone modal and the lightbox close
+   button. The header sets its own centre once, `--h-row-centre`:
+   `max(var(--top-row-clearance), var(--top-row-centre))`, so in a tab the
+   row centres at the clearance itself. The version badge sits above that
+   row, its top 26px above the row centre (clear of the clock, the title
+   and the icons, in the app and in a tab), and hides while the phone nav
+   covers the page.
 2. **One frosted surface on the phone header** (`Header.svelte` at
-   `max-width: 768px`), from the top of the screen to the header bottom,
-   fading out at the bottom over two stacked blur layers:
+   `max-width: 768px`). The bar is `--header-height` (64px, `app.css`) plus
+   `--safe-top`; `padding-top: calc(2 * var(--h-row-centre) -
+   var(--header-bottom))` centres the 18px row on `--h-row-centre`. The frost
+   runs from the top of the screen, fully frosted down to the row centre,
+   then fades out over `--h-fade` (76px) *below* the bar, so text scrolling
+   under it fades into the frost instead of ending at a line. Two stacked
+   layers, both inset to end `--h-fade` below the row centre:
    ```css
-   /* .shell-header: --h-row-centre: max(var(--top-row-clearance), var(--top-row-centre)), set once;
-      padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom)) centres the row on it */
-   /* ::before: full --glass-blur and the 72% tint, fading from the row centre */
+   /* .shell-header */
+   --h-row-centre: max(var(--top-row-clearance), var(--top-row-centre)); --h-fade: 76px;
+   padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom));
+   /* ::before: full --glass-blur; tint (--header-top-base) and mask fade through eased stops */
+   inset: 0 0 calc(var(--header-bottom) - var(--h-row-centre) - var(--h-fade)) 0;
    background-image: linear-gradient(180deg,
-     color-mix(in srgb, var(--header-top-base) 72%, transparent) var(--h-row-centre),
-     transparent 100%);
-   mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));
-   /* ::after: --glass-blur-soft, smoothing that fade to the bottom edge */
-   mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
+     color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--h-row-centre) + 6px),
+     color-mix(in srgb, var(--header-top-base) 56%, transparent) calc(var(--h-row-centre) + 22px),
+     color-mix(in srgb, var(--header-top-base) 32%, transparent) calc(var(--h-row-centre) + 40px),
+     color-mix(in srgb, var(--header-top-base) 12%, transparent) calc(var(--h-row-centre) + 58px),
+     transparent calc(var(--h-row-centre) + var(--h-fade)));
+   mask-image: linear-gradient(180deg, currentColor calc(var(--h-row-centre) + 6px),
+     color-mix(in srgb, currentColor 88%, transparent) calc(var(--h-row-centre) + 20px),
+     color-mix(in srgb, currentColor 62%, transparent) calc(var(--h-row-centre) + 34px),
+     color-mix(in srgb, currentColor 34%, transparent) calc(var(--h-row-centre) + 48px),
+     color-mix(in srgb, currentColor 12%, transparent) calc(var(--h-row-centre) + 62px),
+     transparent calc(var(--h-row-centre) + var(--h-fade)));
+   /* ::after: --glass-blur-soft, smoothing the hand-over; same inset, no tint */
+   mask-image: linear-gradient(180deg, currentColor calc(var(--h-row-centre) + 20px),
+     transparent calc(var(--h-row-centre) + var(--h-fade)));
    ```
-   Never one masked layer: WebKit masks the blurred backdrop too, so a
-   single fading layer shows sharp content through the fade and ends in a
-   hard line. A flat unmasked tint reads as a slab with a hard bottom edge.
+   One masked blur layer shows sharp content through its fade, so the
+   second, lighter blur under it carries the fade to nothing. A flat
+   unmasked tint reads as a slab with a hard bottom edge.
    Under `prefers-reduced-transparency` the bar is solid
    `--header-top-base`. Replaces the inset rim on mobile (which read as a
    hairline seam between iOS status bar and our chrome).
