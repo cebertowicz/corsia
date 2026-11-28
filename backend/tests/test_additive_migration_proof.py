@@ -57,7 +57,27 @@ _PINNED_BODIES = {
             if table in tables:
                 conn.execute(sql.strip().rstrip(";"))
     ''',
+    211: '''
+    def step(conn):
+        conn.execute(ACTIVITY_DRAFT_ACK_SCHEMA_SQL)
+    ''',
 }
+#: The first from-version the additive mechanism can reach: the runner skips the
+#: whole-database check only when *every* step in a migration's range is
+#: additive, and 208 is the lowest step ever listed. Steps below it take the full
+#: check whatever their author wrote. The whole ladder is squashed into one clean
+#: schema before release, so this floor moves with the squash -- when leading
+#: steps leave MIGRATIONS, raise it to the lowest one that survives.
+_CLASSIFICATION_FLOOR = 208
+
+#: Steps at or above the floor whose author chose the whole-database
+#: foreign-key validation path. Every registered step at or above the floor
+#: belongs in exactly one of the two sets: ``ADDITIVE_STEPS`` when this file can
+#: prove it writes nothing existing, here when it cannot. Nothing reads this set
+#: at runtime -- the runner still reads only ``ADDITIVE_STEPS`` -- so an
+#: unclassified step is caught by the guard test below rather than by behaviour.
+FULL_CHECK_STEPS: frozenset[int] = frozenset()
+
 _NAMED_READ_PRAGMAS = {"table_info", "table_xinfo", "index_list", "index_info", "index_xinfo", "foreign_key_list"}
 _READ_PRAGMAS = _NAMED_READ_PRAGMAS | {"database_list", "table_list", "compile_options", "data_version", "page_count", "page_size", "freelist_count", "schema_version", "user_version"}
 _ALLOWED = {
@@ -83,6 +103,32 @@ def _allowed(action, first, second, _database, _source):
 def test_every_additive_step_has_a_registered_migration_and_proof():
     assert ADDITIVE_STEPS <= MIGRATIONS.keys()
     assert ADDITIVE_STEPS == _FIXTURES.keys() | _PINNED_BODIES.keys()
+
+
+def test_every_step_at_or_above_the_floor_is_classified():
+    """A new step's author has to say which validation path it takes.
+
+    ``ADDITIVE_STEPS`` is opt-in, so a step nobody classified silently costs
+    every install a whole-database ``foreign_key_check`` plus a backup read on
+    the update that crosses it -- 298 s holding the write lock on a large dev
+    database for step 211 (#3489, after the same thing at 209 on Nov 26).
+    """
+    unclassified = sorted(
+        version
+        for version in MIGRATIONS
+        if version >= _CLASSIFICATION_FLOOR
+        and version not in ADDITIVE_STEPS
+        and version not in FULL_CHECK_STEPS
+    )
+    assert not unclassified, (
+        f"step(s) {unclassified} are in neither ADDITIVE_STEPS nor "
+        "FULL_CHECK_STEPS: a new step belongs in exactly one of them, and one "
+        "declared additive needs its proof in this file"
+    )
+
+
+def test_the_two_step_classifications_do_not_overlap():
+    assert not ADDITIVE_STEPS & FULL_CHECK_STEPS
 
 
 def _assert_literal_execute_only(function):
@@ -157,9 +203,10 @@ def _body_ast(source):
 
 def test_metadata_guarded_steps_have_only_the_reviewed_operations():
     # An authorizer sees only the executed branch and cannot inspect ADD COLUMN's
-    # definition. Pin the whole executable body and both referenced SQL constants.
+    # definition. Pin the whole executable body and the SQL constants it names.
     for version, expected in _PINNED_BODIES.items():
         assert _body_ast(inspect.getsource(MIGRATIONS[version])) == _body_ast(expected)
+    from infra.activity_draft_ack_schema import ACTIVITY_DRAFT_ACK_SCHEMA_SQL
     from infra.migration_210_to_211_queue_read_indexes import (
         ATTENTION_STATE_INDEX_SQL, USER_OPEN_TASK_INDEX_SQL,
     )
@@ -173,6 +220,12 @@ def test_metadata_guarded_steps_have_only_the_reviewed_operations():
         "ON artifact_identities(json_extract(metadata, '$.attention_state')) "
         "WHERE state='active' AND json_valid(metadata);"
     )
+    assert ' '.join(ACTIVITY_DRAFT_ACK_SCHEMA_SQL.split()) == (
+        "CREATE TABLE IF NOT EXISTS activity_draft_acknowledgements ( "
+        "user_id TEXT NOT NULL, "
+        "draft_id TEXT NOT NULL REFERENCES action_drafts(id) ON DELETE CASCADE, "
+        "PRIMARY KEY (user_id, draft_id) );"
+    )
 
 
 def test_metadata_guarded_steps_only_issue_safe_actions():
@@ -181,6 +234,7 @@ def test_metadata_guarded_steps_only_issue_safe_actions():
             CREATE TABLE plans (id TEXT);
             CREATE TABLE plan_nodes (plan_id TEXT, assignee TEXT, kind TEXT, state TEXT, archived_at TEXT);
             CREATE TABLE artifact_identities (metadata TEXT, state TEXT);
+            CREATE TABLE action_drafts (id TEXT PRIMARY KEY);
         """)
         for version in _PINNED_BODIES:
             events = []

@@ -315,8 +315,13 @@ def test_209_to_211_preserves_old_orphan_without_whole_scan(tmp_path, ladder):
 
 @pytest.mark.parametrize("breaks_fk", [False, True])
 def test_mixed_additive_and_nonadditive_steps_take_full_path(tmp_path, ladder, breaks_fk):
+    from infra.migration_211_to_212_activity_draft_ack import migrate_211_to_212
+
     _register_209_and_210(ladder)
-    ladder[211] = lambda conn: conn.execute(
+    # 211 is declared additive, so the data-changing step in this range is 212:
+    # a range that mixes the two kinds still takes the whole-database path.
+    ladder[211] = migrate_211_to_212
+    ladder[212] = lambda conn: conn.execute(
         "DELETE FROM parent WHERE id=1" if breaks_fk else "INSERT INTO parent VALUES (2, 'new')"
     )
     path = _database(tmp_path, 209)
@@ -325,10 +330,10 @@ def test_mixed_additive_and_nonadditive_steps_take_full_path(tmp_path, ladder, b
     with closing(sqlite3.connect(path, factory=CountingConnection)) as conn:
         if breaks_fk:
             with pytest.raises(MigrationError, match="foreign_key_check failed"):
-                migrate_to_current(conn, 212)
+                migrate_to_current(conn, 213)
             assert conn.execute("PRAGMA user_version").fetchone()[0] == 209
         else:
-            assert migrate_to_current(conn, 212).migrated
+            assert migrate_to_current(conn, 213).migrated
         assert conn.whole_fk_checks == 1
 
 

@@ -25,6 +25,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Activity shows email drafts waiting for you in Your tasks, where you can open and send them.
 - Activity shows instructions for tasks assigned to you.
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
+- An update whose database steps only add tables or indexes no longer checks every table for broken links and re-reads its safety copy afterwards; on one large database that held the update for 298 seconds.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
 - Commenting on an image or text taller than the window no longer makes the screen jump: opening its comment moves the document once, and scrolling or typing afterward leaves it where you put it. Comment stays in the window beside a tall selection, including after you scroll.
