@@ -96,7 +96,10 @@ def append_input(
         # A wake is not invented for a thread that cannot run it: the plan
         # keeps the work pending and offers it again once a model exists.
         return None
-    materialize_pending_digest(db, recipient)
+    from infra.db_hold_spans import span
+
+    with span("digest"):
+        materialize_pending_digest(db, recipient)
     from prompts import plan_wakes as wakes
 
     # A plan input is a context event, in the one shape every event wake has

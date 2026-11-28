@@ -10,7 +10,7 @@ from typing import Callable, Iterator
 
 import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
-from infra import write_effects, write_lock_window
+from infra import db_hold_spans, write_effects, write_lock_window
 from infra.db_loop_guard import guard_write_off_event_loop
 from infra.db_hold_callers import hold_callers
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
@@ -38,13 +38,15 @@ CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 # that settles it (24 h of production with zero in-process lock refusals), and no later than
 # 2026-12-14.
 # (2) Slow write holds stall every other writer on the file. The slow-hold warning names the
-# holding callers (hold_callers) so each slow writer can be fixed: delete it once production
-# logs show no hold over WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than
-# 2026-12-14. Keeping either past its date needs a reviewed change that says why and sets a new one.
+# holding callers (hold_callers) and inclusive digest/status timings (db_hold_spans); status can
+# be nested in digest. Delete them together once production logs show no hold over
+# WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than 2026-12-14.
+# Keeping either diagnostic past its date needs a reviewed change that says why and sets a new one.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
 
 
-def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None) -> None:
+def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None,
+                       spans: dict[str, tuple[int, float]]) -> None:
     if started_at is None:  # BEGIN never succeeded, so nothing was held
         return
     held_for = time.monotonic() - started_at
@@ -52,8 +54,8 @@ def _finish_write_hold(scope: str, started_at: float | None, admission: write_ad
         write_lock_window.window.hold(scope, held_for, held_for < WRITE_TRANSACTION_SLOW_SECONDS)
     if held_for >= WRITE_TRANSACTION_SLOW_SECONDS:
         log.warning(
-            "SQLite write transaction held: scope=%s held=%.3fs callers=%s",
-            scope, held_for, hold_callers(),
+            "SQLite write transaction held: scope=%s held=%.3fs spans=%s callers=%s",
+            scope, held_for, db_hold_spans.format_spans(spans), hold_callers(),
         )
 
 
@@ -184,26 +186,22 @@ def write_transaction(
     db: sqlite3.Connection | None, *, scope: str,
 ) -> Iterator[sqlite3.Connection]:
     """Run one write transaction whose ownership is declared, not guessed.
-
     ``get_db()`` hands every caller on a thread the *same* connection, so "is a
-    transaction open?" cannot answer "is it mine?".  Ownership is therefore
+    transaction open?" cannot answer "is it mine?". Ownership is therefore
     declared by the ``db`` argument and enforced here:
-
     * ``db=None`` claims the outermost boundary: this frame owns the connection
       and the transaction, so it requires a clean connection and is the only
       frame that may ``BEGIN``, ``commit``, ``rollback``, or ``close``.  A
-      pooled connection that is already in a transaction has an owner this
-      frame cannot see; nesting under it and then closing would silently
-      discard that owner's work, so it raises instead.
+      pooled connection already in a transaction has an owner this frame cannot see;
+      nesting under it and then closing would silently discard that owner's work.
     * ``db=<connection>`` names the owner explicitly.  If that connection is
       already in a transaction, an enclosing frame on this call stack owns it:
       this frame nests with a ``SAVEPOINT`` and never commits, never rolls the
       outer transaction back, and never closes.  Because the owner is a caller
       that cannot commit while we are inside it, the savepoint is valid by
       construction rather than by convention.
-    * ``db=<clean connection>`` delegates the transaction but not the
-      connection: this frame begins and commits, and leaves the connection open
-      for its owner.
+    * ``db=<clean connection>`` delegates the transaction but not the connection:
+      this frame begins and commits, leaving the connection open for its owner.
     ``scope`` names the savepoint so a failure identifies the frame that opened
     it.  It is interpolated into SQL, so it must be a bare identifier; callers
     pass a literal, and this keeps that provable at the one place it is used.
@@ -229,15 +227,21 @@ def write_transaction(
         started_at: float | None = None
         admission: write_admission.Admission | None = None
         committed: list[write_effects.Effect] = []
+        spans: dict[str, tuple[int, float]] | None = None
+        spans_active = False
         try:
             guard_write_off_event_loop(scope)
             admission = write_admission.admit(connection, scope)
             connection.execute("BEGIN IMMEDIATE")
+            spans = db_hold_spans.begin()
+            spans_active = True
             write_effects.begin(connection)
             started_at = time.monotonic()
             with startup_progress.database_writes(connection):
                 yield connection
                 connection.commit()
+                db_hold_spans.end()
+                spans_active = False
             committed = write_effects.take(connection)
         except BaseException:
             write_effects.abort(connection)
@@ -245,7 +249,9 @@ def write_transaction(
                 connection.rollback()
             raise
         finally:
-            _finish_write_hold(scope, started_at, admission)
+            if spans_active:
+                db_hold_spans.end()
+            _finish_write_hold(scope, started_at, admission, spans or {})
             write_admission.release(admission)  # before effects, which may write
             if owns_connection:
                 connection.close()

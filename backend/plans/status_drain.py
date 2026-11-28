@@ -153,14 +153,16 @@ def _drain_committed(db, plan_id: str) -> None:
 
 def _drain_in_place(db, plan_ids: Iterable[str]) -> None:
     """Journal each plan's status inside the transaction ``db`` holds, one savepoint each."""
+    from infra.db_hold_spans import span
     from plans import status_context
 
-    for plan_id in plan_ids:
-        try:
-            with write_transaction(db, scope="plan_status_drain") as connection:
-                row = connection.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
-                if row is not None:
-                    status_context.journal_status(connection, row)
-                connection.execute("DELETE FROM plan_status_dirty WHERE plan_id=?", (plan_id,))
-        except Exception:
-            log.exception("plan status drain failed for plan %s; its marker stays", plan_id)
+    with span("status"):
+        for plan_id in plan_ids:
+            try:
+                with write_transaction(db, scope="plan_status_drain") as connection:
+                    row = connection.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+                    if row is not None:
+                        status_context.journal_status(connection, row)
+                    connection.execute("DELETE FROM plan_status_dirty WHERE plan_id=?", (plan_id,))
+            except Exception:
+                log.exception("plan status drain failed for plan %s; its marker stays", plan_id)
