@@ -370,12 +370,18 @@ class MigrationResult:
 #: build never inherits the ladder.
 MIGRATIONS: dict[int, MigrationStep] = {}
 
-ADDITIVE_STEPS: frozenset[int] = frozenset({208, 209, 210})
+ADDITIVE_STEPS: frozenset[int] = frozenset({208, 209, 210, 211})
 """From-versions proven to only create tables or indexes, or add nullable columns
 without references, and never branch on data.
 
+A table a step creates may declare a foreign key into an existing one: it is
+created empty, and the additive path checks foreign keys for newly created
+tables only, so it cannot add a violation.
+
 The additive-step authorizer proof checks each marked step. An unmarked step
-always takes the full foreign-key validation path.
+always takes the full foreign-key validation path. Every step from 208 up is in
+this set or in ``FULL_CHECK_STEPS`` (``tests/test_additive_migration_proof.py``),
+which the guard test there enforces, so a new step's author has to choose.
 """
 
 
