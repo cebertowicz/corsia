@@ -10,7 +10,7 @@ from typing import Callable, Iterator
 
 import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
-from infra import write_effects, write_lock_window
+from infra import db_hold_spans, write_effects, write_lock_window
 from infra.db_loop_guard import guard_write_off_event_loop
 from infra.db_hold_callers import hold_callers
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
@@ -38,13 +38,15 @@ CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 # that settles it (24 h of production with zero in-process lock refusals), and no later than
 # 2026-12-14.
 # (2) Slow write holds stall every other writer on the file. The slow-hold warning names the
-# holding callers (hold_callers) so each slow writer can be fixed: delete it once production
-# logs show no hold over WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than
-# 2026-12-14. Keeping either past its date needs a reviewed change that says why and sets a new one.
+# holding callers (hold_callers) and inclusive digest/status timings (db_hold_spans); status can
+# be nested in digest. Delete them together once production logs show no hold over
+# WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than 2026-12-14.
+# Keeping either diagnostic past its date needs a reviewed change that says why and sets a new one.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
 
 
-def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None) -> None:
+def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None,
+                       spans: dict[str, tuple[int, float]]) -> None:
     if started_at is None:  # BEGIN never succeeded, so nothing was held
         return
     held_for = time.monotonic() - started_at
@@ -52,8 +54,8 @@ def _finish_write_hold(scope: str, started_at: float | None, admission: write_ad
         write_lock_window.window.hold(scope, held_for, held_for < WRITE_TRANSACTION_SLOW_SECONDS)
     if held_for >= WRITE_TRANSACTION_SLOW_SECONDS:
         log.warning(
-            "SQLite write transaction held: scope=%s held=%.3fs callers=%s",
-            scope, held_for, hold_callers(),
+            "SQLite write transaction held: scope=%s held=%.3fs spans=%s callers=%s",
+            scope, held_for, db_hold_spans.format_spans(spans), hold_callers(),
         )
 
 
@@ -229,10 +231,12 @@ def write_transaction(
         started_at: float | None = None
         admission: write_admission.Admission | None = None
         committed: list[write_effects.Effect] = []
+        spans: dict[str, tuple[int, float]] | None = None
         try:
             guard_write_off_event_loop(scope)
             admission = write_admission.admit(connection, scope)
             connection.execute("BEGIN IMMEDIATE")
+            spans = db_hold_spans.begin()
             write_effects.begin(connection)
             started_at = time.monotonic()
             with startup_progress.database_writes(connection):
@@ -245,7 +249,9 @@ def write_transaction(
                 connection.rollback()
             raise
         finally:
-            _finish_write_hold(scope, started_at, admission)
+            if spans is not None:
+                db_hold_spans.end()
+            _finish_write_hold(scope, started_at, admission, spans or {})
             write_admission.release(admission)  # before effects, which may write
             if owns_connection:
                 connection.close()
