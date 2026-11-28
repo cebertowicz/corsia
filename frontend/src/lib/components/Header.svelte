@@ -45,6 +45,8 @@
 
 	let overflowOpen = $state(false);
 	let headerEl = $state<HTMLElement>();
+	/** The right controls' own width: their size is what the canvas has to stop short of, and it changes when a control arrives with the scope. */
+	let rightControlsWidth = $state(0);
 	const overflowActions = $derived((h?.actions ?? []).filter((a) => !a.primary && !a.wideOnly));
 	// PL-2: an agent thread opens its own scope, a conductor thread its project.
 	const isLaneThread = $derived($activeThread != null && isNavAgent($activeThread));
@@ -156,7 +158,7 @@
 			<span class="h-title">{@render titleInner()}</span>
 		</div>
 
-		<div use:inlineReach={{ shell: headerEl, report: onRightControlsWidth }} class="h-zone h-right" data-document-bar-tools>
+		<div use:inlineReach={{ shell: headerEl, controlsWidth: rightControlsWidth, report: onRightControlsWidth }} bind:offsetWidth={rightControlsWidth} class="h-zone h-right" data-document-bar-tools>
 			{#if isTakeover && h?.actions?.length}
 				{#each h.actions as a (a.id)}
 					<button class="h-act" class:active={a.active} class:overflowable={!a.primary} class:wide-only={a.wideOnly} disabled={a.disabled} onclick={() => run(a.onClick)} title={a.title ?? a.label}>{a.label}</button>
