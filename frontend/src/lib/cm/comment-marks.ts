@@ -112,7 +112,16 @@ const STEADY_CHECKS = 2;
 export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 
 const QUOTE_MARGIN = 8;
+const READER_INPUTS = ['wheel', 'touchstart', 'keydown'] as const;
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
+// scrollTop rounds to a device pixel, so a tall target lands within half of one of its place. Measured on tall table rows at 320, 393
+// and 1440 wide, device pixel ratio 1: at most 0.47 px (0.19, 0.47, 0.36). 1 px covers that at every ratio.
+const TALL_SLACK = 1;
+// A target taller than the band can never be inside it, so it is placed once its top sits at the band's top (under the quote margin
+// when it is placed with one). Asking more of it would send every check after a jump that lands it no nearer.
+const placed = (box: Box | null, band: Box, margin: number) => !!box && (box.bottom - box.top > band.bottom - band.top
+	? box.top >= band.top - TALL_SLACK && box.top <= band.top + margin + TALL_SLACK
+	: within(box, band));
 
 // Where a target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
 const boxAt = (current: EditorView, target: number, widget: ReturnType<typeof widgetTarget>): Box | null => widget ? widget.box(current) : current.coordsAtPos(Math.min(target, current.state.doc.length));
@@ -175,9 +184,9 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const requestedMargin = Number.parseFloat(getComputedStyle(view.dom).getPropertyValue('--comment-jump-margin'));
 	const quoteMargin = Number.isFinite(requestedMargin) && requestedMargin >= 0 ? requestedMargin : QUOTE_MARGIN;
 	const boxOf = (current: EditorView) => boxAt(current, target, widget);
-	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	if (origin === 'comment-save' && placed(boxOf(view), visibleRegion(view).band, quoteMargin)) return;
 	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
-	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && within(boxOf(view), visibleRegion(view).band)) return;
+	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && placed(boxOf(view), visibleRegion(view).band, quoteMargin)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
 	// whole replaced block, which centres on the block's middle. Anything else, and a widget not drawn yet, goes to CodeMirror.
 	const jump = () => {
@@ -188,7 +197,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				write: ({ box, band, scroller }, current) => {
 					if (done) return;
 					widget.reveal(current);
-					if (box) scroller.scrollTop += box.top - (quote ? band.top + quoteMargin : (band.top + band.bottom - (box.bottom - box.top)) / 2);
+					// Centred in the band, but never above its top: a row taller than the band starts at the top and runs on below.
+					if (box) scroller.scrollTop += box.top - (quote ? band.top + quoteMargin : Math.max(band.top, (band.top + band.bottom - (box.bottom - box.top)) / 2));
 				},
 			});
 			// The reader's place is taken again from where this lands.
@@ -219,23 +229,39 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	// a reader scroll ends the watch, so nothing here pulls the reader back. Its first callback only reports the size the
 	// box already has, which is not a move.
 	let seenSize = false;
+	// A late image can change which element is the scroller, so each listener comes off the element it went on.
+	const listening: Array<[HTMLElement, string]> = [];
+	const listen = (type: string) => {
+		const scroller = visibleRegion(view).scroller;
+		scroller.addEventListener(type, onMove, { passive: true });
+		listening.push([scroller, type]);
+	};
 	const stop = () => {
 		done = true;
 		watch?.disconnect();
-		visibleRegion(view).scroller.removeEventListener('scroll', onMove);
+		for (const [scroller, type] of listening.splice(0)) scroller.removeEventListener(type, onMove);
 		if (placedIn.get(view) === stop) placedIn.delete(view);
 	};
 	const onMove = () => stop();
+	let seenWidth = visibleRegion(view).scroller.getBoundingClientRect().width;
 	const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
 		if (!seenSize) { seenSize = true; return; }
 		if (done) return;
 		// A sheet the reader pulled up is their own move, as a scroll is: the keyboard that follows it moves nothing.
 		if (sheetRaised(overlaySheet(view))) { stop(); return; }
+		// Only a change of width rewraps the lines above the landing and moves it. A pane that only grows or shrinks in height (the
+		// keyboard, a composer growing, a sheet resizing) leaves the landing where it is, and placing it again is a move the reader
+		// did not ask for.
+		const width = visibleRegion(view).scroller.getBoundingClientRect().width;
+		if (width === seenWidth) return;
+		seenWidth = width;
 		steady = 0;
 		check(settledPass);
 	}) : null;
 	placedIn.get(view)?.();
 	placedIn.set(view, stop);
+	// The reader's own wheel, touch or key ends the placement at once, not only after it has settled.
+	for (const input of READER_INPUTS) listen(input);
 	// CodeMirror refuses a dispatch during its measure cycle, so a repeat jump
 	// waits for the next frame.
 	// A retired jump may still have a frame or a measure queued: each one checks `done` first, so it never moves the reader.
@@ -245,7 +271,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 		view.requestMeasure({
 			key: scrollToRange,
 			read(current) {
-				return within(boxOf(current), visibleRegion(current).band);
+				return placed(boxOf(current), visibleRegion(current).band, quoteMargin);
 			},
 			write(onScreen) {
 				if (done) return;
@@ -255,7 +281,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 					steady += 1;
 					if (steady < STEADY_CHECKS) { check(pass); return; }
 					// Settled. From here a scroll is the reader's own, and their place is theirs to keep.
-					visibleRegion(view).scroller.addEventListener('scroll', onMove, { passive: true });
+					listen('scroll');
 					return;
 				}
 				steady = 0;
