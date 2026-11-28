@@ -13,6 +13,7 @@ import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
 import { syncCanvasHeader } from '$lib/homeCanvasHeader';
 import Header from './Header.svelte';
 import headerSource from './Header.svelte?raw';
+import appHtml from '../../app.html?raw';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -345,22 +346,43 @@ describe('Header glass layers', () => {
 		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
 	});
 
-	it('draws the phone header as an even frosted bar with no fade', () => {
-		// WebKit masks the blurred backdrop too: a fading mask shows the unblurred transcript
-		// through the lower header and ends in a hard line, so the phone layer has no mask and
-		// one flat tint over the whole box.
-		const phoneLayer = rule(phone, '.shell-header::before');
-		expect(phoneLayer).toContain('-webkit-mask-image: none;');
-		expect(phoneLayer).toMatch(/\n\t\t\tmask-image: none;/);
-		expect(phoneLayer).toContain('background-image: none;');
-		expect(phoneLayer).toContain('background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);');
-		expect(phoneLayer).not.toMatch(/gradient/);
+	it('lets the installed iOS app draw the page under a translucent status bar', () => {
+		// With `default` iOS draws an opaque bar above the page: white in light mode, the page's own dark colour in dark mode.
+		expect(appHtml).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />');
 	});
 
-	it('sizes the phone header and positions the row using the safe-area inset', () => {
+	it('fades the phone header out over two stacked blur layers that run below the bar', () => {
+		// WebKit masks the blurred backdrop too, so one masked layer shows the sharp transcript
+		// where it fades. Both layers end --h-fade (76px) below the row centre, past the bar, so
+		// text scrolling under the bar fades into the frost with no edge. The full blur and tint
+		// step down through eased stops; a light blur on top runs to the same end.
+		expect(rule(phone, '.shell-header')).toContain('--h-fade: 76px;');
+		const full = rule(phone, '.shell-header::before');
+		const reach = 'inset: 0 0 calc(var(--header-bottom) - var(--h-row-centre) - var(--h-fade)) 0;';
+		expect(full).toContain(reach);
+		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--h-row-centre) + 6px)');
+		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 12%, transparent) calc(var(--h-row-centre) + 58px)');
+		expect(full).toContain('transparent calc(var(--h-row-centre) + var(--h-fade))');
+		expect(full).toContain('-webkit-mask-image: var(--h-mask); mask-image: var(--h-mask);');
+		expect(full).toContain('--h-mask: linear-gradient(');
+		expect(full).toContain('color-mix(in srgb, currentColor 62%, transparent) calc(var(--h-row-centre) + 34px)');
+		const soft = rule(phone, '.shell-header::after');
+		expect(soft).toContain(reach);
+		expect(soft).toContain('backdrop-filter: var(--glass-blur-soft);');
+		expect(soft).toContain('-webkit-backdrop-filter: var(--glass-blur-soft);');
+		expect(soft).toContain('--h-mask: linear-gradient(180deg, currentColor calc(var(--h-row-centre) + 20px), transparent calc(var(--h-row-centre) + var(--h-fade)));');
+		expect(soft).toContain('-webkit-mask-image: var(--h-mask); mask-image: var(--h-mask);');
+		expect(soft).toContain('pointer-events: none;');
+	});
+
+	it('sizes the phone header and centres the row at the shared top-row centre', () => {
+		// The iOS 27 system blur covers the top of the page to about safe-top + 34px; an 18px row
+		// centred at --top-row-centre (safe-top + 36px under an inset) is sharp. In a tab the
+		// centre stays 36px. The padding and both fade stops come from the one centre.
 		const phoneHeader = rule(phone, '.shell-header');
 		expect(phoneHeader).toContain('height: var(--header-bottom);');
-		expect(phoneHeader).toContain('padding-top: max(8px, calc(var(--safe-top) - 28px));');
+		expect(phoneHeader).toContain('--h-row-centre: max(var(--top-row-clearance), var(--top-row-centre));');
+		expect(phoneHeader).toContain('padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom));');
 	});
 
 	it('makes the phone header solid when transparency is reduced', () => {
@@ -368,6 +390,11 @@ describe('Header glass layers', () => {
 		// transcript sharp through the bar.
 		const at = headerSource.indexOf('@media (max-width: 768px) and (prefers-reduced-transparency: reduce)');
 		expect(at).toBeGreaterThan(-1);
-		expect(rule(headerSource.slice(at), '.shell-header::before')).toContain('background-color: var(--header-top-base);');
+		const solid = rule(headerSource.slice(at), '.shell-header::before');
+		expect(solid).toContain('background-color: var(--header-top-base);');
+		// The solid bar ends at the bar's bottom; the fade below it exists only with the blur.
+		expect(solid).toContain('inset: 0;');
+		expect(solid).toContain('background-image: none;');
+		expect(solid).toContain('-webkit-mask-image: none;');
 	});
 });

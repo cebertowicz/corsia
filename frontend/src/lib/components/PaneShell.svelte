@@ -116,9 +116,11 @@
 			padding: 0 16px calc(24px + env(safe-area-inset-bottom, 0px));
 		}
 		.pane.open, .pane.dragging { display: flex; }
+		/* On a phone with a top inset the row centres at the shared --top-row-centre, level with the
+		   header row: the box is as tall as the header, so twice the centre less that height. */
 		.pane-top {
 			height: var(--header-bottom);
-			padding-top: var(--safe-top);
+			padding-top: max(var(--safe-top), calc(2 * var(--top-row-centre) - var(--header-bottom)));
 		}
 	}
 </style>

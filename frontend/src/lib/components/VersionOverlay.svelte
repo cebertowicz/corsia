@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { coreSettings } from '$lib/stores/settings';
+	import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
 	import {
 		myBuild,
 		serverVersion,
@@ -36,7 +37,7 @@
 	const timeText = formatHHMM(myBuild.build_iso);
 </script>
 
-{#if visible}
+{#if visible && !$phoneNavOver}
 	<div class="version-overlay" class:stale aria-hidden="true">
 		{#if backendBehind}
 			<span class="seg">b {backendShort}<span class="arrow">⇢</span>{diskHeadShort}</span>
@@ -57,7 +58,7 @@
 <style>
 	.version-overlay {
 		position: fixed;
-		top: max(4px, calc(var(--safe-top) + 2px));
+		top: max(2 * var(--space-px-2), calc(var(--safe-top) + var(--space-px-2)));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: 11;
@@ -67,12 +68,21 @@
 		line-height: 1;
 		letter-spacing: -0.01em;
 		color: var(--text-secondary);
-		padding: 2px 8px;
+		padding: var(--space-px-2) 8px;
 		white-space: nowrap;
 		max-width: calc(100vw - 32px);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+	}
+	/* On a phone the header row holds the title and its icons and the transcript runs under the
+	   header, so the badge sits in the free band above the row: 26px above the row centre, about
+	   2px above the row's top. That is below the clock and the camera island in an installed app,
+	   and clear of the title, the icons and the transcript there and in a tab. */
+	@media (max-width: 768px) {
+		.version-overlay {
+			top: max(2 * var(--space-px-2), calc(max(var(--top-row-clearance), var(--top-row-centre)) - 13 * var(--space-px-2)));
+		}
 	}
 	.version-overlay.stale {
 		color: var(--amber);
