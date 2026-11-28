@@ -47,6 +47,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Revoke host access in its drawer is now a plain button; before, it was red.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
+- Tall images in a document, such as a phone screenshot, are now held to a height that fits the window, with their width following, so one no longer fills the screen; wide and square images and images inside a table are unchanged, and pressing an image still opens it at full size.
 - The Send button on comment replies is the app's standard button and is easier to tap on a phone.
 - The update progress bar no longer immediately moves into restart when a status check fails while agents are still finishing.
 - Three skills written for software work (product-thinking, engineering-standards and agent-experience) no longer come with CORSIA, so projects without software stop paying for them on every turn. A project that needs them installs them from the skill library, which offers CORSIA's own skills whether or not you turned on community improvements. An install that updates loses them until they are installed there.
