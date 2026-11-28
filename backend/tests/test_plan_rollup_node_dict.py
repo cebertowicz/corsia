@@ -160,13 +160,15 @@ def test_chat_list_batches_child_plan_reads(db, scene):
     ]
     child_plan_ids = [str(child_plan.id) for child_plan, _step, _id in child_steps]
     # The rollup reads each shown child's open rows once (#731 S2-2: a plan's open work,
-    # not the plan); admission's own single-plan walks are not this read.
-    tree_queries = [
-        statement for statement in statements if _open_read_of(statement) in child_plan_ids
+    # not the plan), alone or in a set read of sibling plans (``open_tree_many``);
+    # admission's own single-plan walks are not this read.
+    tree_reads = [
+        plan_id for statement in statements for plan_id in _open_reads_of(statement)
+        if plan_id in child_plan_ids
     ]
     # ``fetch_all`` prepares then executes the one packed result query.
     assert len(child_queries) == 2
-    assert sorted(_open_read_of(statement) for statement in tree_queries) == sorted(child_plan_ids)
+    assert sorted(tree_reads) == sorted(child_plan_ids)
 
     child_plan, child_step, child_id = child_steps[0]
     _activate(db, child_plan.id, child_step.id, PlanActor(child_id, "user", None))
@@ -185,6 +187,22 @@ _OPEN_READ = re.compile(
     + re.escape(node_states.listed_open_sql("plan_nodes")) + r"\)",
     re.DOTALL,
 )
+
+
+_OPEN_MANY_READ = re.compile(
+    r"^WITH q\(.*AS \(SELECT \* FROM plan_nodes WHERE plan_id IN \(([^)]*)\) AND "
+    + re.escape(node_states.listed_open_sql("plan_nodes")) + r"\)",
+    re.DOTALL,
+)
+
+
+def _open_reads_of(statement: str) -> list[str]:
+    """The plans whose open rows this statement reads, alone or as a set (``open_tree_many``)."""
+    found = _OPEN_MANY_READ.search(statement)
+    if found:
+        return [value.strip().strip("'") for value in found.group(1).split(",")]
+    single = _open_read_of(statement)
+    return [single] if single else []
 
 
 def _open_read_of(statement: str) -> str | None:
