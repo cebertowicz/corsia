@@ -9,6 +9,7 @@ counting the whole canonical unread set through ``feedback_state`` directly.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from doceditor import doc_sections
@@ -161,7 +162,7 @@ def _replies(db, user_id: str, scope: tuple[str, ...]) -> list:
     return db.execute(sql, (json.dumps(scope), *unread_params, json.dumps(scope), user_id)).fetchall()
 
 
-def document_rows(db, user_id: str) -> list[dict]:
+def document_rows(db, user_id: str, *, timings: dict | None = None) -> list[dict]:
     """Return one row per document holding an unread agent reply to the person's comment.
 
     A document qualifies when an agent answered in a thread the person commented in, and
@@ -176,19 +177,37 @@ def document_rows(db, user_id: str) -> list[dict]:
     Only the documents the person commented in are read, a chunk at a time, each through
     its own index range, so a poll's cost follows those documents, not every comment.
     """
+    started = time.perf_counter()
     documents = _person_documents(db)
+    person_ms = (time.perf_counter() - started) * 1000
     # Access is the artifact routes' own predicate, asked once per owner thread.
     access: dict[str, bool] = {}
-
-    def allowed(owner: str) -> bool:
-        if owner not in access:
-            access[owner] = may_access_artifact(owner, user_id, db=db)
-        return access[owner]
-
-    replies = [row for start in range(0, len(documents), _SCOPE_CHUNK)
-               for row in _replies(db, user_id, tuple(documents[start:start + _SCOPE_CHUNK]))
-               if allowed(row['owner_thread'])]
+    access_seconds = 0.0
+    reply_seconds = 0.0
+    reply_count = 0
+    chunks = 0
+    replies = []
+    for start in range(0, len(documents), _SCOPE_CHUNK):
+        started = time.perf_counter()
+        chunk = _replies(db, user_id, tuple(documents[start:start + _SCOPE_CHUNK]))
+        reply_seconds += time.perf_counter() - started
+        chunks += 1
+        reply_count += len(chunk)
+        for row in chunk:
+            owner = row['owner_thread']
+            if owner not in access:
+                started = time.perf_counter()
+                access[owner] = may_access_artifact(owner, user_id, db=db)
+                access_seconds += time.perf_counter() - started
+            if access[owner]:
+                replies.append(row)
+    started = time.perf_counter()
     sources = thread_sources(db, {str(r['author_thread_id']) for r in replies})
+    sources_ms = (time.perf_counter() - started) * 1000
+    if timings is not None:
+        timings.update(person_documents_ms=person_ms, person_documents_count=len(documents),
+                       replies_ms=reply_seconds * 1000, replies_chunks=chunks, replies_rows=reply_count,
+                       access_ms=access_seconds * 1000, access_owners=len(access), thread_sources_ms=sources_ms)
     groups: dict[str, list] = {}
     for row in replies:  # newest first within each document
         groups.setdefault(row['artifact_id'], []).append(row)

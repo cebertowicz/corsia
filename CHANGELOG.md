@@ -27,6 +27,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
+- Commenting on an image or text taller than the window no longer makes the screen jump: opening its comment moves the document once, and scrolling or typing afterward leaves it where you put it. Comment stays in the window beside a tall selection, including after you scroll.
 - Comments and suggestions that span more than one line stay on their text when the document changes elsewhere, and can be accepted.
 - Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
 - Document tables no longer leave an empty band underneath on touch screens.
