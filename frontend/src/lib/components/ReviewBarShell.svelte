@@ -20,10 +20,11 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', suppressed = false, docked = false, capsuleClearance = $bindable(0), receipt, stale, actions,
+		status = '', suppressed = false, docked = false, emailReview = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
 		/** The ask answers from a card docked to the document canvas's bottom edge: at rest the question on one line above the answers; a tap opens it to the asker and the full question. The caller docks only on a phone or a short touch screen; elsewhere the ask keeps its row. */
 		docked?: boolean;
+		emailReview?: boolean;
 		view: 'ask' | 'receipt' | 'stale';
 		who?: { name: string; id: string };
 		/** How many others also asked. */
@@ -169,12 +170,12 @@
 		<span class="rb-text">{stale.text}</span><span class="rb-sub">{stale.sub}</span>
 	</section>
 {:else if view === 'ask' && who}
-	<section class="review-bar ask" class:suppressed class:noting class:expanded class:static={!expandable} aria-label={askLabel} aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
+	<section class="review-bar ask" class:email-review={emailReview} class:suppressed class:noting class:expanded class:static={!expandable} aria-label={askLabel} aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
 		<span class="rb-head">
 			{#snippet lead()}
 				<span class="rb-lead">
 					<Avatar name={who.name} color={agentColor(who.id)} hidden />
-					<span class="rb-who"><strong><MiddleName name={who.name} /></strong>{#if plus}<span class="rb-plus" aria-hidden="true">+{plus}</span>{/if}:</span>
+					<span class="rb-who"><strong>{#if emailReview}{who.name}{:else}<MiddleName name={who.name} />{/if}</strong>{#if plus}<span class="rb-plus" aria-hidden="true">+{plus}</span>{/if}:</span>
 				</span>
 			{/snippet}
 			{#if expandable}
@@ -285,6 +286,17 @@
 	.rb-who:has(:global(.name.cut)) { min-width: calc(1.8em + 6ch); }
 	/* The request keeps about 16 characters: a long name gives up its middle before the request is left with nothing. */
 	.rb-ask { flex: 1 1 0; min-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+	.email-review { margin-left: var(--space-px-2); }
+	.email-review .rb-line { flex-wrap: wrap; }
+	.email-review .rb-who, .email-review .rb-who strong { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+	.email-review .rb-ask { flex: 1 1 12rem; min-width: 0; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+	@media (max-width: 48rem) {
+		.email-review { margin-left: calc(-1 * var(--doc-inset, 24px)); }
+		.email-review .rb-line { flex-wrap: nowrap; }
+		.email-review .rb-who, .email-review .rb-who strong { overflow: hidden; white-space: nowrap; }
+		.email-review .rb-ask { flex: 1 1 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+	}
+	.email-review:not(.noting) .rb-row2:has(.rb-status:empty) { display: none; }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
 	.review-bar.expanded .rb-chev { transform: rotate(180deg); }
 	/* Expanded, line 1 keeps its one row and the text moves below it, across the whole row (PE round 5 F-C). */
@@ -368,6 +380,10 @@
 			.rb-capsule :global(.rb-note) { flex: 1 0 100%; min-height: var(--rb-hit); max-height: calc(4lh + 2 * var(--space-2)); padding: var(--space-2); font-size: var(--text-input); line-height: var(--lh-normal); }
 			.review-bar.noting .rb-capsule :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }
 			.review-bar.noting .rb-capsule :global(.rb-actions .btn) { flex: 0 0 auto; min-width: max-content; }
+			.review-bar.email-review .rb-row2 { display: flex; }
+			.review-bar.email-review:not(.noting) .rb-row2:has(.rb-status:empty) { display: none; }
+			.review-bar.email-review .rb-capsule { position: static; display: contents; animation: none; }
+			.review-bar.email-review .rb-capsule :global(.btn) { min-height: var(--touch-target); }
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

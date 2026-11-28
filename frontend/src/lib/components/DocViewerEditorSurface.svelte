@@ -222,7 +222,7 @@
 <div class="doc-main" class:email-mode={email} class:touch-reading={touchReading} bind:this={column}>
 	{#if docState === 'ready' && draft && artifactId}
 		{#key artifactId}
-			<EmailSendBar {artifactId} text={() => editor?.editorView()?.state.doc.toString() ?? value} targetVersion={email?.targetVersion ?? null} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} flush={onFlush} readState={() => readEmailDraftState(artifactId!)} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
+			<EmailSendBar {artifactId} draftId={draft.id} text={() => editor?.editorView()?.state.doc.toString() ?? value} targetVersion={email?.targetVersion ?? null} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} flush={onFlush} readState={() => readEmailDraftState(artifactId!)} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
 		{/key}
 	{/if}
 	{#if docState === 'loading' || docState === 'error'}

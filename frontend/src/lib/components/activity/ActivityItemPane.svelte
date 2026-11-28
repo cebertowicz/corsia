@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { setContext, untrack } from 'svelte';
 	import { REVIEW_ANSWERED, REVIEW_REPLIES } from '$lib/reviewBarState.svelte';
+	import { EMAIL_DRAFT_SETTLED } from '$lib/emailDraft';
+	import ActivityFallback from './ActivityFallback.svelte';
+	import UnopenableDocument from './UnopenableDocument.svelte';
 	import { openActivityBrowser, openActivityDocument } from './activityDocumentOpen';
 	import { Button } from '$lib/components/ui';
 	import { keepInView } from '$lib/actions/keepInView';
@@ -8,7 +11,6 @@
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
 	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
-	import ActivityDocumentUnavailable from './ActivityDocumentUnavailable.svelte';
 	import ActivityDocumentBar from './ActivityDocumentBar.svelte';
 	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
@@ -20,7 +22,7 @@
 	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
 	import { emitProductEvent } from '$lib/product_events';
 	import {
-		agentsLabel, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps,
+		agentsLabel, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps, answerIsReady,
 		type DecisionDraft, type DocumentLookup,
 	} from './activityItems';
 	import {
@@ -55,6 +57,7 @@
 	// Every band here, the document's own review band included, names the agent asking at rest.
 	setContext(ASKER_AT_REST, true);
 	setContext(REVIEW_ANSWERED, () => void onActed());
+	setContext(EMAIL_DRAFT_SETTLED, untrack(() => item.kind === 'draft') ? () => void onActed() : undefined);
 
 	const decision = $derived(decisionOf(item));
 	const held = $derived(heldOf(item));
@@ -93,6 +96,7 @@
 	// ordinary close (which saves a pending edit and sends the open comment batch).
 	// Primitive inputs only: a re-read hands over new item objects, and the document must not reopen for that.
 	const docArtifactId = $derived(doc?.artifactId ?? null);
+	const docPath = $derived(doc?.path);
 	// A document row lands on its newest unread reply. Fixed when the pane opens: an approved review that stays open as
 	// its document must not land again.
 	const landsOnReplies = untrack(() => item.kind === 'document');
@@ -101,7 +105,7 @@
 		if (browserThread && !browserEnded) return;
 		return openActivityDocument(
 			workspaceKey, docArtifactId, documentThread, landsOnReplies, replyThread,
-			(value) => { lookup = value; },
+			(value) => { lookup = value; }, docPath,
 		);
 	});
 
@@ -137,12 +141,7 @@
 		}
 	}
 
-	const answerReady = $derived.by(() => {
-		if (!decision) return false;
-		if (isPickAny(decision)) return true;
-		if (!selected) return false;
-		return selected !== OTHER_OPTION_ID || other.trim().length > 0;
-	});
+	const answerReady = $derived(answerIsReady(decision, selected, other));
 
 	function answer(d: DecisionDetail) {
 		return press('answer', 'save your answer', async () => {
@@ -199,7 +198,7 @@
 		repliesRead ? 'All replies read.' : position.of === 1 ? '1 reply to your comment' : `${positionLabel} to your comments`,
 	);
 	// A review with unread replies says where the person is in them beside its ask.
-	setContext(REVIEW_REPLIES, () => (total > 0 && !repliesRead && item.kind === 'review' ? positionLabel : ''));
+	setContext(REVIEW_REPLIES, () => (total > 0 && !repliesRead && (item.kind === 'review' || item.kind === 'draft') ? positionLabel : ''));
 
 	/** The button whose press failed reads Try again; after a refusal or a final outcome, every button keeps its name. */
 	const labelFor = (action: PressAction, label: string) => (failure?.retry === action ? 'Try again' : label);
@@ -257,7 +256,11 @@
 	<div class="doc-pane"><ArtifactLeaf threadId={workspaceKey} notice={taskNotice} collapsible={false} mode={phone ? 'compact' : 'expanded'} onNoBrowser={() => { browserEnded = true; }} /></div>
 {:else if doc}
 	{#if lookupFailed}
-		<ActivityDocumentUnavailable notice={noLonger || stale ? itemNotice : undefined} label={item.title} failed={lookup?.status === 'failed'} {sourceThread} threadLabel={item.source.thread_label} {onOpenChat} />
+		<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
+			{#snippet body()}
+				<UnopenableDocument failed={lookup?.status === 'failed'} thread={sourceThread} threadLabel={item.source.thread_label} {onOpenChat} />
+			{/snippet}
+		</ActivityKindPanel>
 	{:else if lookup?.status !== 'found'}
 		<div class="doc-pane" aria-busy="true"></div>
 	{:else}
@@ -345,10 +348,7 @@
 {:else}
 	<ActivityKindPanel notice={noLonger || stale ? itemNotice : undefined} label={item.title}>
 		{#snippet body()}
-			<h1 class="dh">{item.title}</h1>
-			{#if sourceThread}
-				<Button size="sm" variant="secondary" onclick={() => onOpenChat(sourceThread)}>Open {item.source.thread_label}’s chat</Button>
-			{/if}
+			<ActivityFallback {item} {offline} {onActed} {onOpenChat} />
 		{/snippet}
 	</ActivityKindPanel>
 {/if}

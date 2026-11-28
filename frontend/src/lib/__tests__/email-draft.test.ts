@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, refusedEntries, repliedToId, senderAddress, senderName,
+	currentRecipients, emailTabTitle, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, refusedEntries, repliedToId, senderAddress, senderName,
 	type EmailMessage, type ServerHeader,
 } from '$lib/emailDraft';
 import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
@@ -49,6 +49,15 @@ describe('newer emails', () => {
 		expect(repliedToId({ conversation: [DANA, OLDER], repliedTo: 'r-1' })).toBeNull();
 		expect(newerEmails({ conversation: [DANA, OLDER] })).toEqual([]);
 		expect(repliedToId({ conversation: [] })).toBeNull();
+	});
+});
+
+describe('email tab title', () => {
+	it('uses the current subject and falls back for an empty or absent header', () => {
+		const draft = { id: 'draft', header: { text: 'To: person@example.com\nSubject: Hello there', recipients: [] } };
+		expect(emailTabTitle(draft, 'draft.md')).toBe('Hello there');
+		expect(emailTabTitle({ ...draft, header: { ...draft.header, text: 'Subject:  ' } }, 'draft.md')).toBe('draft.md');
+		expect(emailTabTitle(undefined, 'document.md')).toBe('document.md');
 	});
 });
 

@@ -4,6 +4,8 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { createActivityQueue } from '$lib/stores/activityQueue.svelte';
 	import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { emailTabTitle } from '$lib/emailDraft';
 	import { activityOpenRequest } from '$lib/stores/activityOpen';
 	import { threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveTab } from '$lib/stores/artifactWorkspace';
 	import ArtifactTabSheet from '$lib/components/ArtifactTabSheet.svelte';
@@ -13,8 +15,7 @@
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
-	import { EMPTY_LINE, documentDetailOf, documentOf, followerOf, keepInPlace, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
-
+	import { EMPTY_LINE, documentDetailOf, documentOf, followerOf, keepInPlace, matchingDocumentRows, readThrough, settledArtifact, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
 	/**
 	 * Activity: two lists beside the pane the chat uses. Your tasks holds everything waiting on the person, ranked by
 	 * the scope's conductor (CORSIA in the workspace); Notifications holds documents where agents answered the person's
@@ -41,7 +42,6 @@
 
 	const store = createActivityQueue(() => projectId);
 	const workspaceKey = $derived(activityWorkspaceKey(projectId));
-
 	/** The item open in the pane; on a phone, the item marked in the list until it is tapped open. */
 	let openKey = $state<string | null>(null);
 	/** Phone only: the item is on screen instead of the list. */
@@ -143,12 +143,7 @@
 			} else if (openKey && !keys.includes(openKey) && advancing === openKey && lastOpen) {
 				advance(lists[tabOf(lastOpen)], openKey);
 			} else if (openKey && !keys.includes(openKey) && lastOpen) {
-				const doc = documentOf(lastOpen);
-				const matches = doc ? current.filter((item) => {
-					const candidate = documentOf(item);
-					return item.kind === lastOpen?.kind && candidate?.artifactId === doc.artifactId
-						&& candidate.commentId === doc.commentId && item.source.thread_id === lastOpen?.source.thread_id;
-				}) : [];
+				const matches = matchingDocumentRows(lastOpen, current);
 				if (matches.length === 1) {
 					openKey = matches[0].key;
 					kept = null;
@@ -194,7 +189,7 @@
 	function advance(current: readonly ActivityQueueItem[], key: string) {
 		advancing = null;
 		kept = null;
-		const artifact = lastOpen?.kind === 'review' ? documentOf(lastOpen)?.artifactId : undefined;
+		const artifact = settledArtifact(lastOpen);
 		const document = artifact ? store.queue?.notifications.items.find((item) => documentDetailOf(item)?.artifact_id === artifact) : undefined;
 		if (document) { openKey = document.key; return; }
 		const list = lastOpen ? tabOf(lastOpen) : tab;
@@ -209,6 +204,16 @@
 		const key = openKey;
 		const keep = refusedKeep;
 		refusedKeep = false;
+		// A send claim can remove the draft before its review settles. Read the final lists first,
+		// so an unread document that returns to Notifications remains open.
+		if (!keep && key && lastOpen?.kind === 'draft') {
+			await store.reload();
+			await tick();
+			if (instance !== paneInstance || openKey !== key || store.failure !== null) return;
+			const current = store.queue?.items ?? [];
+			if (!current.some((item) => item.key === key)) advance(current, key);
+			return;
+		}
 		if (!keep && key) {
 			advancing = key;
 			const queue = store.queue;
@@ -241,16 +246,11 @@
 		if (listScroll) listScroll.scrollTop = scrolls[to];
 	}
 
-	const through = (item: ActivityQueueItem) => {
-		const detail = documentDetailOf(item);
-		return detail ? { artifact_id: detail.artifact_id, through_reply_id: detail.latest_reply_id } : null;
-	};
-
 	/** × or a swipe: the same call as Done, without opening the document. The open one is acted on as Done is. */
 	async function dismiss(key: string) {
 		markAllFailed = false;
 		const item = notifications.find((row) => row.key === key);
-		const read = item && through(item);
+		const read = item && readThrough(item);
 		if (!read) return;
 		const { [key]: _, ...rest } = dismissFailed;
 		dismissFailed = rest;
@@ -268,7 +268,7 @@
 	/** Every listed document in one call; the open one stays open, reading "All replies read." */
 	async function markAllRead() {
 		if (markingAll) return;
-		const documents = notifications.map(through).filter((read) => read !== null);
+		const documents = notifications.map(readThrough).filter((read) => read !== null);
 		if (!documents.length) return;
 		markingAll = true;
 		markAllFailed = false;
@@ -304,7 +304,7 @@
 					void tick().then(() => { if (listScroll) listScroll.scrollTop = scrolls[tab]; });
 				},
 				...(tabForItem ? { artifact: {
-					title: tabForItem.title, tabCount: workspace.tabs.length,
+					title: emailTabTitle(tabForItem.artifactId ? $emailDraftHeaders[tabForItem.artifactId] : undefined, tabForItem.title), tabCount: workspace.tabs.length,
 					anyChanged: hasChangedTab(workspace), onTabs: () => { phoneTabsOpen = !phoneTabsOpen; },
 				} } : {}),
 			}

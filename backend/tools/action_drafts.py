@@ -10,18 +10,38 @@ newest message does not follow. Nothing else writes these columns.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 
 from doceditor.document_scope import revision as document_revision
 from infra.database import write_transaction
 from infra.time import utc_now_iso
+from infra.write_effects import after_commit
 
 KINDS = ("email", "invite", "message")
 
 
 class DraftError(ValueError):
     """A draft call the stored state refuses."""
+
+
+def _notify_after_commit(conn, draft_id: str) -> None:
+    try:
+        row = conn.execute(
+            "SELECT d.id, d.thread_id, d.kind, d.state, t.user_id FROM action_drafts d "
+            "JOIN threads t ON t.id=d.thread_id WHERE d.id=?", (draft_id,),
+        ).fetchone()
+        if row:
+            frame = {"type": "artifacts_changed", "draft_id": row["id"], "thread_id": row["thread_id"],
+                     "kind": row["kind"], "state": row["state"]}
+            user_id = row["user_id"]
+            def send():
+                from infra import state
+                state.broadcast_to_user(user_id, frame)
+            after_commit(conn, send)
+    except Exception:  # Notification is best-effort; the draft write must still succeed.
+        logging.getLogger(__name__).exception("Could not schedule draft change notification")
 
 
 def create_draft(
@@ -45,6 +65,7 @@ def create_draft(
             (draft_id, thread_id, kind, path, json.dumps(target or {}),
              document_revision(data), now, now),
         )
+        _notify_after_commit(conn, draft_id)
     return {"draft_id": draft_id, "revision": document_revision(data), "recorded_at": now}
 
 
@@ -72,6 +93,7 @@ def record_draft(
             )
         if cursor.rowcount != 1:
             raise DraftError("There is no open draft with that id.")
+        _notify_after_commit(conn, draft_id)
     return {"draft_id": draft_id, "revision": revision, "recorded_at": now}
 
 
@@ -85,6 +107,9 @@ def _transition(draft_id: str, before: str, after: str, db, **columns) -> None:
         )
         if cursor.rowcount != 1:
             raise DraftError(f"The draft is not {before}.")
+        if before == "sending":
+            conn.execute("DELETE FROM activity_draft_acknowledgements WHERE draft_id=?", (draft_id,))
+        _notify_after_commit(conn, draft_id)
 
 
 def claim_for_send(draft_id: str, *, db: sqlite3.Connection | None = None) -> None:

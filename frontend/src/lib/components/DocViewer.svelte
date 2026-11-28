@@ -6,6 +6,7 @@
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
 	import { isMobile, isShortTouch, prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
+	import { createViewerActivityEmail } from '$lib/docViewerActivityEmail.svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
 	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, pickedComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
@@ -43,7 +44,6 @@
 	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
 	import { createViewerSuggestionHistory } from '$lib/docViewerSuggestionHistory.svelte';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
-	import { reload as reloadAttentionQueue } from '$lib/stores/attentionQueueState.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus, { type PresenceView } from './DocPresenceStatus.svelte';
@@ -52,7 +52,7 @@
 	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
-	import { createReviewBarState, documentAskOf } from '$lib/reviewBarState.svelte';
+	import { documentAskOf } from '$lib/reviewBarState.svelte';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
@@ -136,7 +136,9 @@
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
 	const columnFits = () => commentSurface?.cardMode() === 'margin';
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), columnFits);
-	const reviewBarState = createReviewBarState();
+	let reviewBarInstance: ReviewBar | undefined = $state();
+	const activityEmailState = createViewerActivityEmail(() => loadedArtifactId, () => reviewBarInstance);
+	const reviewBarState = activityEmailState.bar;
 	let askReach = $state(0); // How far the docked ask card reaches up from the canvas's foot: the touch Comment button is held above it.
 	/** The ask waiting on this document, for Details while its card is hidden (under a comment sheet, or stepped aside for Details). */
 	const askSheetHidden = $derived(commentUI.state != null && commentUI.sheetUp);
@@ -247,7 +249,7 @@
 				snapshot: (text) => { editText = text; },
 				failure: (failure) => { openRefusal = failure.refusal; docState = failure.state;
 					if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
-				reloadAttention: () => { void reloadAttentionQueue(); },
+				reloadAttention: activityEmailState.reloadAttention,
 			});
 		});
 	});
@@ -263,7 +265,7 @@
 
 <svelte:window onkeydown={(event) => handleDocumentKey(event, keyState())} onkeydowncapture={(event) => closeCardPopover(event, keyState())} />
 <DocumentViewport instanceId={target?.instanceId} ready={docState === 'ready'} root={docRoot} />
-<div class="doc" class:margin-room={commentSurface?.marginShown()} use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
+<div class="doc" class:activity-email={activityEmailState.active} class:margin-room={commentSurface?.marginShown()} use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	{#if target && loadedArtifactId}
 		<DocPresenceStatus {target} artifactId={loadedArtifactId} root={docRoot}
 			textCurrent={liveConnection === null || liveConnection === 'connected' || liveConnection === 'refused'}
@@ -304,7 +306,7 @@
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
-		{#snippet reviewBar()}{@render reviewControls()}{/snippet}
+		{#snippet reviewBar()}<ReviewBar bind:this={reviewBarInstance} bind:capsuleClearance={askReach} emailReview={activityEmailState.active} docked={!activityEmailState.active && ($isMobile || $isShortTouch)} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
 		{#snippet presence()}<DocPresenceAvatars view={presenceView} artifactId={loadedArtifactId} instanceId={target?.instanceId} ready={docState === 'ready'} />{/snippet}
 	</DocViewerStatus>
 	{#if target}<DocBottomBand artifactId={loadedArtifactId} threads={unreadThreads} root={docRoot} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetUp} onJump={(thread) => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.goTo(thread.id); }} onControlGone={() => focusDocumentEditor(docRoot)} />{/if}
@@ -394,7 +396,4 @@
 		bind:resolvedOpen
 	/>
 </div>
-{#snippet reviewControls()}
-	<ReviewBar bind:capsuleClearance={askReach} docked={$isMobile || $isShortTouch} artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={draftController.hasText} suppressed={askSheetHidden} pendingSuggestions={readonly || confirming || suggestionHistory.busy ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { return await acceptAllOpen(target, loadedArtifactId ?? '', { onText: suggestionHistory.showAccepted, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
-{/snippet}
 <!-- Styles are in DocViewer.css. -->

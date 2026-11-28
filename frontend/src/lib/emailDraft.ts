@@ -1,3 +1,6 @@
+/** Optional enclosing surface callback when a draft is conclusively settled. */
+export const EMAIL_DRAFT_SETTLED = Symbol('email-draft-settled');
+
 /** One email of the conversation a draft replies into. Read-only: it is never part of the draft's text. */
 export interface EmailMessage {
 	id: string;
@@ -110,6 +113,14 @@ export function headerLayout(lines: Iterable<string>): { text: string; lines: He
 		at += line.length + 1;
 	}
 	return { text: texts.join('\n'), lines: found };
+}
+
+/** The current subject for an email tab, or its ordinary title if the subject is empty. */
+export function emailTabTitle(draft: EmailDraftInfo | undefined, fallback: string): string {
+	if (!draft) return fallback;
+	const header = headerLayout(draft.header.text.split('\n'));
+	const subject = header.lines.find((line) => line.key === 'subject');
+	return subject ? header.text.slice(subject.valueFrom, subject.to).trim() || fallback : fallback;
 }
 
 /** The server's reading of the recipients while it read this same header text; null while an edit it hasn't read is in. */

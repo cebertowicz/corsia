@@ -9,6 +9,7 @@ import { createReviewBarState, DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarSta
 import { ReviewRefusal, type ReviewBarRead } from '$lib/api/reviewBar';
 import { submittedAnswers } from '$lib/stores/cardAnswers';
 import { token } from '$lib/stores/auth';
+import { ACTIVITY_EMAIL_REVIEW } from '$lib/activityEmailReview';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 const planApi = vi.hoisted(() => ({ mutateUserTask: vi.fn() }));
@@ -54,6 +55,17 @@ afterEach(() => {
 });
 
 describe('ReviewBar', () => {
+	it('uses the existing note flow and returns focus to the Activity email action on cancel', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		const focusRequest = vi.fn();
+		component = mount(ReviewBar, { target: host, context: new Map([[ACTIVITY_EMAIL_REVIEW, { focusRequest }]]), props: { artifactId: 'doc-1', emailReview: true } });
+		await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
+		expect(button('Approve')).toBeUndefined(); expect(button('Send back')).toBeUndefined();
+		await (component as unknown as { requestChanges: () => Promise<void> }).requestChanges();
+		await vi.waitFor(() => expect(host.querySelector('textarea')).toBe(document.activeElement));
+		button('Cancel')!.click();
+		await vi.waitFor(() => expect(focusRequest).toHaveBeenCalledTimes(1));
+	});
 	it('offers the two answers, Approve and Send back, regardless of feedback', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();

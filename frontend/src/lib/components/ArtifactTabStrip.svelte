@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { emailTabTitle } from '$lib/emailDraft';
 	import { documentBar } from '$lib/stores/documentBar';
 	import MiddleName from './MiddleName.svelte';
 
@@ -23,7 +24,8 @@
 		return name.slice(-Math.max(4, extension.length));
 	};
 	$effect(() => {
-		const name = tabs.find((tab) => tab.instanceId === activeKey)?.title;
+		const active = tabs.find((tab) => tab.instanceId === activeKey);
+		const name = active ? emailTabTitle(active.artifactId ? $emailDraftHeaders[active.artifactId] : undefined, active.title) : undefined;
 		const el = stripEl;
 		if (!name || !el) { tabFloor = 0; return; }
 		const measure = () => {
@@ -115,6 +117,7 @@
 		{#each tabs as t, i (t.instanceId)}
 			{@const key = t.instanceId}
 			{@const active = key === activeKey}
+			{@const title = emailTabTitle(t.artifactId ? $emailDraftHeaders[t.artifactId] : undefined, t.title)}
 			{@const changed = isTabChanged(t)}
 			<div class="tab-wrap" class:active role="presentation">
 				<button
@@ -139,7 +142,7 @@
 						{:else}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
 						{/if}
-					<span class="tab-title" title={t.title}><MiddleName name={t.title} tail={extensionOf(t.title)} /></span>
+					<span class="tab-title" {title}><MiddleName name={title} tail={extensionOf(title)} /></span>
 					{#if t.status === 'error'}
 						<span class="tab-err" title="Couldn't load this document">!</span>
 					{:else if t.status === 'unavailable'}
@@ -152,7 +155,7 @@
 						<span class="tab-dot" title="Updated elsewhere since you opened it" aria-label="Updated elsewhere"></span>
 					{/if}
 				</button>
-				<button type="button" class="tab-close" aria-label="Close {t.title}" onclick={() => onClose(key)}>
+				<button type="button" class="tab-close" aria-label="Close {title}" onclick={() => onClose(key)}>
 					<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
 				</button>
 			</div>

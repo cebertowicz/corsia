@@ -207,7 +207,7 @@
 										<span class="rank">{index + 1}</span>
 										<strong class:one={!open}>{item.title}</strong>
 									</span>
-									<span class="sub indent">{item.source.thread_label} · {KIND_LABEL[item.kind]}{item.raised_at ? ` · ${ageLabel(item.raised_at)}` : ''}{replies ? ` · ${unreadRepliesLabel(replies)}` : ''}</span>
+									<span class="sub indent">{item.source.thread_label} · {item.kind === 'draft' && 'missing' in item.detail && item.detail.missing && !item.detail.unconfirmed ? 'File missing' : KIND_LABEL[item.kind]}{item.raised_at ? ` · ${ageLabel(item.raised_at)}` : ''}{replies ? ` · ${unreadRepliesLabel(replies)}` : ''}</span>
 									{#if open}
 										<span class="why">{item.rank ? `Why it’s here: ${item.rank.reason}` : 'Not ranked yet'}</span>
 									{/if}

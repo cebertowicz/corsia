@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivityQueueItem } from '$lib/api/activityQueue';
 import type { DecisionDetail } from '$lib/api/attentionQueue';
 import { decisionOf } from './activityItems';
-import { activityDocument, activityFrameItems, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
+import { activityDocument, activityFrameItems, activityItem, activityQueueBody, activitySource } from '$lib/__tests__/fixtures/attentionQueue';
 
 const { mobile, mutate, emit, closeTab, listeners } = vi.hoisted(() => ({
 	mobile: { store: null as null | import('svelte/store').Writable<boolean> },
@@ -39,6 +39,7 @@ import paneSource from './ActivityItemPane.svelte?raw';
 import documentBarSource from './ActivityDocumentBar.svelte?raw';
 import listSource from './ActivityList.svelte?raw';
 import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 import { activityOpenRequest, openActivity } from '$lib/stores/activityOpen';
 import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 import { closeArtifactTab, consumeTabLanding, threadWorkspaces } from '$lib/stores/artifactWorkspace';
@@ -114,6 +115,7 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	emailDraftHeaders.set({});
 	vi.unstubAllGlobals();
 });
 
@@ -182,6 +184,156 @@ describe('Activity browser steps', () => {
 });
 
 describe('Activity list', () => {
+	it('shows a missing draft and lets the person discard a registered one', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			served = [];
+			return respond(200, { state: 'discarded' });
+		});
+		render(); await settle();
+		expect(rows()[0].textContent).toContain('File missing');
+		expect(pane().textContent).toContain('This draft’s file is missing or can’t be opened, so it can’t be sent.');
+		expect(buttonNamed('Send now')).toBeUndefined();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(rows()).toHaveLength(0));
+	});
+
+	it('acknowledges an unconfirmed missing draft and clears its row', async () => {
+		served = [activityItem({ key: 'draft:missing', external_id: 'draft-1', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unconfirmed: true } })];
+		alsoServe('/api/attention/drafts/draft-1/acknowledge', () => { served = []; return respond(204, null); });
+		render(); await settle();
+		expect(pane().textContent).toContain('Couldn’t confirm the email left. Check your Sent mail.');
+		expect(buttonNamed('Don’t send')).toBeUndefined();
+		buttonNamed('Done')!.click();
+		await vi.waitFor(() => expect(rows()).toHaveLength(0));
+	});
+
+	it('keeps an unconfirmed missing draft when acknowledgement fails', async () => {
+		served = [activityItem({ key: 'draft:missing', external_id: 'draft-1', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unconfirmed: true } })];
+		alsoServe('/api/attention/drafts/draft-1/acknowledge', () => respond(500, {}));
+		render(); await settle();
+		buttonNamed('Done')!.click();
+		await vi.waitFor(() => expect(alert()).toContain('Couldn’t mark this done. Try again.'));
+		expect(pane().querySelector('[role="alert"]')?.classList.contains('failure')).toBe(true);
+		expect(rows()).toHaveLength(1);
+	});
+
+	it('pauses Done for an unconfirmed missing draft while offline', async () => {
+		served = [activityItem({ key: 'draft:missing', external_id: 'draft-1', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unconfirmed: true } })];
+		connectionState.set('disconnected');
+		render(); await settle();
+		expect(buttonNamed('Done')?.disabled).toBe(true);
+		expect(pane().textContent).toContain('Done is paused until this reconnects.');
+	});
+
+	it('explains why removing an open missing draft is paused offline', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		connectionState.set('disconnected');
+		render(); await settle();
+		expect(buttonNamed('Don’t send')?.disabled).toBe(true);
+		expect(pane().textContent).toContain('Don’t send is paused until this reconnects.');
+	});
+
+	it('shows a failure when a missing draft cannot be removed', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			source: activitySource('Untitled thread', 'thread-1'),
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => respond(500, {}));
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(alert()).toContain('Don’t send didn’t go through. Try again.'));
+		expect(pane().querySelector('[role="alert"]')?.classList.contains('failure')).toBe(true);
+		const actions = buttonNamed('Don’t send')!.parentElement!;
+		expect(actions).toBe(buttonNamed('Open the chat')!.parentElement!.parentElement);
+		expect(actions.nextElementSibling?.getAttribute('role')).toBe('alert');
+		expect(rows()).toHaveLength(1);
+	});
+
+	it.each([
+		['123456789012345678901234', 'Open 123456789012345678901234’s chat'],
+		['1234567890123456789012345', 'Open the chat'],
+	])('labels the missing draft chat for a %s name', async (name, label) => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			source: activitySource(name, 'thread-1'),
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		const onSelectThread = render(); await settle();
+		buttonNamed(label)!.click();
+		expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+	});
+
+	it('opens an untitled missing draft chat with a natural label', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			source: activitySource('Untitled thread', 'thread-1'),
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		const onSelectThread = render(); await settle();
+		buttonNamed('Open the chat')!.click();
+		expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+	});
+
+	it('keeps a draft’s unread document open when its review settles', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true, unread_replies: 1 } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			served = [];
+			notes = [activityDocument('draft', { artifact_id: 'art-draft' })];
+			return respond(200, { state: 'discarded' });
+		});
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(pane().textContent).toContain('Couldn’t open this document.'));
+		expect(buttonNamed('Don’t send')).toBeUndefined();
+	});
+
+	it('advances after a draft without a review even when its document has unread replies', async () => {
+		const next = activityItem({ key: 'task:next', kind: 'task', title: 'Next task' });
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } }), next];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			served = [next];
+			notes = [activityDocument('draft', { artifact_id: 'art-draft' })];
+			return respond(200, { state: 'discarded' });
+		});
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(pane().textContent).toContain('Next task'));
+	});
+
+	it('keeps the settled draft open when its queue reread fails', async () => {
+		let failRead = false;
+		let failedReads = 0;
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: 'art-draft', missing: true } })];
+		alsoServe('/api/email-drafts/art-draft/discard', () => {
+			failRead = true;
+			return respond(200, { state: 'discarded' });
+		});
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation((input, init) => {
+			if (failRead && String(input).includes('/api/attention/queue')) {
+				failedReads += 1;
+				return Promise.resolve(respond(500, {}));
+			}
+			return base(input, init);
+		});
+		render(); await settle();
+		buttonNamed('Don’t send')!.click();
+		await vi.waitFor(() => expect(failedReads).toBeGreaterThan(0));
+		await settle();
+		expect(pane().textContent).toContain('This draft’s file is missing or can’t be opened, so it can’t be sent.');
+		expect(rows()).toHaveLength(1);
+	});
+
+	it('offers no discard action for a missing draft without an identity', async () => {
+		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
+			open: null, detail: { artifact_id: null, missing: true } })];
+		render(); await settle();
+		expect(buttonNamed('Don’t send')).toBeUndefined();
+	});
 	it('shows every kind in the ranker’s order and opens the top item with why it is there', async () => {
 		render();
 		await settle();
@@ -1129,7 +1281,7 @@ describe('product events', () => {
 		notes = [activityDocument('first', {}, 1), activityDocument('second', {}, 2), activityDocument('third', {}, 3)];
 		alsoServe('/api/attention/notifications/read', (init) => {
 			const read = (JSON.parse(String(init?.body)).documents as { artifact_id: string }[]).map((doc) => doc.artifact_id);
-			notes = notes.filter((item) => !read.includes(item.open!.artifact_id));
+			notes = notes.filter((item) => !read.includes(item.open!.artifact_id ?? ''));
 			return respond(200, {});
 		});
 		render();
@@ -1246,7 +1398,7 @@ describe('a document row in Notifications', () => {
 				const body = JSON.parse(String(init?.body));
 				reads.push(body);
 				const read = (body.documents as { artifact_id: string }[]).map((doc) => doc.artifact_id);
-				notes = notes.filter((item) => !read.includes(item.open!.artifact_id));
+				notes = notes.filter((item) => !read.includes(item.open!.artifact_id ?? ''));
 				return respond(200, {});
 			}
 			return queue(input, init);
@@ -1263,6 +1415,19 @@ describe('a document row in Notifications', () => {
 		rows()[0].click();
 		await settle();
 	}
+
+	it('shows the current email subject in the phone header, falling back to the document title', async () => {
+		served = [];
+		mobile.store!.set(true);
+		await openNotifications();
+		const fallback = get(activityPhoneItem)!.artifact!.title;
+		flushSync(() => emailDraftHeaders.set({ 'art-plan-pane': { id: 'draft', header: { text: 'Subject: First subject', recipients: [] } } }));
+		expect(get(activityPhoneItem)!.artifact!.title).toBe('First subject');
+		flushSync(() => emailDraftHeaders.set({ 'art-plan-pane': { id: 'draft', header: { text: 'Subject: Updated subject', recipients: [] } } }));
+		expect(get(activityPhoneItem)!.artifact!.title).toBe('Updated subject');
+		flushSync(() => emailDraftHeaders.set({}));
+		expect(get(activityPhoneItem)!.artifact!.title).toBe(fallback);
+	});
 
 	it('opens the top row when switching to a populated tab with nothing open on desktop', async () => {
 		served = [];

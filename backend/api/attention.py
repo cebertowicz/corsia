@@ -19,6 +19,8 @@ from infra.db_async import run_in_db, run_read
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
 from api.attention_notifications import router as notifications_router
+from api.attention_draft_ack import router as draft_ack_router, _acknowledge_draft as _acknowledge_draft
+from api.attention_review_bar import _review_bar
 from api.operator_annotations import mark_activity_browser_steps
 from doceditor import review_bar
 from plans import public
@@ -27,6 +29,7 @@ from registry import attention
 
 router = APIRouter(prefix="/api/attention", tags=["attention"])
 router.include_router(notifications_router)
+router.include_router(draft_ack_router)
 
 
 def _require_user(token: str) -> dict:
@@ -70,28 +73,6 @@ async def _authorize(artifact_id: str, user: dict) -> None:
         raise HTTPException(status_code=404, detail="artifact not found")
     if not accessible:
         raise HTTPException(status_code=403, detail="forbidden")
-
-
-def _review_bar(artifact_id: str, user_id: str) -> dict | None:
-    """The review bar's read for a document or image, or None for any other type."""
-    from doceditor.person_comment_projection import person_step_attention
-
-    db = get_db()
-    try:
-        row = AR.identity_row_for(artifact_id, db=db)
-        if row is None or row["type"] not in public.ASKABLE_TYPES:
-            return None
-        person_step = public.person_step_instructions(str(row["id"]), db=db)
-        attention = person_step and person_step_attention(db, person_step["node_id"], str(row["id"]), user_id)
-        if attention:
-            person_step = {**person_step, "comment_attention": attention}
-        return {
-            "artifact_id": artifact_id, "artifact_type": row["type"],
-            **review_bar.round_state(db, str(row["id"])),
-            **({"person_step": person_step} if person_step is not None else {}),
-        }
-    finally:
-        db.close()
 
 
 def _summarize(item: dict) -> dict:
@@ -201,16 +182,17 @@ async def get_raised(user: dict = Depends(require_user), thread_id: str | None =
     return {"items": rows}
 
 
-def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+def activity_queue(db, user_id: str, *, project_id: str | None = None, view: str | None = None,
+                   draft_subjects: bool = True):
     """Compose and rank one authorized view's tasks; return uncapped rows, ranker and scope.
 
     Activity's Notifications list is never ranked, so the ranker and its wake see tasks only.
     """
-    rows, _, ranker, scope = activity_lists(db, user_id, project_id=project_id, view=view)
+    rows, _, ranker, scope = activity_lists(db, user_id, project_id=project_id, view=view, draft_subjects=draft_subjects)
     return rows, ranker, scope
 
 
-def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str | None = None):
+def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str | None = None, draft_subjects: bool = True):
     """Return (ranked tasks, notifications newest first, ranker, scope), both lists uncapped."""
     from collections import Counter
     from loguru import logger
@@ -233,6 +215,7 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     notifications: list[dict] = []
     if view == 'activity':
         from doceditor.activity_reply_rows import document_rows
+        from infra.activity_draft_rows import draft_rows, merge_draft_reviews
         started = time.perf_counter()
         projected = mark_activity_browser_steps(db, public.activity_plan_rows(db, user_id, annotated))
         plan_ms = (time.perf_counter() - started) * 1000
@@ -242,12 +225,13 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
         started = time.perf_counter()
         rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
         dedupe_ms = (time.perf_counter() - started) * 1000
+        rows, draft_reviews = merge_draft_reviews(rows, draft_rows(db, user_id, subjects=draft_subjects, project_id=project_id))
         # A reviewed document's replies ride on its review row; Approve ends the review and
         # the next read lists the document in Notifications.
         unread = {d['detail']['artifact_id']: d['detail']['unread'] for d in documents}
         reviewed = set()
         for row in rows:
-            if row['kind'] == 'review' and row['detail']['artifact_id'] in unread:
+            if (row['kind'] == 'review' or (row['kind'] == 'draft' and row['detail']['artifact_id'] in draft_reviews)) and row['detail']['artifact_id'] in unread:
                 row['detail']['unread_replies'] = unread[row['detail']['artifact_id']]
                 reviewed.add(row['detail']['artifact_id'])
         notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed]

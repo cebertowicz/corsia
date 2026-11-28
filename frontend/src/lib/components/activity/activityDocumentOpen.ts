@@ -22,7 +22,15 @@ export function openActivityDocument(
 	workspaceKey: string, artifactId: string | null, thread: string | null,
 	landOnReplies: boolean, commentId: string | undefined,
 	setLookup: (value: DocumentLookup | { status: 'resolving' } | null) => void,
+	path?: string,
 ): () => void {
+	if (!artifactId && path && thread) {
+		const title = path.split('/').pop() ?? path;
+		setLookup({ status: 'found', path, title });
+		openArtifactTab(workspaceKey, { path, title });
+		void closeAllBut(workspaceKey, get(threadWorkspaces)[workspaceKey]?.activeTabId ?? null);
+		return () => {};
+	}
 	if (!artifactId) {
 		setLookup(null);
 		void closeAllBut(workspaceKey, null);

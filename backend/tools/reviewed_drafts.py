@@ -151,6 +151,10 @@ async def save_draft(
         )
         if isinstance(written, str) and written.startswith("Error"):
             raise DraftStorageRefused(written.removeprefix("Error: "))
+        if kind == "email":
+            from registry.observed_write import register_observed_write
+            await run_in_db(register_observed_write, thread_id, {"path": str(path), "description": description},
+                            ("path", "description"), written, name="write_file", is_cc_builtin=False, origin=None, db=None)
         data = await run_in_db(_read_bytes, relative)
         if data != text.encode("utf-8"):
             raise DraftStorageRefused(CHANGED_WHILE_SAVING)
