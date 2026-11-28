@@ -5,6 +5,7 @@ import { expect, type Page } from '@playwright/test';
 import { loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
 import { seedImageDocument, overlay } from '../support/docImageComments';
+import { PORTRAIT_CAP_PX, PORTRAIT_CAP_SVH } from '../../src/lib/cm/markdown-image-portrait';
 
 // A portrait image in a document (taller than wide) is held to a height that fits the window, its width following; a landscape or
 // square image is never capped; pins stay on the same spot of the image; a press still opens the image larger.
@@ -21,6 +22,8 @@ const filler = (n: number) => `Paragraph ${n}: the walkthrough continues with en
 const markdown = (name: keyof typeof FILES) => `![${FILES[name].alt}](shots/${name})`;
 const DOC = ['# Design walkthrough', '', filler(1), ...Object.keys(FILES).flatMap((name, i) => [markdown(name as keyof typeof FILES), '', filler(i + 2)])].join('\n');
 const REGION = { x: 0.3, y: 0.3, w: 0.3, h: 0.2 };
+/** The height a portrait image is held to at a window height: the same two numbers the editor's theme is built from. */
+const capAt = (windowHeight: number) => Math.min((PORTRAIT_CAP_SVH / 100) * windowHeight, PORTRAIT_CAP_PX);
 
 /** Put the pointer over the document's own column, which at 1440 sits right of the chat, so a wheel scrolls the document. */
 async function overDocument(page: Page) {
@@ -45,7 +48,7 @@ async function open(page: Page, request: Parameters<typeof seedImageDocument>[1]
 	await loginByUrl(page);
 	if (size.w <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(seeded.sessionTitle).first().click();
-	if (late) { await expect(page.getByText('Paragraph 1:').first()).toBeVisible(); return seeded; }
+	if (late) await expect(page.getByText('Paragraph 1:').first()).toBeVisible();
 	return seeded;
 }
 
@@ -95,7 +98,7 @@ for (const size of [PHONE, DESKTOP]) {
 			const rows = await measure(page);
 			expect(rows.length, 'every image of the document was measured').toBe(Object.keys(FILES).length);
 			await testInfo.attach(`sizes-${size.w}.json`, { body: JSON.stringify(rows, null, 1), contentType: 'application/json' });
-			const cap = Math.min(0.6 * size.h, 640);
+			const cap = capAt(size.h);
 			for (const row of rows) {
 				const ratio = row.naturalHeight / row.naturalWidth;
 				const uncappedWidth = Math.min(row.naturalWidth, row.column);
@@ -130,6 +133,7 @@ for (const size of [PHONE, DESKTOP]) {
 			const drawn = (await img.boundingBox())!.height;
 			await testInfo.attach(`late-${size.w}.json`, { body: JSON.stringify({ before, after, shift: after - before, drawn, loadedBefore }), contentType: 'application/json' });
 			expect(after - before, `the text moves down by at most the image's drawn height plus its padding (before ${before}, after ${after}, drawn ${drawn})`).toBeLessThanOrEqual(drawn + 20);
+			expect(after - before, `and by no more than the cap plus its padding, so an image that was not held to the cap fails here (cap ${capAt(size.h)})`).toBeLessThanOrEqual(capAt(size.h) + 20);
 		});
 
 		test('a pin stays on the same spot of its image, and a press opens the image larger', async ({ page, request }, testInfo) => {

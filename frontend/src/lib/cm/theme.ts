@@ -2,6 +2,7 @@ import '../components/commentAnchors.css';
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
+import { PORTRAIT_CAP_PX, PORTRAIT_CAP_SVH } from './markdown-image-portrait';
 
 /**
  * In a narrow fine-pointer window, a Comment offer with no margin beside a table sits under it (`offerPlace`). The table's
@@ -116,7 +117,7 @@ export const docTheme = EditorView.theme({
 	'.cm-md-image img': { display: 'block', maxWidth: '100%', height: 'auto' },
 	// A portrait image (marked once it loads, `markPortrait`) is also held to a height that fits the view, its width following to keep
 	// its shape; svh so a phone keyboard does not resize it. Landscape and square images are never capped.
-	'.cm-md-image-portrait img': { maxHeight: 'min(60svh, 640px)' },
+	'.cm-md-image-portrait img': { maxHeight: `min(${PORTRAIT_CAP_SVH}svh, ${PORTRAIT_CAP_PX}px)` },
 	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
 	// A cell image or diagram is a tab stop that Enter or Space opens (`widget-open.ts`), ringed as the selected image is.
