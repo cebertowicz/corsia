@@ -12,7 +12,7 @@
 	const missing = $derived(item.kind === 'draft' && 'missing' in item.detail && item.detail.missing);
 	const artifact = $derived(missing && 'artifact_id' in item.detail ? item.detail.artifact_id : null);
 	const thread = $derived(item.source.thread_id);
-	const label = $derived(item.source.thread_label === 'Untitled thread' || item.source.thread_label.length > 24
+	const label = $derived(item.kind === 'draft' && (item.source.thread_label === 'Untitled thread' || item.source.thread_label.length > 24)
 		? 'Open the chat' : `Open ${item.source.thread_label}’s chat`);
 </script>
 
