@@ -228,7 +228,7 @@ class ReadFileTool(Tool):
             from infra.database import get_db
             from registry import service
             from registry.doc_freshness import (
-                artifact_freshness, format_freshness, verification_hint,
+                artifact_freshness, format_freshness, read_banner, verification_hint,
             )
             from registry.shared_principals import is_shared_document_path
 
@@ -243,9 +243,10 @@ class ReadFileTool(Tool):
                 if projection is None:
                     return None
                 owner_name = str(projection["owner_name"])
-                banner = f"[Shared document · {format_freshness(projection, owner_name)}]"
-                hint = verification_hint(projection, str(artifact["id"]))
-                return f"{banner} {hint}" if hint else banner
+                return read_banner(
+                    format_freshness(projection, owner_name),
+                    verification_hint(projection, str(artifact["id"])),
+                )
             finally:
                 db.close()
 
@@ -342,6 +343,10 @@ class WriteFileTool(Tool):
         update_trigger: str | None = None,
         **kwargs: Any,
     ) -> str:
+        from registry.doc_freshness import strip_read_banner
+
+        # A copy of the line a read puts first is not part of the document, whatever the file; see `strip_read_banner`.
+        content = strip_read_banner(content)
         try:
             authorized = await _resolve_path_for_action(
                 tool=self,
