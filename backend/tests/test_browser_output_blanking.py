@@ -11,6 +11,7 @@ import html
 import json
 import os
 import re
+import time
 import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,7 +44,6 @@ def _saved(state) -> tuple[str, str]:
     return secret_text, marker
 
 
-# Under saved_logins.BLANKING_MIN characters, so it is never blanked.
 SHORT_VALUE = "short7x"
 
 
@@ -145,12 +145,30 @@ async def test_a_result_that_cant_be_checked_is_withheld(state, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_short_saved_value_and_unrelated_text_are_left_alone(state, monkeypatch):
+async def test_a_short_saved_value_is_hidden_but_not_inside_a_word(state, monkeypatch):
     saved_logins.save_login(site="https://example.com", username="me", password=SHORT_VALUE, saved_by="person")
-    _fake_owner(monkeypatch, KINDS["snapshot"]("short7x and ordinary text"))
+    _fake_owner(monkeypatch, KINDS["snapshot"]("short7x and xshort7xy"))
     text = await browser_runtime._run(["snapshot"], thread_id="thread-1")
-    assert "short7x and ordinary text" in text
-    assert blanking.BLANK not in text
+    assert "[hidden] and xshort7xy" in text
+
+
+@pytest.mark.parametrize("value", ["hunter22pass", "123-45-6789"])
+@pytest.mark.parametrize("escape", [r"\n", r"\r", r"\t", r"\b", r"\f", r"\u00a0", r"\u00A0", "%20", "%0A", r"\\n",
+                                    r"\x0a", r"\v", r"\0", r"\U0001F600", "%2520", "%253D", "%252520"])
+@pytest.mark.parametrize("side", ["before", "after"])
+def test_escaped_boundaries_hide_values(value, escape, side):
+    text = f"label{escape}{value}" if side == "before" else f"{value}{escape}label"
+    expected = f"label{escape}[hidden]" if side == "before" else f"[hidden]{escape}label"
+    assert blanking.blank(text, [value]) == expected
+
+
+def test_escape_between_saved_values_is_preserved_and_both_are_hidden():
+    assert blanking.blank("hunter22pass%2520hunter22pass", ["hunter22pass"]) == "[hidden]%2520[hidden]"
+
+
+def test_encoded_prefix_of_saved_value_is_hidden_with_the_value():
+    assert blanking.blank("q=%2F0", ["/0"]) == "q=[hidden]"
+    assert blanking.blank("q=%20a%20b", [" a b"]) == "q=[hidden]"
 
 
 @contextmanager
@@ -299,10 +317,9 @@ def test_each_whitespace_form_a_snapshot_shows_is_blanked(form, in_json):
     assert blanking.blank(f"<p>{shown}</p>", [value]) == f"<p>{blanking.BLANK}</p>"
 
 
-def test_a_value_without_whitespace_adds_no_form_and_a_short_trimmed_form_blanks_nothing():
+def test_short_trimmed_form_is_hidden_as_a_whole_token():
     assert blanking._whitespace_forms("Ab1-cd-ef") == {"Ab1-cd-ef"}
-    # Trimmed, this value is "ab": blanking it would wreck ordinary text, so only its own forms are blanked.
-    assert blanking.blank("a tab bar", ["ab      "]) == "a tab bar"
+    assert blanking.blank("a tab bar ab", ["ab      "]) == "a tab bar [hidden]"
 
 
 @pytest.mark.integration
@@ -462,3 +479,72 @@ def test_every_written_form_of_a_value_is_blanked_longest_first():
     value = "abc/def ghi\"jkl"
     text = " | ".join(sorted(blanking.encodings(value)))
     assert set(blanking.blank(text, [value]).split(" | ")) == {blanking.BLANK}
+
+
+@pytest.mark.parametrize("written", ["123456789", "123 45 6789", "123.45.6789", "1234-56789", "1  23/45-6789",
+                                     "123%2045%206789", "123+45+6789", "123%2F45%2f6789", r"123\/45\/6789"])
+def test_grouped_number_is_hidden_in_any_grouping(written):
+    assert blanking.blank(f"({written})", ["123-45-6789"]) == "([hidden])"
+
+
+@pytest.mark.parametrize("value,written", [("1234 5678 9012 3456", "1234567890123456"),
+                                           ("987/654/321", "987-65-4321")])
+def test_card_and_account_groupings(value, written):
+    assert blanking.blank(written, [value]) == blanking.BLANK
+
+
+@pytest.mark.parametrize("written", ["١٢٣", "%D9%A1%20%D9%A2%D9%A3", r"\u0661-\u0662\u0663"])
+def test_encoded_unicode_digit_groupings(written):
+    assert blanking.blank(f"({written})", ["١-٢٣"]) == "([hidden])"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Account123456789", "Account[hidden]"), ("123-45-6789SSN", "[hidden]SSN"),
+    ("x123456789y", "x[hidden]y"), ("_123456789_", "_[hidden]_"),
+    ("0123456789", "0123456789"), ("1234567890", "1234567890"),
+    ("٣123456789", "٣123456789"), ("123456789٣", "123456789٣"),
+    ("ssn%20123-45-6789", "ssn%20[hidden]"), (r"ssn\u00a0123-45-6789", r"ssn\u00a0[hidden]"),
+])
+def test_number_boundaries_allow_letters_but_not_digits(text, expected):
+    assert blanking.blank(text, ["123-45-6789"]) == expected
+
+
+def test_token_boundaries_and_non_alphanumeric_edges():
+    assert blanking.blank("a1 xa1 a1x éa1 a1٣ _a1_ !a1!", ["a1"]) == (
+        "[hidden] xa1 a1x éa1 a1٣ _[hidden]_ ![hidden]!")
+    assert blanking.blank("x!a1!y", ["!a1!"]) == "x[hidden]y"
+    assert blanking.blank("1234567890 6789", ["123-45-6789"]) == "1234567890 6789"
+
+
+@pytest.mark.parametrize("value,written", [("a~b", "a%7Eb"), ("a\"b", r'a\"b'), ("a&b", "a&amp;b")])
+def test_short_encoded_values(value, written):
+    assert blanking.blank(f"({written})", [value]) == "([hidden])"
+
+
+@pytest.mark.parametrize("base,value,written", [
+    ("https://example.com/a?p=", "a~b", "a%7Eb"),
+    ("https://example.com/a?p=", "abc~defgh", "abc%7Edefgh"),
+    ("https://example.com/a?p=", "a# b", "a#%20b"),
+    ("https://example.com/a?p=", "abcdef# gh", "abcdef#%20gh"),
+    ("https://example.com/", "a? b", "a?%20b"),
+    ("https://example.com/", "abcdef? gh", "abcdef?%20gh"),
+    ("https://example.com/a#", "a`b", "a%60b"),
+    ("https://example.com/a#", "abcdef`gh", "abcdef%60gh"),
+])
+def test_short_and_long_browser_url_forms(base, value, written):
+    assert blanking.blank(f"{base}{written}", [value]) == f"{base}[hidden]"
+
+
+@pytest.mark.parametrize("value,written", [("abc ", "abc"), ("abcdefgh ", "abcdefgh"),
+                                           (" abc", "%20abc"), (" abcdefgh", "%20abcdefgh"),
+                                           ("a b ", "a%20b")])
+def test_url_ending_with_a_value_whose_edge_space_is_serialized_or_trimmed(value, written):
+    assert blanking.blank(f"https://example.com/{written}", [value]) == "https://example.com/[hidden]"
+
+
+def test_blanking_large_page_with_many_values_is_fast():
+    values = [f"secret-{n:04d}-value" for n in range(200)]
+    page = ("ordinary page content, no saved value. " * 27000)[:999_982] + " " + values[137] + " "
+    started = time.perf_counter()
+    assert blanking.blank(page, values) == page.replace(values[137], blanking.BLANK)
+    assert time.perf_counter() - started < 3.0

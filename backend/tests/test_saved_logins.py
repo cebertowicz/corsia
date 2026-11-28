@@ -230,12 +230,15 @@ def test_an_unknown_or_malformed_id_is_refused(state, login_id):
     assert str(refused.value) == "No saved login has that id."
 
 
-def test_blanking_values_holds_every_saved_password_of_eight_or_more_characters(state):
+def test_blanking_values_holds_every_saved_password(state):
     _save(username="a", password="12345678")
     _save(username="b", password="1234567")
     stale = _save(username="c", password="out of date but still blanked")
     saved_logins.mark_out_of_date(stale)
-    assert saved_logins.blanking_values() == frozenset({"12345678", "out of date but still blanked"})
+    values = saved_logins.blanking_values()
+    assert {"12345678", "out of date but still blanked"} <= values
+    assert len(values) == 3
+    assert any(len(value) < 8 for value in values)
 
 
 def test_a_view_has_no_password_field(state):
