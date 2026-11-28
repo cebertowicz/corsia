@@ -54,16 +54,37 @@ def link_requested(node_id: str, params: dict, actor, *, db) -> None:
     )
 
 
+def _bar_steps_from() -> str:
+    """Open person steps that take a document as input; the newest link's step owns its bar."""
+    return f"""FROM plan_node_artifact_links l
+             CROSS JOIN plan_nodes n ON n.id=l.node_id
+             CROSS JOIN plans p ON p.id=n.plan_id
+             LEFT JOIN threads t ON t.id=p.owner_id
+            WHERE l.role='input' AND n.kind='task' AND n.assignee='user'
+              AND {node_states.open_sql('n')}"""
+
+
+_BAR_ORDER = "l.created_at DESC, l.node_id DESC"
+
+
 def for_nodes(db, node_ids) -> dict[str, str]:
-    """Each person step among ``node_ids`` with the instructions document it was given."""
+    """Each person step among ``node_ids`` whose instructions document's bar settles that step.
+
+    A document whose bar belongs to another step (see ``read_for_artifact``) is left out, so a
+    row never opens a Done that settles a different task.
+    """
     ids = [str(node_id) for node_id in node_ids]
     if not ids:
         return {}
     rows = db.execute(
-        "SELECT node_id, artifact_id FROM plan_node_artifact_links"
-        " WHERE provenance=? AND role='input' AND node_id IN (SELECT value FROM json_each(?))"
-        " ORDER BY created_at",
-        (PROVENANCE, json.dumps(ids)),
+        f"""SELECT node_id, artifact_id FROM (
+            SELECT l.node_id, l.artifact_id, l.provenance,
+                   row_number() OVER (PARTITION BY l.artifact_id ORDER BY {_BAR_ORDER}) AS rn
+              {_bar_steps_from()}
+               AND l.artifact_id IN (SELECT artifact_id FROM plan_node_artifact_links
+                    WHERE provenance=? AND role='input' AND node_id IN (SELECT value FROM json_each(?))))
+            WHERE rn=1 AND provenance=? AND node_id IN (SELECT value FROM json_each(?))""",
+        (PROVENANCE, json.dumps(ids), PROVENANCE, json.dumps(ids)),
     ).fetchall()
     return {str(row["node_id"]): str(row["artifact_id"]) for row in rows}
 
@@ -72,14 +93,8 @@ def read_for_artifact(artifact_id: str, *, db) -> dict | None:
     """Return the one open person step whose input is this instructions document."""
     row = db.execute(
         f"""SELECT n.id,n.title,n.revision,n.plan_id,p.owner_id,t.title AS owner_title
-             FROM plan_node_artifact_links l
-             CROSS JOIN plan_nodes n ON n.id=l.node_id
-             CROSS JOIN plans p ON p.id=n.plan_id
-             LEFT JOIN threads t ON t.id=p.owner_id
-            WHERE l.artifact_id=? AND l.role='input'
-              AND n.kind='task' AND n.assignee='user'
-              AND {node_states.open_sql('n')}
-            ORDER BY l.created_at DESC LIMIT 1""",
+             {_bar_steps_from()} AND l.artifact_id=?
+            ORDER BY {_BAR_ORDER} LIMIT 1""",
         (artifact_id,),
     ).fetchone()
     if row is None:
