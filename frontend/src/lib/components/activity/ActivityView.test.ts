@@ -266,6 +266,14 @@ describe('Activity list', () => {
 		expect(onSelectThread).toHaveBeenCalledWith('thread-1');
 	});
 
+	it.each(['Untitled thread', '1234567890123456789012345'])('keeps the named chat label for other fallback rows: %s', async (name) => {
+		served = [activityItem({ key: 'review:unavailable', kind: 'review', title: 'Review',
+			source: activitySource(name, 'thread-1'), open: null, detail: { artifact_id: null } })];
+		const onSelectThread = render(); await settle();
+		buttonNamed(`Open ${name}’s chat`)!.click();
+		expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+	});
+
 	it('opens an untitled missing draft chat with a natural label', async () => {
 		served = [activityItem({ key: 'draft:missing', kind: 'draft', title: 'Email draft',
 			source: activitySource('Untitled thread', 'thread-1'),
