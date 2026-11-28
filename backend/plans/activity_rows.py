@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from plans import activity_facts, activity_projection, activity_reducer, attention_detail, node_states, operator_display_state, person_comment_task, user_ask
+from plans import activity_facts, activity_projection, activity_reducer, attention_detail, node_states, operator_display_state, person_comment_task, user_ask, user_step_instructions
 from plans.boundary import PlanActor
 from infra.activity_queue_base import clip_title
 from infra.auth import may_access_artifact
@@ -74,10 +74,13 @@ def rows(db, user_id, annotated):
     node_ids = [n["id"] for n in task_nodes]
     details = {r["id"]: dict(r) for r in db.execute("SELECT id,title,description,revision,created_at FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(node_ids),))}
     links = person_comment_task.comment_tasks(db, node_ids)
+    # A person step given an instructions document opens it, as its plan row does; the document's
+    # bar carries the step's Done.
+    steps = {node: doc for node, doc in user_step_instructions.for_nodes(db, node_ids).items() if node not in links}
     # Match the artifact route's owner selection; access is that route's own predicate, one
     # thread read per comment-linked task, so a change to the rule governs these rows too.
     authorized_artifacts = set()
-    if links:
+    if links or steps:
         for r in db.execute("""SELECT artifact_id, parent_thread_id FROM (
             SELECT i.id AS artifact_id, reg.parent_thread_id,
                    row_number() OVER (PARTITION BY i.id ORDER BY
@@ -85,7 +88,7 @@ def rows(db, user_id, annotated):
                        reg.updated_at DESC, reg.id ASC) AS rn
               FROM artifact_identities i JOIN artifact_registrations reg ON reg.artifact_id=i.id
              WHERE i.state='active' AND reg.relationship_state IN ('owner-pinned','owner-active')
-               AND i.id IN (SELECT value FROM json_each(?))) WHERE rn=1""", (json.dumps(list(links.values())),)):
+               AND i.id IN (SELECT value FROM json_each(?))) WHERE rn=1""", (json.dumps(sorted({*links.values(), *steps.values()})),)):
             owner = r['parent_thread_id']
             if owner and may_access_artifact(owner, user_id, db=db):
                 authorized_artifacts.add(r['artifact_id'])
@@ -105,7 +108,9 @@ def rows(db, user_id, annotated):
         artifact_id = links.get(node["id"])
         if artifact_id and artifact_id not in authorized_artifacts:
             continue
-        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":artifact_id} if artifact_id else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], "description":detail["description"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":0})
+        step_doc = steps.get(node["id"])
+        opened = artifact_id or (step_doc if step_doc in authorized_artifacts else None)
+        out.append({"renderer":"task", "kind":"task", "key":f"task:{node['id']}", "external_id":node["id"], "title":detail["title"], "raised_at":detail["created_at"], "source":sources.get(plans[node["plan_id"]]["owner_id"], dict(attention_detail._UNKNOWN_SOURCE)), "open":{"artifact_id":opened} if opened else None, "detail":{"plan_id":node["plan_id"], "node_id":node["id"], "revision":detail["revision"], "description":detail["description"], **({"comment_artifact_id":artifact_id} if artifact_id else {})}, "priority":0})
     return out
 
 

@@ -127,3 +127,29 @@ def test_ask_from_later_node_has_no_review_row(isolated_db):
         assert reviews() == []
     finally:
         db.close()
+
+
+def test_person_step_row_opens_its_instructions_document(isolated_db):
+    """A person step given an instructions document opens it from Activity, as its plan row does."""
+    from plans import artifact_links, user_step_instructions
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc = seed_document(db, 'owner', name='runner-steps.md')
+        with write_transaction(db, scope='step_instructions') as conn:
+            plan = service.ensure_plan('thread', 'owner', db=conn)
+            step = service.add_node(plan.id, kind='task', title='Start the runner', acceptance_criteria='Done',
+                                    description='Steps in the linked doc.', assignee='user', actor_id=None,
+                                    provenance='test', db=conn)
+            bare = service.add_node(plan.id, kind='task', title='No document', acceptance_criteria='Done',
+                                    assignee='user', actor_id=None, provenance='test', db=conn)
+            artifact_links.link(step.id, doc, 'input', actor_id='owner',
+                                provenance=user_step_instructions.PROVENANCE, db=conn)
+        rows = {r['detail']['node_id']: r for r in projection.rows(db, 'owner-token', []) if r['kind'] == 'task'}
+        assert rows[step.id]['open'] == {'artifact_id': doc}
+        assert 'comment_artifact_id' not in rows[step.id]['detail']
+        assert rows[step.id]['detail']['description'] == 'Steps in the linked doc.'
+        assert rows[bare.id]['open'] is None
+        assert len(projection.dedupe_comment_tasks(db, 'owner-token', list(rows.values()), [])) == 2
+    finally:
+        db.close()

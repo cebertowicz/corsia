@@ -1,7 +1,11 @@
 """Validate and project a person step's linked instructions document."""
 from __future__ import annotations
 
+import json
+
 from plans import node_states, service
+
+PROVENANCE = "plans.person_step_instructions"
 
 
 def artifact_id(params: dict, actor, *, db) -> str | None:
@@ -46,8 +50,22 @@ def link_requested(node_id: str, params: dict, actor, *, db) -> None:
 
     artifact_links.link(
         node_id, requested_id, "input", actor_id=actor.thread_id,
-        provenance="plans.person_step_instructions", db=db,
+        provenance=PROVENANCE, db=db,
     )
+
+
+def for_nodes(db, node_ids) -> dict[str, str]:
+    """Each person step among ``node_ids`` with the instructions document it was given."""
+    ids = [str(node_id) for node_id in node_ids]
+    if not ids:
+        return {}
+    rows = db.execute(
+        "SELECT node_id, artifact_id FROM plan_node_artifact_links"
+        " WHERE provenance=? AND role='input' AND node_id IN (SELECT value FROM json_each(?))"
+        " ORDER BY created_at",
+        (PROVENANCE, json.dumps(ids)),
+    ).fetchall()
+    return {str(row["node_id"]): str(row["artifact_id"]) for row in rows}
 
 
 def read_for_artifact(artifact_id: str, *, db) -> dict | None:
