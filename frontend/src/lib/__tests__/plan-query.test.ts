@@ -123,7 +123,7 @@ describe('ambient trigger lifecycle', () => {
 		const waiting = envelope('t-1');
 		waiting.plans = [{
 			plan: { id: 'p1', state: 'active', revision: 1 }, owner: { kind: 'thread', id: 't-1' },
-			progress: { done: 0, total: 1, open: 1, distribution: {} },
+			progress: { done: 0, total: 1, open: 1, open_above: 1, distribution: {} },
 			display: { label_key: 'waiting', tone_key: 'waiting', not_moving: { next_overdue_at: overdueAt } },
 			oversize: null, current_node_ids: [], next_node_ids: [], nodes: [], folds: [], root_count: 0,
 		} as never];

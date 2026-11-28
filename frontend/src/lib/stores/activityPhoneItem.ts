@@ -7,6 +7,10 @@ import { writable } from 'svelte/store';
 export interface ActivityPhoneItem {
 	backLabel: 'Your tasks' | 'Notifications';
 	onBack: () => void;
+	/** The open-items sheet covers the item's dock while it is open. */
+	tabsOpen?: boolean;
+	/** The open item uses the same compact header as a chat artifact. */
+	artifact?:  { title: string; tabCount: number; anyChanged: boolean; onTabs: () => void };
 }
 
 export const activityPhoneItem = writable<ActivityPhoneItem | null>(null);

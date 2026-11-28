@@ -6,7 +6,7 @@ import type {
 	ActivityReviewDetail,
 	ActivityTaskDetail,
 } from '$lib/api/activityQueue';
-import type { DecisionDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
+import { isPickAny, OTHER_OPTION_ID, type DecisionDetail, type HeldReplyDetail } from '$lib/api/attentionQueue';
 export { findDocument } from '$lib/findDocument';
 import { parseWsTimestamp } from '$lib/time';
 
@@ -17,6 +17,7 @@ export const KIND_LABEL: Record<ActivityKind, string> = {
 	document: 'Document',
 	message: 'Message',
 	chat: 'Chat',
+	draft: 'Draft',
 };
 
 /** Activity's two lists. A document with unread replies is a notification; everything else is a task. */
@@ -114,13 +115,44 @@ export function keepInPlace(
 	return [...items.slice(0, place), kept, ...items.slice(place)];
 }
 
-export function documentOf(item: ActivityQueueItem): { artifactId: string; commentId?: string } | null {
-	if (item.open && 'artifact_id' in item.open) {
-		return { artifactId: item.open.artifact_id, commentId: item.open.comment_id };
-	}
-	return null;
+export function documentOf(item: ActivityQueueItem): { artifactId: string | null; path?: string; commentId?: string } | null {
+	if (!item.open) return null;
+	if ('path' in item.open) return { artifactId: item.open.artifact_id, path: item.open.path };
+	return { artifactId: item.open.artifact_id, commentId: item.open.comment_id };
 }
 
+
+/** Find a rekeyed row for the same open document and reply. */
+export function matchingDocumentRows(lastOpen: ActivityQueueItem, current: readonly ActivityQueueItem[]): ActivityQueueItem[] {
+	const doc = documentOf(lastOpen);
+	return doc ? current.filter((item) => {
+		const candidate = documentOf(item);
+		return item.kind === lastOpen.kind && !!candidate
+			&& (doc.artifactId ? candidate.artifactId === doc.artifactId : !!doc.path && candidate.path === doc.path)
+			&& candidate.commentId === doc.commentId && item.source.thread_id === lastOpen.source.thread_id;
+	}) : [];
+}
+
+/** The document that can stay open after its review or email draft settles. */
+export function settledArtifact(item: ActivityQueueItem | null): string | null | undefined {
+	return item?.kind === 'review' ? documentOf(item)?.artifactId
+		: item?.kind === 'draft' && 'unread_replies' in item.detail && item.detail.unread_replies
+			&& 'artifact_id' in item.detail ? item.detail.artifact_id : undefined;
+}
+
+/** Read through the latest reply shown by a document row. */
+export function readThrough(item: ActivityQueueItem) {
+	const detail = documentDetailOf(item);
+	return detail ? { artifact_id: detail.artifact_id, through_reply_id: detail.latest_reply_id } : null;
+}
+
+/** A pick-any answer may be empty; a free-text option needs text. */
+export function answerIsReady(decision: DecisionDetail | null, selected: string | null, other: string): boolean {
+	if (!decision) return false;
+	if (isPickAny(decision)) return true;
+	if (!selected) return false;
+	return selected !== OTHER_OPTION_ID || other.trim().length > 0;
+}
 
 export const decisionOf = (item: ActivityQueueItem) =>
 	item.kind === 'decision' ? (item.detail as DecisionDetail) : null;
@@ -129,7 +161,7 @@ export const heldOf = (item: ActivityQueueItem) =>
 export const taskOf = (item: ActivityQueueItem) =>
 	item.kind === 'task' ? (item.detail as ActivityTaskDetail) : null;
 export const reviewOf = (item: ActivityQueueItem) =>
-	item.kind === 'review' ? (item.detail as ActivityReviewDetail) : null;
+	item.kind === 'review' || item.kind === 'draft' ? (item.detail as ActivityReviewDetail) : null;
 export const chatDetailOf = (item: ActivityQueueItem): ActivityChatDetail | null =>
 	item.kind === 'chat' ? item.detail as ActivityChatDetail : null;
 

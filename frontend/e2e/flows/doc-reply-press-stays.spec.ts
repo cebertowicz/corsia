@@ -178,20 +178,33 @@ test('1440 docked list: pressing a card that is not open goes to its text', asyn
 	expect(Math.abs((await doc.evaluate((node) => node.scrollTop)) - before), 'the document did not go to the comment').toBeGreaterThan(200);
 });
 
-// Pinned as it is today, so a later change to it shows: unfolding the earlier replies in the phone sheet lifts the text out from under the taller sheet.
-test('393 sheet: unfolding the earlier replies lifts the document, as it does today', async ({ page, request }, info) => {
-	only(PHONE, info); test.setTimeout(180_000);
-	const seeded = await seedThread(request, 'phone unfold', 'top', 8);
-	await markRead(request, seeded);
-	const { card } = await openThread(page, request, PHONE, seeded);
-	const control = targetOf(card, 'earlier replies', 2);
-	await expect(control).toBeVisible();
-	const doc = page.locator('.cm-scroller').first();
-	const before = await doc.evaluate((node) => node.scrollTop);
-	await page.touchscreen.tap(...(await control.boundingBox().then((b) => [b!.x + b!.width / 2, b!.y + b!.height / 2] as const)));
-	await page.waitForTimeout(1500); await settled(page);
-	expect((await doc.evaluate((node) => node.scrollTop)) - before).toBeGreaterThan(50);
+// Unfolding the earlier replies in the phone sheet: the sheet keeps the height it had and the longer list scrolls inside it, so the page stays
+// where it is and the commented text stays above the sheet.
+const sheetState = (page: Page) => page.evaluate(() => {
+	const panel = document.querySelector('[data-adaptive-drawer] .drawer-panel') as HTMLElement, body = panel.querySelector('.drawer-body') as HTMLElement;
+	const anchor = document.querySelector('.cm-comment-anchor')!.getBoundingClientRect();
+	return { doc: document.querySelector('.cm-scroller')!.scrollTop, sheetHeight: panel.getBoundingClientRect().height, sheetTop: panel.getBoundingClientRect().top, anchorTop: anchor.top, anchorBottom: anchor.bottom, bodyScrolls: body.scrollHeight - body.clientHeight > 1 };
 });
+for (const [surface, position] of [[PHONE, 'top'], [PHONE, 'middle'], [NARROW, 'top']] as const) {
+	test(`${surface.name}: unfolding the earlier replies keeps the sheet's height and the page still, the text ${position} of the document in view`, async ({ page, request }, info) => {
+		only(surface, info); test.setTimeout(180_000);
+		const seeded = await seedThread(request, `${surface.mode} unfold ${position}`, position, 20);
+		await markRead(request, seeded);
+		const { card } = await openThread(page, request, surface, seeded);
+		const control = targetOf(card, 'earlier replies', 20);
+		await expect(control).toBeVisible();
+		await page.waitForTimeout(500); await settled(page);
+		const before = await sheetState(page);
+		await page.touchscreen.tap(...(await control.boundingBox().then((b) => [b!.x + Math.min(b!.width / 2, 60), b!.y + b!.height / 2] as const)));
+		await page.waitForTimeout(1500); await settled(page);
+		const after = await sheetState(page);
+		expect(Math.abs(after.doc - before.doc), 'the document scrolled').toBeLessThanOrEqual(STEADY);
+		expect(Math.abs(after.sheetHeight - before.sheetHeight), 'the sheet changed height').toBeLessThanOrEqual(1);
+		expect(after.anchorTop, 'the commented text left the screen').toBeGreaterThanOrEqual(0);
+		expect(after.anchorBottom, 'the sheet covers the commented text').toBeLessThanOrEqual(after.sheetTop + 1);
+		expect(after.bodyScrolls, 'the earlier replies did not scroll inside the sheet').toBe(true);
+	});
+}
 
 // "Go to text" on the card already open still takes the document to the text, however far the thread was read and the page left.
 // Only the docked list has the button to press: the margin card shows it only while its text shows, and the sheet's thread view has none.

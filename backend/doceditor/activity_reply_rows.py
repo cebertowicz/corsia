@@ -8,10 +8,12 @@ counting the whole canonical unread set through ``feedback_state`` directly.
 """
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 from doceditor import doc_sections
-from doceditor.feedback_state import unread_comment_rows
+from doceditor.feedback_state import _SCOPE_CHUNK, unread_comment_rows
 from infra.activity_queue_base import clip_title, flat as _flat
 from infra.auth import may_access_artifact
 from plans.public import UNKNOWN_THREAD_SOURCE, thread_sources
@@ -95,7 +97,72 @@ def _document_row(artifact: str, rows: list, sources: dict) -> dict:
     }
 
 
-def document_rows(db, user_id: str) -> list[dict]:
+def _person_documents(db) -> list[str]:
+    """The documents holding a comment by the person, in id order.
+
+    Only these can hold a qualifying reply: one needs the person to have written its
+    thread's root or a reply under it, on the same document. A comment by the person is
+    ``author_kind='user'``, as in the qualifying test below. ``INDEXED BY``: the person's
+    comments by time (idx_doc_comments_user_created) hold only their rows, so the read
+    never visits an agent's comment; with no ANALYZE the planner would scan every comment.
+    """
+    rows = db.execute("""SELECT DISTINCT artifact_id FROM doc_comments INDEXED BY idx_doc_comments_user_created
+                         WHERE author_kind='user' ORDER BY artifact_id""").fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _replies(db, user_id: str, scope: tuple[str, ...]) -> list:
+    """The qualifying unread replies on the given documents, by document, newest first."""
+    unread_sql, unread_params = unread_comment_rows(user_id, scope)
+    # The attention authorization seam requires a current routing owner; a
+    # released owner's registration is not an owner, even if comments can read it.
+    # One JSON list binds the scope here, so a full chunk stays under SQLite's bind limit.
+    sql = f"""
+    WITH owner_candidates AS (
+      SELECT r.artifact_id, r.parent_thread_id,
+             ROW_NUMBER() OVER (PARTITION BY r.artifact_id ORDER BY
+               CASE r.relationship_state WHEN 'owner-pinned' THEN 0 ELSE 1 END,
+               r.updated_at DESC, r.id ASC) AS pos
+      FROM artifact_registrations r
+      WHERE r.relationship_state IN ('owner-pinned','owner-active')
+        AND r.artifact_id IN (SELECT value FROM json_each(?))
+    ), unread AS (
+      SELECT root.id AS root_id, root.artifact_id AS root_artifact,
+             root.author_kind AS root_author_kind, item.id AS reply_id,
+             item.parent_id, item.author_kind, item.artifact_id,
+             item.created_at, item.author_thread_id
+      {unread_sql}
+    ), person_threads AS (
+      -- One row per thread avoids repeated person-reply lookups and join fan-out.
+      SELECT DISTINCT artifact_id, parent_id FROM doc_comments
+      WHERE author_kind='user' AND parent_id IS NOT NULL
+        AND artifact_id IN (SELECT value FROM json_each(?))
+    ), qualified AS (
+      SELECT u.*,
+             (u.parent_id IS NOT NULL AND u.author_kind='agent'
+              AND u.artifact_id=u.root_artifact
+              AND EXISTS (SELECT 1 FROM threads author WHERE author.id=u.author_thread_id AND author.user_id=?)
+              AND (u.root_author_kind='user' OR pt.parent_id IS NOT NULL)) AS qualifies
+      FROM unread u LEFT JOIN person_threads pt
+        ON pt.parent_id=u.root_id AND pt.artifact_id=u.root_artifact
+    ), counted AS (
+      SELECT u.*,
+             FIRST_VALUE(u.reply_id) OVER (PARTITION BY u.artifact_id
+               ORDER BY u.created_at DESC, u.reply_id DESC) AS latest_unread_id
+      FROM qualified u
+    )
+    SELECT c.root_id, c.reply_id, c.artifact_id, c.created_at, c.author_thread_id, c.latest_unread_id,
+           i.title AS artifact_title, i.path AS artifact_path, own.parent_thread_id AS owner_thread
+    FROM counted c
+    JOIN artifact_identities i ON i.id=c.artifact_id AND i.state='active'
+    JOIN owner_candidates own ON own.artifact_id=i.id AND own.pos=1
+    WHERE c.qualifies AND own.parent_thread_id IS NOT NULL AND own.parent_thread_id<>''
+    ORDER BY c.artifact_id, c.created_at DESC, c.reply_id DESC
+    """
+    return db.execute(sql, (json.dumps(scope), *unread_params, json.dumps(scope), user_id)).fetchall()
+
+
+def document_rows(db, user_id: str, *, timings: dict | None = None) -> list[dict]:
     """Return one row per document holding an unread agent reply to the person's comment.
 
     A document qualifies when an agent answered in a thread the person commented in, and
@@ -106,53 +173,41 @@ def document_rows(db, user_id: str) -> list[dict]:
     never older than the newest counted reply, one press clears every counted reply and
     the row with it; an item that arrives after the press stays unread until the next
     qualifying reply starts a new row.
+
+    Only the documents the person commented in are read, a chunk at a time, each through
+    its own index range, so a poll's cost follows those documents, not every comment.
     """
-    unread_sql, unread_params = unread_comment_rows(user_id, None)
-    # The attention authorization seam requires a current routing owner; a
-    # released owner's registration is not an owner, even if comments can read it.
-    sql = f"""
-    WITH owner_candidates AS (
-      SELECT r.artifact_id, r.parent_thread_id,
-             ROW_NUMBER() OVER (PARTITION BY r.artifact_id ORDER BY
-               CASE r.relationship_state WHEN 'owner-pinned' THEN 0 ELSE 1 END,
-               r.updated_at DESC, r.id ASC) AS pos
-      FROM artifact_registrations r
-      WHERE r.relationship_state IN ('owner-pinned','owner-active')
-    ), unread AS (
-      SELECT root.id AS root_id, item.id AS reply_id, item.artifact_id,
-             item.created_at, item.author_thread_id,
-             (item.parent_id IS NOT NULL AND item.author_kind='agent'
-              AND item.artifact_id=root.artifact_id
-              AND EXISTS (SELECT 1 FROM threads author WHERE author.id=item.author_thread_id AND author.user_id=?)
-              AND EXISTS (SELECT 1 FROM doc_comments person WHERE person.artifact_id=root.artifact_id
-                          AND person.author_kind='user' AND (person.id=root.id OR person.parent_id=root.id))
-             ) AS qualifies
-      {unread_sql}
-    ), counted AS (
-      SELECT u.*,
-             FIRST_VALUE(u.reply_id) OVER (PARTITION BY u.artifact_id
-               ORDER BY u.created_at DESC, u.reply_id DESC) AS latest_unread_id
-      FROM unread u
-    )
-    SELECT c.root_id, c.reply_id, c.artifact_id, c.created_at, c.author_thread_id, c.latest_unread_id,
-           i.title AS artifact_title, i.path AS artifact_path, own.parent_thread_id AS owner_thread
-    FROM counted c
-    JOIN artifact_identities i ON i.id=c.artifact_id AND i.state='active'
-    JOIN owner_candidates own ON own.artifact_id=i.id AND own.pos=1
-    WHERE c.qualifies AND own.parent_thread_id IS NOT NULL AND own.parent_thread_id<>''
-    ORDER BY c.artifact_id, c.created_at DESC, c.reply_id DESC
-    """
+    started = time.perf_counter()
+    documents = _person_documents(db)
+    person_ms = (time.perf_counter() - started) * 1000
     # Access is the artifact routes' own predicate, asked once per owner thread.
     access: dict[str, bool] = {}
-
-    def allowed(owner: str) -> bool:
-        if owner not in access:
-            access[owner] = may_access_artifact(owner, user_id, db=db)
-        return access[owner]
-
-    replies = [row for row in db.execute(sql, (user_id, *unread_params)).fetchall()
-               if allowed(row['owner_thread'])]
+    access_seconds = 0.0
+    reply_seconds = 0.0
+    reply_count = 0
+    chunks = 0
+    replies = []
+    for start in range(0, len(documents), _SCOPE_CHUNK):
+        started = time.perf_counter()
+        chunk = _replies(db, user_id, tuple(documents[start:start + _SCOPE_CHUNK]))
+        reply_seconds += time.perf_counter() - started
+        chunks += 1
+        reply_count += len(chunk)
+        for row in chunk:
+            owner = row['owner_thread']
+            if owner not in access:
+                started = time.perf_counter()
+                access[owner] = may_access_artifact(owner, user_id, db=db)
+                access_seconds += time.perf_counter() - started
+            if access[owner]:
+                replies.append(row)
+    started = time.perf_counter()
     sources = thread_sources(db, {str(r['author_thread_id']) for r in replies})
+    sources_ms = (time.perf_counter() - started) * 1000
+    if timings is not None:
+        timings.update(person_documents_ms=person_ms, person_documents_count=len(documents),
+                       replies_ms=reply_seconds * 1000, replies_chunks=chunks, replies_rows=reply_count,
+                       access_ms=access_seconds * 1000, access_owners=len(access), thread_sources_ms=sources_ms)
     groups: dict[str, list] = {}
     for row in replies:  # newest first within each document
         groups.setdefault(row['artifact_id'], []).append(row)

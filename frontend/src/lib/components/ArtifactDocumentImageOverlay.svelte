@@ -14,11 +14,13 @@
 	import type { DocumentImageComments } from '$lib/docViewerImages';
 	import type { TabDocumentImage } from '$lib/stores/tabViewState';
 
-	let { image, comments, target, place = null, onBack, onPlace, onReplyJump }: {
+	let { image, comments, target, tabThreadId = target.threadId, place = null, onBack, onPlace, onReplyJump }: {
 		image: TabDocumentImage;
 		/** From the document under the image as it is now; none when it cannot hold comments. */
 		comments?: DocumentImageComments;
 		target: DocViewerTarget;
+		/** The thread whose tab holds the open image: the leaf's own, not the document's when the leaf shows another thread's document. */
+		tabThreadId?: string | null;
 		place?: ImageViewportPlace | null;
 		onBack: () => void;
 		onPlace: (place: ImageViewportPlace) => void;
@@ -29,7 +31,7 @@
 	let destroyed = false;
 	onDestroy(() => { destroyed = true; });
 	async function refreshDiagram(): Promise<boolean> {
-		if (!comments || image.diagramSource === undefined || !target.threadId) return false;
+		if (!comments || image.diagramSource === undefined || !tabThreadId) return false;
 		const opened = image;
 		const next = await comments.refreshDiagram(opened.from, opened.to);
 		if (!next) return false;
@@ -37,7 +39,7 @@
 			releaseDiagramSnapshot(next.src);
 			return false;
 		}
-		return refreshTabDocumentImage(target.threadId, target.instanceId, opened, next);
+		return refreshTabDocumentImage(tabThreadId, target.instanceId, opened, next);
 	}
 	let hasDraft = $state(false);
 	let sheetUp = $state(false);
@@ -92,6 +94,7 @@
 					occurrence: { from: image.from, to: image.to },
 					post: (region, text, taggedAgentIds, mentions, press) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, press, image.diagramSource),
 					failure: comments.failure,
+					place: () => comments.placeOf(image.from, image.to),
 				}}
 				focus={image.focus ?? null}
 				feedback={comments.feedback ?? null}

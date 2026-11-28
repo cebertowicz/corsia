@@ -78,3 +78,8 @@ export async function readEmailDraftState(artifactId: string): Promise<EmailDraf
 export function discardEmailDraft(artifactId: string): Promise<DraftActionResult> {
 	return draftAction(artifactId, 'discard');
 }
+
+export async function acknowledgeEmailDraft(draftId: string): Promise<void> {
+	const response = await apiFetch(`/api/attention/drafts/${encodeURIComponent(draftId)}/acknowledge`, { method: 'POST' });
+	if (response.status !== 204) throw new Error('Acknowledgement failed');
+}

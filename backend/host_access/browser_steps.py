@@ -14,7 +14,7 @@ from typing import ClassVar
 from host_access import browser_pane_state
 from host_access.browser_domain import registrable_domain
 from infra import state
-from plans.public import MAX_NODE_TITLE
+from plans.public import MAX_NODE_TITLE, nodes_created_with
 
 PASSWORD_STEP_DESCRIPTION = (
     "Enter your password in the shared browser. The agent can't see this page and carries on once you're past it.")
@@ -112,6 +112,20 @@ class PersonStep(BrowserStep):
             "The agent can't see this page and carries on once you're past it."
             f"\n\n{self.instruction}"
         )
+
+
+# The creation provenance that marks a plan node as one of these steps; it never changes after the node is made.
+PROVENANCES = (PasswordStep.provenance, PersonStep.provenance)
+
+
+def browser_threads(db, owners: dict[str, str]) -> dict[str, str]:
+    """The thread whose shared browser each of these person steps is in, for those a shared browser opened.
+
+    ``owners`` maps a step's node id to the thread whose plan holds it: a step lives in the plan of the
+    thread whose browser opened it, so that owner is the browser's thread. Every surface that offers the
+    browser for a step reads it here.
+    """
+    return {node_id: owners[node_id] for node_id in nodes_created_with(list(owners), PROVENANCES, db=db)}
 
 
 # Each thread's open step. browser_step_lifecycle alone writes it; others read it here, so none imports the lifecycle.

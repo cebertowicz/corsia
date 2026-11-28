@@ -104,3 +104,35 @@ def read_origin(skill_folder: Path) -> dict[str, Any] | None:
         return None
     origin = sidecar.get("origin")
     return dict(origin) if isinstance(origin, dict) else None
+
+
+
+def follow_conductor(project_id: str, db) -> None:
+    """Hand a project's library copies to its current conductor, the only agent that can act on their notices.
+
+    Run before anything reads the copies' owner (a notice, or a project-scope change), so a conductor
+    change never leaves a copy, or its notices, with the previous one.
+    """
+    from events.connectors.library import INSTALLED_SKILL_TYPE, LIBRARY_INTEGRATION
+    from infra.conductor import get_scope_coordinator
+    from registry.ownership import rehome_artifact
+
+    conductor = get_scope_coordinator(project_id, db=db)
+    if conductor is None:
+        return
+    prefix = f"project/{project_id}/"
+    rows = db.execute(
+        """SELECT identities.external_id FROM artifact_identities AS identities
+             JOIN artifact_registrations AS registrations ON registrations.artifact_id=identities.id
+             WHERE identities.integration=? AND identities.type=? AND identities.state='active'
+               AND substr(identities.external_id, 1, ?)=? AND registrations.parent_thread_id<>?
+               AND registrations.relationship_state IN ('owner-active', 'owner-pinned')""",
+        (LIBRARY_INTEGRATION, INSTALLED_SKILL_TYPE, len(prefix), prefix, conductor),
+    ).fetchall()
+    for row in rows:
+        rehome_artifact(
+            integration=LIBRARY_INTEGRATION, type=INSTALLED_SKILL_TYPE, external_id=row["external_id"],
+            new_owner_thread_id=conductor, actor_thread_id=None, authority="conductor_change",
+            reason="a project's library copy belongs to its conductor", source_path="library.installed",
+            db=db, show_to_new_owner=False,
+        )

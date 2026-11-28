@@ -16,6 +16,7 @@ from infra.guidance_git import GitFault, file_version, workspace_repository
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from infra.system_package import system_package_dir
 from plans.public import PlanInputError
+from tools.workflow_run_parent import validate as validate_run_placement
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,20 @@ def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Wor
         )
 
 
+def prepare_mutation(
+    operation: str, params: dict[str, Any], workflows: dict[str, Workflow], db, plan_id: str, actor,
+) -> tuple[str | None, tuple[dict[str, Any], ...]]:
+    """Check a mutation against the workflow rules: the reference an add or insert names, then
+    where a run sits (``workflow_run_parent``). Returns the version and steps an add builds."""
+
+    if operation in {"add", "insert"}:
+        validate_creation_reference(params, workflows)
+    validate_run_placement(operation, params, db, plan_id, actor)
+    if operation not in {"add", "insert"}:
+        return None, ()
+    return creation_version(params, workflows), creation_run(params, workflows)
+
+
 def creation_version(params: dict[str, Any], workflows: dict[str, Workflow]) -> str | None:
     """Resolve the persisted workflow version from the named effective skill."""
 
@@ -298,8 +313,10 @@ def _system_workflow_version(skill) -> str | None:
 
 START_NOTICE = (
     "[Workflow skill · When you apply it and any \"Applying these steps\" note covers this run, "
-    "start one run: plan_update add with kind \"phase\", workflow_ref \"{name}\", a difficulty "
-    "and a size. CORSIA builds the steps; don't add them yourself. More: skill task-discipline, "
+    "start one run: plan_update add with kind \"phase\", workflow_ref \"{name}\", a difficulty, "
+    "a size and parent_id: the plain phase (no workflow_ref) that holds this piece of work; add "
+    "that phase first if it has none. CORSIA builds the steps; don't add them yourself. More: "
+    "skill task-discipline, "
     "Declared workflows.]"
 )
 

@@ -12,6 +12,7 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { emailTabTitle } from '$lib/emailDraft';
 
 	let { tabs, activeKey, onSelect, onClose, onCloseSheet }: {
 		tabs: ArtifactTab[];
@@ -30,6 +31,7 @@
 <AdaptiveDrawer ariaLabel="Open side panel items" heading="Open items" onClose={onCloseSheet}>
 	<ul class="sheet-list">
 		{#each tabs as t (t.instanceId)}
+			{@const title = emailTabTitle(t.artifactId ? $emailDraftHeaders[t.artifactId] : undefined, t.title)}
 			<li class="sheet-row" class:active={t.instanceId === activeKey}>
 				<button
 					class="sheet-pick"
@@ -47,7 +49,7 @@
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
 						{/if}
 					</span>
-					<span class="sheet-title">{t.title}</span>
+					<span class="sheet-title">{title}</span>
 					{#if t.status === 'error' || t.status === 'unavailable'}
 						<span class="sheet-tag err">{t.status === 'error' ? 'Failed' : 'Unavailable'}</span>
 					{:else if t.status === 'readonly'}
@@ -56,7 +58,7 @@
 						<span class="sheet-dot" aria-label="Updated elsewhere"></span>
 					{/if}
 				</button>
-				<button class="sheet-close" type="button" aria-label="Close {t.title}" onclick={() => onClose(t.instanceId)}>
+				<button class="sheet-close" type="button" aria-label="Close {title}" onclick={() => onClose(t.instanceId)}>
 					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
 				</button>
 			</li>

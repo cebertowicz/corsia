@@ -5,7 +5,7 @@ description: Use when evidence ties a wrong decision to delivered context, cross
 
 # Context stewardship
 
-Improve agent behavior, not prose volume. This covers context-delivery cost and placement. A design's total operating cost belongs to skill `product-thinking`.
+Improve agent behavior, not prose volume. This covers context-delivery cost and placement. A design's total operating cost is weighed when the design is made, not here.
 
 ## Diagnose first
 

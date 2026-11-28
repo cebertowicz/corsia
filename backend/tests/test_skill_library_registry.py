@@ -20,7 +20,7 @@ async def test_discard_confirmation_round_trips_through_the_tool_registry(isolat
     (folder / "SKILL.md").write_bytes(b"edited by the adopter")
     confirmed: list[bool] = []
 
-    def fake_execute(action, thread_id, thread, query, name, discard, digest=None):
+    def fake_execute(action, thread_id, thread, query, name, discard, digest=None, scope=None):
         refusal = skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md"], True, digest)
         if discard and not refusal:
             confirmed.append(True)

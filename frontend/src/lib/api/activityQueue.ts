@@ -7,10 +7,10 @@ import type { AttentionRenderer, AttentionSource, DecisionDetail, HeldReplyDetai
  * comments, newest reply first, never ranked. Only Activity reads this view; the plan pane reads the default view,
  * whose rows and renderers are unchanged.
  */
-export type ActivityKind = 'review' | 'decision' | 'task' | 'document' | 'message' | 'chat';
+export type ActivityKind = 'review' | 'decision' | 'task' | 'document' | 'message' | 'chat' | 'draft';
 
 /** What the pane opens: a document (at a comment), or nothing (the kind's own panel). */
-export type ActivityOpen = { artifact_id: string; comment_id?: string } | null;
+export type ActivityOpen = { artifact_id: string; comment_id?: string } | { path: string; artifact_id: string | null } | null;
 
 export interface ActivityRank {
 	position: number;
@@ -40,6 +40,8 @@ export interface ActivityTaskDetail {
 	revision: number;
 	/** The step's instructions, when the step carries them. */
 	description?: string | null;
+	/** The thread whose shared browser opened this step, when it is a browser step. */
+	browser_thread_id?: string;
 }
 
 /**
@@ -65,7 +67,7 @@ export interface ActivityQueueItem {
 	/** Stable across reads; what the ranker writes. */
 	key: string;
 	external_id: string;
-	renderer: AttentionRenderer | 'review' | 'task' | 'document' | 'chat';
+	renderer: AttentionRenderer | 'review' | 'task' | 'document' | 'chat' | 'draft';
 	kind: ActivityKind;
 	title: string;
 	raised_at: string | null;
@@ -78,7 +80,8 @@ export interface ActivityQueueItem {
 		| ActivityReviewDetail
 		| ActivityTaskDetail
 		| ActivityDocumentDetail
-		| ActivityChatDetail;
+		| ActivityChatDetail
+		| { artifact_id: string | null; missing?: boolean; unconfirmed?: boolean; unread_replies?: number };
 }
 
 export interface ActivityQueue {
@@ -128,10 +131,11 @@ function isActivityQueue(value: unknown): value is QueueBody {
 	return notifications === undefined || isList(notifications);
 }
 
-export async function fetchActivityQueue(projectId: string | null): Promise<ActivityQueue> {
+export async function fetchActivityQueue(projectId: string | null, signal?: AbortSignal): Promise<ActivityQueue> {
 	const query = new URLSearchParams({ view: 'activity' });
 	if (projectId) query.set('project_id', projectId);
-	const res = await apiFetch(`/api/attention/queue?${query.toString()}`);
+	const url = `/api/attention/queue?${query.toString()}`;
+	const res = await (signal ? apiFetch(url, { signal }) : apiFetch(url));
 	if (!res.ok) throw new ActivityQueueError(res.status);
 	const data: unknown = await res.json().catch(() => null);
 	// Anything else is not this view (an older server's queue, or a broken body): it shows as a failed read, never as

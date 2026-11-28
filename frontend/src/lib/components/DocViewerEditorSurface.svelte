@@ -10,7 +10,8 @@
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
-	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
+	import { coarsePointer, keepInBand, selectionButtonPlace } from '$lib/selectionButtonPlace';
+	import { visibleRegion } from '$lib/cm/visible-region';
 	import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import DocLoadState from './DocLoadState.svelte';
@@ -62,6 +63,7 @@
 		saveError,
 		pendingSel,
 		listOverText = false,
+		bottomClear = 0,
 		cardMode,
 		onTyping,
 		onStartComment,
@@ -101,6 +103,8 @@
 		pendingSel: PendingSelection | null;
 		/** The comment list is over the text (the sheet, whose closing scrim stays modal until its outro ends, or the list popover). */
 		listOverText?: boolean;
+		/** What stands at the canvas's foot over the text (the docked ask card): the touch Comment button is held above it. */
+		bottomClear?: number;
 		/** How a card opened from the text shows now (DocCommentSurface): over the text, as a popover or the sheet, only a click opens one. */
 		cardMode?: CardMode;
 		onTyping?: () => void;
@@ -165,16 +169,32 @@
 	export function editorView() { return editor?.editorView(); }
 	export function acceptSuggestion(text: string, eventId: string, ids: string[]) { return editor?.acceptSuggestion(text, eventId, ids) ?? false; }
 	export function clearInputSelection() { editor?.clearInputSelection(); }
+	export function offerFor(from: number, to: number) { return editor?.offerFor(from, to) ?? null; }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
 	const coarse = coarsePointer();
+	// The button is fixed to the window, so it is read again whenever the document scrolls: a selection that is taller than the
+	// window, or has scrolled away, keeps it at the edge of what the reader sees nearest the selection.
+	let scrolled = $state(0);
+	$effect(() => {
+		const view = pendingSel ? untrack(() => editor?.editorView()) : undefined;
+		if (!view) return;
+		const scroller = visibleRegion(view).scroller;
+		const bump = () => { scrolled += 1; };
+		scroller.addEventListener('scroll', bump, { passive: true });
+		return () => scroller.removeEventListener('scroll', bump);
+	});
+	let buttonHeight = $state(0);
 	const place = $derived.by(() => {
 		if (!pendingSel) return null;
+		void scrolled;
 		// An offer placed by its widget (above a cell, or at the point it gives) sits as given.
 		if (pendingSel.above || pendingSel.exact) return { top: pendingSel.top, above: !!pendingSel.above, below: !!pendingSel.below };
-		const { top, above } = selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse);
-		return { top, above, below: !above };
+		const placed = selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse);
+		const view = editor?.editorView();
+		const top = view ? keepInBand(placed, visibleRegion(view).band, buttonHeight, EDGE) : placed.top;
+		return { top, above: placed.above, below: !placed.above };
 	});
 	const refusedStale = $derived(!!tabInstanceId && !!$docSaveDrafts[tabInstanceId]?.stale);
 	const EDGE = 8;
@@ -202,7 +222,7 @@
 <div class="doc-main" class:email-mode={email} class:touch-reading={touchReading} bind:this={column}>
 	{#if docState === 'ready' && draft && artifactId}
 		{#key artifactId}
-			<EmailSendBar {artifactId} text={() => editor?.editorView()?.state.doc.toString() ?? value} targetVersion={email?.targetVersion ?? null} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} flush={onFlush} readState={() => readEmailDraftState(artifactId!)} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
+			<EmailSendBar {artifactId} draftId={draft.id} text={() => editor?.editorView()?.state.doc.toString() ?? value} targetVersion={email?.targetVersion ?? null} readAt={email?.readAt ?? null} initialState={draft.state ?? 'open'} {readOnly} connected={typingAllowed} blocker={attachments.find((item) => item.unavailable)?.name ?? null} bind:ended={sendEnded} flush={onFlush} readState={() => readEmailDraftState(artifactId!)} onReread={() => readAttempt += 1} onRefused={(reason) => { context = { artifactId: artifactId!, read: { status: 'error', reason, conversation: [], notes: [], attachments: [] } }; }} />
 		{/key}
 	{/if}
 	{#if docState === 'loading' || docState === 'error'}
@@ -224,11 +244,11 @@
 {/snippet}
 
 {#if touchReading}
-	<DocTouchCommentBar {column} offered={!!pendingSel && !listOverText}>
+	<DocTouchCommentBar {column} above={bottomClear} offered={!!pendingSel && !listOverText}>
 		<button class="sel-comment" onpointerdown={(event) => event.preventDefault()} onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>{@render commentFace()}</button>
 	</DocTouchCommentBar>
 {:else if pendingSel && !listOverText}
-	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth} bind:offsetHeight={buttonHeight}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>
 		{@render commentFace()}
 	</button>

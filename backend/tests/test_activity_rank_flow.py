@@ -198,6 +198,32 @@ def test_the_runners_own_sweep_with_no_connection_records_note(db, monkeypatch):
     assert _unread_wakes(db) == 0 and db.execute('SELECT count(*) FROM messages').fetchone()[0] == before
 
 
+def test_new_email_draft_adds_no_wake_through_runner(db, monkeypatch, tmp_path):
+    """A new draft participates in the passive sweep without reading its file or waking an agent."""
+    import infra.database
+    from automation.continuation import runner
+    from automation.continuation.sources import activity_ranking
+    from infra import activity_draft_rows
+    from infra.platform_paths import WorkspaceSelection
+    from tools.action_drafts import create_draft
+
+    seed(db)
+    monkeypatch.setattr(activity_draft_rows.config, 'WORKSPACE', tmp_path)
+    monkeypatch.setattr(activity_draft_rows.config, 'WORKSPACE_SELECTION',
+                        WorkspaceSelection(workspace_id='workspace-stable-id', root=tmp_path, name='Test workspace'))
+    (tmp_path / 'email-drafts').mkdir()
+    (tmp_path / 'email-drafts/example.md').write_bytes(b'Subject: Example')
+    pooled = lambda: _DbProxy(db)  # noqa: E731
+    for module in (infra.database, runner, activity_ranking):
+        monkeypatch.setattr(module, 'get_db', pooled)
+    monkeypatch.setattr(activity_draft_rows, '_read_bytes', lambda path: (_ for _ in ()).throw(AssertionError('file read')))
+    before = db.execute('SELECT count(*) FROM messages').fetchone()[0]
+    saved = create_draft('root', 'email', 'email-drafts/example.md', b'Subject: Example', db=db)
+    assert runner._prepare('2026-01-01T00:00:00+00:00', [activity_ranking.ActivityRankingSource()], None) == []
+    assert any(f"draft:{saved['draft_id']}" in note['summary'] for note in _notes(db))
+    assert _unread_wakes(db) == 0 and db.execute('SELECT count(*) FROM messages').fetchone()[0] == before
+
+
 def test_nudge_failed_enqueue_does_not_throttle(db, monkeypatch):
     from automation.continuation.sources import activity_ranking
     seed(db)

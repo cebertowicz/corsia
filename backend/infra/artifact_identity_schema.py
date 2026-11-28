@@ -12,6 +12,15 @@ CREATE INDEX IF NOT EXISTS idx_artifact_identities_decision_source
     WHERE integration='local' AND type='plan-decision' AND json_valid(metadata);
 """
 
+#: The attention queue reads the identities its metadata marks raised (``registry.attention``)
+#: on every poll; without this index that read parses every active identity's metadata.
+#: Partial on well-formed metadata, as above; the read names the same conditions.
+ATTENTION_STATE_INDEX_SQL = """\
+CREATE INDEX IF NOT EXISTS idx_artifact_identities_attention_state
+    ON artifact_identities(json_extract(metadata, '$.attention_state'))
+    WHERE state='active' AND json_valid(metadata);
+"""
+
 ARTIFACT_IDENTITY_SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS artifact_identities (
         id TEXT PRIMARY KEY,
@@ -31,4 +40,4 @@ CREATE TABLE IF NOT EXISTS artifact_identities (
     );
 CREATE INDEX IF NOT EXISTS idx_artifact_identities_upload_path
     ON artifact_identities(path) WHERE integration='upload';
-""" + DECISION_SOURCE_INDEX_SQL
+""" + DECISION_SOURCE_INDEX_SQL + ATTENTION_STATE_INDEX_SQL

@@ -7,7 +7,7 @@ import { get } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
 import * as Y from 'yjs';
 import DocViewer from './DocViewer.svelte';
-import { PostTimeoutError } from '$lib/api/boundedRequest';
+import { COMMENT_POST_TIMEOUT_MS, PostTimeoutError } from '$lib/api/boundedRequest';
 import { connectionState } from '$lib/stores/connection';
 import { emit } from '$lib/ws/events';
 import { encodeUpdate } from '$lib/stores/documentWire';
@@ -17,7 +17,9 @@ import { discardCommentDraft } from '$lib/stores/commentDraft';
 import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { toasts } from '$lib/stores/toast';
 import { docComments, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
-import { resetCommentPostTiming } from '$lib/stores/commentPostTiming';
+import { posting, resetCommentPostTiming } from '$lib/stores/commentPostTiming';
+import { unsentComments } from '$lib/stores/unsentComments.svelte';
+import { user } from '$lib/stores/auth';
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn(), postComment: vi.fn() }));
 vi.mock('$lib/api/docs', async original => ({ ...await original<typeof import('$lib/api/docs')>(), ...api }));
 const wire = vi.hoisted(() => ({ frames: [] as Record<string, any>[] }));
@@ -28,6 +30,12 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 } }));
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
 
+/**
+ * The document's text. Its `beta` (6-10) cannot be told apart: the other copy has the same text after it, so a comment on
+ * it keeps no place and does not go on its own; Comment is pressed again after a failure. One on a passage it can be told
+ * by is sent again without a press (the last test).
+ */
+const TEXT = 'alpha beta gamma and the rest of this line. alpha beta gamma and the rest of this line.';
 const target = { instanceId: 'comment-retry-viewer', path: '/documents/doc.md', name: 'doc.md', projectId: 'project', threadId: 'thread', artifactId: 'artifact' };
 let host: HTMLElement, component: ReturnType<typeof mount> | undefined, stop: () => void, server: Y.Doc | undefined;
 
@@ -62,7 +70,7 @@ beforeEach(() => {
 			to_off: fields.to_off, author: 'you', author_kind: 'user', created_at: '2026-11-18T00:00:00Z', parent_id: null, review: false, resolved: false,
 			replies: [], tagged_agent_ids: [...new Set<string>(fields.tagged_agent_ids ?? [])].sort() };
 		store.rows.set(fields.client_id, row);
-		if (store.unanswered) { store.unanswered = false; throw new PostTimeoutError(12_000); }
+		if (store.unanswered) { store.unanswered = false; throw new PostTimeoutError(COMMENT_POST_TIMEOUT_MS); }
 		return row;
 	});
 });
@@ -84,18 +92,18 @@ async function mountViewer() {
 async function openLive() {
 	await mountViewer();
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_open')!;
-	server = new Y.Doc(); server.getText('text').insert(0, 'alpha beta gamma');
+	server = new Y.Doc(); server.getText('text').insert(0, TEXT);
 	emit('doc_opened', { type: 'doc_opened', live: true, writable: true, artifact_id: 'artifact', store_id: 'store',
 		request_id: ask.request_id, update: encodeUpdate(Y.encodeStateAsUpdate(server)), vector: encodeUpdate(Y.encodeStateVector(server)), pending: false, held: null });
-	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('alpha beta gamma'));
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe(TEXT));
 	emit('doc_ack', { type: 'doc_ack', artifact_id: 'artifact', store_id: 'store', message_ids: wire.frames.flatMap(frame => frame.message_id ? [frame.message_id] : []) });
 }
 /** A document that is not live: the comment posts with the offsets on screen. */
-async function openSaved() {
-	api.fetchContent.mockResolvedValue({ text: 'alpha beta gamma', writable: true, artifact: { id: 'artifact' }, freshness: null, live: false });
+async function openSaved(text = TEXT) {
+	api.fetchContent.mockResolvedValue({ text, writable: true, artifact: { id: 'artifact' }, freshness: null, live: false });
 	await mountViewer();
 	emit('doc_opened', { type: 'doc_opened', request_id: wire.frames.findLast(frame => frame.type === 'doc_open')!.request_id, live: false });
-	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('alpha beta gamma'));
+	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe(text));
 }
 const field = () => document.querySelector<HTMLTextAreaElement>('.composer textarea');
 const submit = () => document.querySelector<HTMLButtonElement>('.composer .submit')!;
@@ -190,10 +198,10 @@ for (const live of [true, false]) {
 			await unmount(component!); component = undefined; host.remove();
 			host = document.createElement('div'); document.body.appendChild(host);
 			component = mount(DocViewer, { target: host, props: { target } }); flushSync();
-			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('alpha beta gamma'));
+			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe(TEXT));
 		} else {
 			(component as unknown as { reload: () => void }).reload();
-			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe('alpha beta gamma'));
+			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe(TEXT));
 		}
 		await compose('Too vague');
 		await press(live);
@@ -223,4 +231,85 @@ it('a live document: a capture refused because the id is in use looks again and 
 	await vi.waitFor(() => expect(field()).toBeNull());
 	expect(api.postComment).toHaveBeenCalledOnce();
 	expect(shown()).toEqual(['Too vague']);
+});
+
+it('a document that is not live: a comment on a passage it can be told by reads "Sending…" after an unanswered press, and the next connection sends it once under its id', async () => {
+	user.set({ id: 'person-1', name: 'person-1' } as never);
+	try {
+		await openSaved('alpha beta gamma'); await compose('Too vague');
+		store.unanswered = true; store.lookupFails = true;
+		await press(false);
+		await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+		const first = posted()[0].client_id;
+		await vi.waitFor(() => expect(posting(first)).toBe(false));
+		flushSync();
+		expect(submit().textContent).toBe('Sending…');
+		expect(alert()).toBeNull();
+		store.lookupFails = false;
+		connectionState.set('disconnected'); connectionState.set('connected');
+		await unsentComments.settled();
+		await vi.waitFor(() => expect(field()).toBeNull());
+		expect(store.rows.size).toBe(1);
+		expect(posted().map(fields => fields.client_id)).toEqual([first, first]);
+		expect(shown()).toEqual(['Too vague']);
+	} finally {
+		user.set(null);
+	}
+});
+
+it('a document that is not live: the box\'s own press reads "Posting…", never "Sending…", while its post is out', async () => {
+	await openSaved('alpha beta gamma'); await compose('Too vague');
+	let answer!: (row: Record<string, unknown>) => void;
+	api.postComment.mockImplementationOnce((_artifact: string, fields: Record<string, any>) => new Promise((resolve) => {
+		answer = () => resolve({ id: fields.client_id, artifact_id: 'artifact', body: fields.body, anchor_text: fields.anchor_text, from_off: fields.from_off, to_off: fields.to_off,
+			author: 'you', author_kind: 'user', created_at: '2026-11-18T00:00:00Z', parent_id: null, review: false, resolved: false, replies: [], tagged_agent_ids: [] });
+	}));
+	await press(false);
+	await vi.waitFor(() => expect(api.postComment).toHaveBeenCalledOnce());
+	// The press keeps what its post needs, so the draft would go on its own if this post failed; the box still reads its own press.
+	await vi.waitFor(() => expect(keptCommentDrafts.pressed()).toHaveLength(1));
+	flushSync();
+	expect(submit().textContent).toBe('Posting…');
+	answer({}); await vi.waitFor(() => expect(field()).toBeNull());
+});
+
+it('a document that is not live: typing in a "Sending…" box makes it read Comment, and nothing goes on its own', async () => {
+	user.set({ id: 'person-1', name: 'person-1' } as never);
+	try {
+		await openSaved('alpha beta gamma'); await compose('Too vague');
+		store.unanswered = true; store.lookupFails = true;
+		await press(false);
+		await vi.waitFor(() => expect(posting(posted()[0].client_id)).toBe(false));
+		flushSync();
+		expect(submit().textContent).toBe('Sending…');
+		expect(field()!.readOnly).toBe(false);
+		type('Too vague, and long');
+		expect(submit().textContent).toBe('Comment');
+		store.lookupFails = false;
+		connectionState.set('disconnected'); connectionState.set('connected');
+		await unsentComments.settled();
+		expect(api.postComment).toHaveBeenCalledOnce();
+	} finally {
+		user.set(null);
+	}
+});
+
+it('a document that is not live: Cancel on a "Sending…" box with nothing out drops it, and nothing goes on its own after', async () => {
+	user.set({ id: 'person-1', name: 'person-1' } as never);
+	try {
+		await openSaved('alpha beta gamma'); await compose('Too vague');
+		store.unanswered = true; store.lookupFails = true;
+		await press(false);
+		await vi.waitFor(() => expect(posting(posted()[0].client_id)).toBe(false));
+		flushSync();
+		expect(submit().textContent).toBe('Sending…');
+		document.querySelector<HTMLButtonElement>('.composer .cancel')!.click(); flushSync();
+		expect(keptCommentDrafts.pressed()).toEqual([]);
+		connectionState.set('disconnected'); connectionState.set('connected');
+		document.dispatchEvent(new Event('visibilitychange'));
+		await unsentComments.settled();
+		expect(api.postComment).toHaveBeenCalledOnce();
+	} finally {
+		user.set(null);
+	}
 });

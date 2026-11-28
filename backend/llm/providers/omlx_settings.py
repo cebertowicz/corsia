@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
 
+from host_access.credential_sanitizer import is_credential_name
 from llm.model_metadata import extract_context_length
 from llm.providers.omlx_public_auth import public_headers
 from llm.providers.omlx_endpoints import (
@@ -18,8 +20,83 @@ from llm.providers.omlx_endpoints import (
 )
 
 
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_AUTHORITY_END_RE = re.compile(r"[/?#]")
+# A field whose last word is one of these holds a key value whenever that value is text:
+# admin_key, access_key, api_keys, tokens. Counts such as max_tokens are numbers and stay.
+_KEY_WORD_RE = re.compile(
+    r"(?:^|[-_.])(?:keys?|tokens?|secrets?|passwords?|passwd|credentials?)$", re.IGNORECASE,
+)
+_OMIT = object()
+
+
+def _holds_key(name: object, item: object) -> bool:
+    """Whether a settings field carries a key, token or password value."""
+    if is_credential_name(name):
+        return True
+    text_like = not isinstance(item, (bool, int, float)) and item is not None
+    return text_like and bool(_KEY_WORD_RE.search(str(name)))
+
+
+def _sub_key_label(entry: object) -> dict[str, Any]:
+    """A sub key's name and creation date; its value never leaves oMLX."""
+    if not isinstance(entry, dict):
+        return {}
+    return {k: entry[k] for k in ("name", "created_at") if k in entry}
+
+
+def _without_userinfo(key: str | None, value: str) -> object:
+    """A URL without its user:password part; _OMIT when the sign-in part can't be told apart."""
+    if "@" not in value:
+        return value
+    text = value.strip()
+    scheme = _SCHEME_RE.match(text)
+    if scheme:
+        prefix, rest = scheme.group(0), text[scheme.end():]
+    elif key and "proxy" in key.casefold():
+        prefix, rest = "", text
+    else:
+        return value
+    end = _AUTHORITY_END_RE.search(rest)
+    authority = rest[:end.start()] if end else rest
+    suffix = rest[len(authority):]
+    signs = authority.count("@")
+    # The value holds an '@' and the prefix can't, so it sits in the host part or past it.
+    # Past the host part it may close a password holding an unencoded '/', '?' or '#';
+    # more than one in the host part is ambiguous too. Only one '@', in the host part, is safe.
+    if signs != 1 or "@" in suffix:
+        return _OMIT
+    return prefix + authority.split("@", 1)[1] + suffix
+
+
+def display_safe(value: Any, key: str | None = None) -> Any:
+    """oMLX's settings without key, token or password values, for the person's screen and agents.
+
+    oMLX's /global-settings returns its admin key, every sub key and third-party keys in
+    plain text. This drops each credential-named field, keeps only a sub key's name and
+    date, and removes sign-in details from any URL such as a proxy.
+    """
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for name, item in value.items():
+            if name == "sub_keys" and isinstance(item, list):
+                safe[name] = [_sub_key_label(entry) for entry in item]
+                continue
+            if _holds_key(name, item):
+                continue
+            shown = display_safe(item, str(name))
+            if shown is not _OMIT:
+                safe[name] = shown
+        return safe
+    if isinstance(value, list):
+        return [shown for shown in (display_safe(item, key) for item in value) if shown is not _OMIT]
+    if isinstance(value, str):
+        return _without_userinfo(key, value)
+    return value
+
+
 async def get_settings(cfg: dict) -> dict[str, Any]:
-    """Read server-wide admin settings for display."""
+    """Read server-wide admin settings for display, with every key value removed."""
     try:
         resp = await admin_request(cfg, "GET", "/global-settings")
     except OmlxAdminError as e:
@@ -29,7 +106,7 @@ async def get_settings(cfg: dict) -> dict[str, Any]:
     except Exception as e:
         return {"ok": False, "message": str(e)}
     if resp.status_code == 200:
-        return {"ok": True, "settings": resp.json() or {}, "readonly": True}
+        return {"ok": True, "settings": display_safe(resp.json() or {}), "readonly": True}
     return {"ok": False, "message": f"HTTP {resp.status_code}"}
 
 

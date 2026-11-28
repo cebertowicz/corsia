@@ -81,6 +81,7 @@ def draft(plan_id: str, *, source_node_id, mutation_id: str, actor, provenance,
             result = replay
         else:
             result = _create(db, plan, source, author, content, bound, provenance)
+            result["next"] = _draft_next(author, _reviewer)
             receipts.record(
                 db, plan_id=plan["id"], mutation_id=mutation_id,
                 actor_id=bound.audit_id, operation="decision_draft",
@@ -98,6 +99,21 @@ def draft(plan_id: str, *, source_node_id, mutation_id: str, actor, provenance,
             drives=drives,
         )
     return notifications.DeferredMutation(result, ())
+
+
+#: A draft's result: what the person sees now and the step that comes next (#3401).
+DRAFT_NEXT_OWN = (
+    "The person can't see this decision until it is raised. Next: parent_review,"
+    " then raise; on your own plan you do both."
+)
+DRAFT_NEXT_PARENT = (
+    "The person can't see this decision until it is raised. The agent that"
+    " delegated this work to you reviews and raises it."
+)
+
+
+def _draft_next(author: str, reviewer: str | None) -> str:
+    return DRAFT_NEXT_PARENT if reviewer and reviewer != author else DRAFT_NEXT_OWN
 
 
 def raise_offer(db, *, plan_id: str, source_node_id: str, content: dict, provenance: str) -> dict:
@@ -173,6 +189,7 @@ def parent_review(decision_id: str, *, expected_revision, mutation_id, actor,
     """Record the parent tier's compliance review before any user raise (E5)."""
 
     def apply(db, plan, decision, source, bound):
+        authz.require_raise_tier(db, plan, bound)
         authz.require_reviewer(db, plan, source, bound)
         authz.require_revision(decision, expected_revision)
         authz.require_state(decision, ("draft",))
@@ -190,9 +207,10 @@ def raise_to_user(decision_id: str, *, expected_revision, mutation_id, actor,
     """Activate the one attention identity for a parent-reviewed decision."""
 
     def apply(db, plan, decision, source, bound):
+        authz.require_raise_tier(db, plan, bound)
         authz.require_reviewer(db, plan, source, bound)
         authz.require_revision(decision, expected_revision)
-        authz.require_state(decision, ("parent_reviewed",))
+        authz.require_reviewed_for_raise(decision)
         return raise_decision(db, decision, bound, provenance)
 
     return _perform(decision_id, "decision_raise", {}, mutation_id=mutation_id,

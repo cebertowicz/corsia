@@ -16,6 +16,9 @@ from plans.workflow_fields import STEPS_CREATED
 from tests.event_routing_helpers import mk_session
 from tests.plan_execution_helpers import execute_as, open_turn, registry_of
 from tests.skill_sidecar_helpers import POINTER
+from tools.workflow_run_parent import (
+    RUN_PARENT_REFUSAL, PlanInputError, validate_run_move, validate_run_parent,
+)
 from tools import workflow_task_fields
 from tools.plans import PlanUpdateTool
 
@@ -79,10 +82,20 @@ class Run:
         )
         return text if text.startswith("Error") else json.loads(text)
 
+    async def work(self) -> str:
+        """The plain phase that holds this piece of work, where every run starts."""
+        if getattr(self, "work_id", None) is None:
+            phase = await self.update("add", {
+                "kind": "phase", "title": "Release notes", "acceptance_criteria": "Notes shipped",
+            })
+            self.work_id = phase["node"]["id"]
+        return self.work_id
+
     async def start(self, workflow: str, mutation_id: str | None = None, **params):
+        parent = {} if "parent_id" in params else {"parent_id": await self.work()}
         return await self.update("add", {
             "kind": "phase", "title": f"Run {workflow}", "acceptance_criteria": "Run recorded",
-            "workflow_ref": workflow, **{"size": "M", **params},
+            "workflow_ref": workflow, **parent, **{"size": "M", **params},
         }, mutation_id)
 
     def rows(self, sql: str, *args):
@@ -99,7 +112,11 @@ class Run:
         return self.rows("SELECT revision FROM plan_nodes WHERE id=?", node_id)[0]["revision"]
 
     def node_count(self) -> int:
-        return self.rows("SELECT COUNT(*) AS n FROM plan_nodes WHERE plan_id=?", self.plan_id)[0]["n"]
+        """Nodes in the plan, not counting the plain phase that holds the work."""
+        return self.rows(
+            "SELECT COUNT(*) AS n FROM plan_nodes WHERE plan_id=? AND id IS NOT ?",
+            self.plan_id, getattr(self, "work_id", None),
+        )[0]["n"]
 
 
 async def test_a_phase_add_builds_every_step_from_the_definition(isolated_db, tmp_path, monkeypatch):
@@ -237,3 +254,147 @@ async def test_a_run_that_cannot_be_built_creates_nothing(isolated_db, tmp_path,
 
     assert isinstance(refused, str) and refusal in refused
     assert run.node_count() == 0
+
+
+async def test_a_run_with_no_parent_is_refused_naming_the_fix(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+
+    refused = await run.start("ship", parent_id=None)
+
+    assert refused == (
+        f"Error: invalid request, fix and resend - {RUN_PARENT_REFUSAL}"
+    )
+    assert run.node_count() == 0
+
+
+async def test_an_insert_refuses_a_top_level_run_and_takes_one_beside_a_nested_sibling(
+    isolated_db, tmp_path, monkeypatch,
+):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    work = await run.work()
+    first = (await run.start("ship"))["node"]
+    params = {
+        "kind": "phase", "title": "Run again", "acceptance_criteria": "Run recorded",
+        "workflow_ref": "ship", "size": "M",
+    }
+
+    refused = await run.update("insert", {**params, "before_node_id": work})
+    nested = await run.update("insert", {**params, "before_node_id": first["id"]})
+
+    assert refused.endswith(RUN_PARENT_REFUSAL)
+    assert nested["node"]["parent_id"] == work
+    assert [step["title"] for step in nested["steps"]] == ["Draft it", "review", "polish"]
+
+
+async def test_a_plain_phase_still_starts_at_the_top_level(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+
+    work = await run.work()
+
+    assert run.rows("SELECT parent_id, workflow_ref FROM plan_nodes WHERE id=?", work) == [
+        {"parent_id": None, "workflow_ref": None},
+    ]
+
+
+async def test_track_is_no_longer_offered_and_names_the_kinds_left(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+
+    refused = await run.update("add", {
+        "kind": "track", "title": "Side work", "acceptance_criteria": "Done", "size": "S",
+        "intent": "Keep side work together",
+    })
+
+    assert isinstance(refused, str) and "must be one of ['phase', 'task']" in refused
+    assert run.node_count() == 0
+
+
+async def test_an_edit_refuses_lifting_a_run_to_the_top_level_and_moves_plain_work(
+    isolated_db, tmp_path, monkeypatch,
+):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    work = await run.work()
+    first = (await run.start("ship"))["node"]
+    task = (await run.update("add", {
+        "kind": "task", "title": "Check links", "acceptance_criteria": "Links work", "size": "S",
+        "intent": "Notes link to the right pages", "parent_id": work,
+    }))["node"]
+
+    single = await run.update("edit", {
+        "node_id": first["id"], "expected_revision": run.revision(first["id"]), "parent_id": None,
+    })
+    bulk = await run.update("edit", {"node_ids": [task["id"], first["id"]], "parent_id": None})
+    plain = await run.update("edit", {
+        "node_id": task["id"], "expected_revision": run.revision(task["id"]), "parent_id": None,
+    })
+
+    assert single.endswith(RUN_PARENT_REFUSAL)
+    assert bulk.endswith(RUN_PARENT_REFUSAL)
+    assert plain["node"]["parent_id"] is None
+    assert run.rows("SELECT parent_id FROM plan_nodes WHERE id=?", first["id"]) == [{"parent_id": work}]
+
+
+async def test_the_run_checks_read_named_nodes_only_on_a_plan_the_caller_may_reach(
+    isolated_db, tmp_path, monkeypatch,
+):
+    from plans.boundary import PlanActor
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    work = await run.work()
+    first = (await run.start("ship"))["node"]
+    params = {"kind": "phase", "workflow_ref": "ship", "before_node_id": work}
+    owner = PlanActor(run.thread_id, "user-1", None)
+    stranger = PlanActor("stranger", "user-2", None)
+    db = get_db()
+    try:
+        with pytest.raises(PlanInputError):
+            validate_run_parent(params, db, run.plan_id, owner)
+        validate_run_parent(params, db, run.plan_id, stranger)
+        validate_run_move(
+            {"node_id": first["id"], "parent_id": None}, db, run.plan_id, stranger,
+        )
+    finally:
+        db.close()
+
+
+async def test_a_coordinator_adds_plain_work_to_a_lane_plan_and_the_lane_starts_the_run(
+    isolated_db, tmp_path, monkeypatch,
+):
+    """A coordinator may add only top-level work to a lane's plan, and a run there would be
+    a fragment: both its run attempts are refused, its plain phase is taken, and the lane
+    starts the run under that phase. Driven through the plan tool as each thread."""
+    from infra.corsia_agent import set_corsia_agent
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, SHIP_STEPS)})
+    lane_work = await run.work()
+    conductor = mk_session("conductor-for-runs")
+    db = get_db()
+    try:
+        assert set_corsia_agent(conductor, db=db)
+        accept_thread_input(
+            conductor, role="user", content="Give the lane the release notes.", intent="apply_now",
+            message_id=f"workflow-run-authority-{conductor}", db=db,
+        )
+        identity = open_turn(db, conductor, turn_id="conductor-turn")
+    finally:
+        db.close()
+
+    async def conductor_add(params: dict):
+        text = await execute_as(
+            run.registry, identity, conductor, "plan_update",
+            {"plan_id": run.plan_id, "mutation_id": f"c-{next(_IDS)}",
+             "operation": "add", "params": {"acceptance_criteria": "Notes shipped", **params}},
+        )
+        return text if text.startswith("Error") else json.loads(text)
+
+    top_level_run = await conductor_add({"kind": "phase", "title": "Run ship", "workflow_ref": "ship"})
+    assert top_level_run.endswith(RUN_PARENT_REFUSAL)
+    nested_run = await conductor_add(
+        {"kind": "phase", "title": "Run ship", "workflow_ref": "ship", "parent_id": lane_work},
+    )
+    assert nested_run.startswith("Error") and not nested_run.endswith(RUN_PARENT_REFUSAL)
+    assert run.rows("SELECT id FROM plan_nodes WHERE workflow_ref='ship'") == []
+
+    handed = (await conductor_add({"kind": "phase", "title": "Changelog"}))["node"]
+    assert handed["parent_id"] is None and handed["workflow_ref"] is None
+    started = (await run.start("ship", parent_id=handed["id"]))["node"]
+    assert started["parent_id"] == handed["id"]

@@ -485,7 +485,8 @@ def test_a_delegated_child_cannot_self_review_its_own_decision(db):
     plan, source = _delegated(db)
     decision = _draft(db, plan, source)
 
-    with pytest.raises(PermissionError):
+    # Refused, and told the review is its parent's (#3401).
+    with pytest.raises(service.PlanError, match="delegated this work to you"):
         decisions.parent_review(
             decision["id"], expected_revision=decision["revision"],
             mutation_id=_mid(), actor=_thread_actor("worker"), provenance="p", db=db,
@@ -569,7 +570,7 @@ def test_a_non_root_owner_thread_still_needs_its_spawning_parent(db):
     db.commit()
     decision = _draft(db, plan, source, actor=_thread_actor("worker"))
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(service.PlanError, match="delegated this work to you"):
         decisions.parent_review(
             decision["id"], expected_revision=decision["revision"],
             mutation_id=_mid(), actor=_thread_actor("worker"), provenance="p", db=db,

@@ -1,7 +1,7 @@
 import { createSubscriber } from 'svelte/reactivity';
 import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 import type { ImageViewportPlace } from '$lib/artifactTabTypes';
-import { remapOccurrence } from '$lib/docImageComments';
+import { remapOccurrence, type MapPos } from '$lib/docImageComments';
 import type { DocumentImageRequest } from '$lib/docViewerImages';
 import type { TextDocumentPlace } from '$lib/documentImagePlace';
 import type { DocumentFreshness } from '$lib/docFreshness';
@@ -96,7 +96,7 @@ export function recordTabDocumentImageCamera(threadId: string, instanceId: strin
 }
 
 /** The tab's document changed under its image: the image keeps to its markdown, so its comments and Back stay with it. */
-export function remapTabDocumentImage(threadId: string, instanceId: string, mapPos: (pos: number) => number): void {
+export function remapTabDocumentImage(threadId: string, instanceId: string, mapPos: MapPos): void {
 	const image = tabViewState(threadId, instanceId)?.documentImage;
 	if (!image) return;
 	const moved = remapOccurrence(image, mapPos);

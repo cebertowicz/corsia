@@ -55,7 +55,7 @@ function envelope(
           updated_at: "now",
         },
         owner: { label: "Thread", project_id: null, thread_id: threadId },
-        progress: { done: 1, total: 2, open: 1, liveness: "advancing", distribution: { ...EMPTY_DISTRIBUTION, active: 1 }, ...over },
+        progress: { done: 1, total: 2, open: 1, open_above: over.open_above ?? over.open ?? 1, liveness: "advancing", distribution: { ...EMPTY_DISTRIBUTION, active: 1 }, ...over },
         display: planDisplay("working", "active"),
         oversize: null,
         current_node_ids: ["step-1"],
@@ -254,7 +254,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("a flat plan with finished work counts what is left, never 0 of N (#2190 review)", async () => {
-    const flat = envelope("t1", { done: 0, total: 1, open: 1, liveness: "advancing" });
+    const flat = envelope("t1", { done: 0, total: 1, open: 1, open_above: 1, liveness: "advancing" });
     flat.plans[0].folds = TWO_FINISHED;
     flat.plans[0].root_count = 3;
     mockFetch(200, flat, { ETag: '"r1"' });
@@ -264,6 +264,15 @@ describe("ThreadPlanPane", () => {
     expect(host.querySelector(".progress")?.textContent).toBe("1 left");
     expect(host.textContent).not.toContain("0/1");
   });
+
+  it.each([{ open: 8, above: 5 }, { open: 3, above: 0 }])(
+    "header counts $above above the line with $open open", async ({ open, above }) => {
+      mockFetch(200, envelope("t1", { open, open_above: above }), { ETag: '"r1"' });
+      component = mountWithHead("t1");
+      await settle();
+      expect(host.querySelector(".progress")?.textContent).toBe(`${above} left`);
+    },
+  );
 
   it("a plan with open work shows no all-finished notice", async () => {
     mockFetch(200, envelope("t1"), { ETag: '"r1"' });
@@ -641,6 +650,7 @@ describe("ThreadPlanPane", () => {
   it("shows one count of unfinished work, with the read budget only in its hint", async () => {
     const large = envelope("t1");
     large.plans[0].progress.open = 12;
+    large.plans[0].progress.open_above = 12;
     large.plans[0].oversize = { open: 41, budget: 40 };
     mockFetch(200, large, { ETag: '"large"' });
     component = mountWithHead("t1");
@@ -786,7 +796,7 @@ describe("ThreadPlanPane", () => {
           available: true,
           plan_id: "cp1",
           thread_id: "child-thread",
-          progress: { done: 1, total: 2, open: 1, liveness: "advancing" },
+          progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing" },
         },
       }),
     ];
@@ -819,7 +829,7 @@ describe("ThreadPlanPane", () => {
                   project_id: null,
                   thread_id: "child-thread",
                 },
-                progress: { done: 1, total: 2, open: 1, liveness: "advancing", distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
+                progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing", distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
                 display: planDisplay("working", "active"),
                 current_node_ids: [],
                 next_node_ids: [],
@@ -877,7 +887,7 @@ describe("ThreadPlanPane", () => {
           available: true,
           plan_id: "cp1",
           thread_id: "child-thread",
-          progress: { done: 1, total: 2, open: 1, liveness: "advancing" },
+          progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing" },
         },
       }),
     ];
@@ -979,7 +989,7 @@ function spawnEnvelope(threadId: string): OperatorEnvelope {
       available: true,
       plan_id: "cp1",
       thread_id: "child-thread",
-      progress: { done: 1, total: 2, open: 1, liveness: "advancing" },
+      progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing" },
     },
   })];
   return env;
@@ -1003,7 +1013,7 @@ function childEnvelope(title: string): OperatorEnvelope {
           updated_at: "now",
         },
         owner: { label: "Child", project_id: null, thread_id: "child-thread" },
-        progress: { done: 1, total: 2, open: 1, liveness: "advancing", distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
+        progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: "advancing", distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
         display: planDisplay("working", "active"),
         current_node_ids: [],
         next_node_ids: [],

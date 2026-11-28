@@ -8,23 +8,17 @@
 // it also holds the draft's one client id, which every later press posts under, so the server never stores it twice.
 // A box opened from it keeps that id with it (`origin`), so a box left unedited posts under it even once the draft is gone.
 // The same holds for a comment typed on a passage of a chat (`chatDraftKey`) and a reply typed in a chat's comment thread.
-import { createMentionSelection } from '$lib/components/comments/mentionSelection';
-import { clippedWindow } from '$lib/cm/visible-region';
-import type { DocViewerTarget } from '$lib/docViewerTarget';
+import type { ImageRegion } from '$lib/api/docs';
+import { elementOnScreen as onScreen } from '$lib/elementOnScreen';
 import { onSignOut, user } from './auth';
 import { newClientId } from './documentWire';
-import { createDraftStorage, type NotKept, type StoredDraft } from './keptCommentDraftsStorage';
+import type { KeptPlace } from '$lib/keptPlace';
+import { edited, restored, sameTags, stored, tagsOf, type DraftOrigin, type KeptCommentDraft, type MentionSelection } from './keptCommentDraftShape';
+import { createDraftStorage, NOT_KEPT_MESSAGE, type DraftSend, type NotKept } from './keptCommentDraftsStorage';
 import { toasts } from './toast';
 
-export type MentionSelection = ReturnType<typeof createMentionSelection>;
-/** `toast`: the toast up now telling why the draft's post failed (`keptCommentDrafts.toast`), while its box is not on screen. */
-export type KeptCommentDraft = { body: string; mentionSelection: MentionSelection; error?: string; clientId?: string; selection?: [number, number]; toast?: string };
-/** The kept draft a box opened from, once Comment was pressed on it: its id, and the text and tags it held then. */
-export type DraftOrigin = { clientId: string; body: string; tags: string };
-
-/** A draft's tagged agents, compared as a set, as the server stores them. */
-const tagsOf = (tags: MentionSelection, body: string) => [...new Set(tags.occurrences(body).map((item) => item.agent_id))].sort().join('\n');
-const sameTags = (tags: MentionSelection, body: string, sent: string[]) => tagsOf(tags, body) === [...new Set(sent)].sort().join('\n');
+export { NOT_KEPT_MESSAGE };
+export type { DraftOrigin, KeptCommentDraft, MentionSelection };
 
 /**
  * One reactive cell per key, so a card reads only its own draft: typing in one reply changes nothing another card
@@ -44,27 +38,12 @@ const cell = (key: string): Cell => {
 	if (!found) cells.set(key, found = new Cell());
 	return found;
 };
-/** The draft as this device keeps it: text, tags and id; an empty box keeps nothing. */
-const stored = (draft: KeptCommentDraft | undefined): StoredDraft | null => draft?.body
-	? { body: draft.body, tags: draft.mentionSelection.occurrences(draft.body), ...(draft.clientId ? { clientId: draft.clientId } : {}) }
-	: null;
-function restored({ body, tags, clientId }: StoredDraft): KeptCommentDraft {
-	const mentionSelection = createMentionSelection(body);
-	for (const tag of tags) mentionSelection.select(tag.agent_id, tag.start, body.slice(tag.start, tag.end));
-	return { body, mentionSelection, ...(clientId ? { clientId } : {}) };
-}
 /** Memory without storage: the draft goes from this page, and the toasts telling its failure or that it was not kept with it. */
 function drop(key: string): void {
 	const found = cells.get(key);
 	if (found?.draft?.toast) toasts.dismiss(found.draft.toast);
 	if (found) { found.draft = undefined; notKept(key, null); }
 }
-/** What the line under a box says when this device does not keep its draft: what happened, and what keeps the text. */
-export const NOT_KEPT_MESSAGE: Record<NotKept, string> = {
-	'too-long': 'Too long to keep on this device. Post it or copy it before you close CORSIA.',
-	full: 'This device has no room left to keep this draft. Post it or copy it before you close CORSIA.',
-	refused: 'Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.',
-};
 /**
  * Whether this device keeps the draft changed. Said in one place: the line under its box (which reads `notKept`), or, when
  * no box of it is on screen at that moment, a toast, which goes once the draft is kept again, leaves, or its box comes on screen.
@@ -95,10 +74,19 @@ const device = createDraftStorage({
 });
 const kept = {
 	get: (key: string) => cell(key).draft,
-	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; device.save(key); },
+	set: (key: string, draft: KeptCommentDraft) => { cell(key).draft = draft; device.save(key); if (!draft.body) notKept(key, null); },
 	/** The draft goes, from this page and this device: what it held is posted, cancelled or cleared. */
 	delete: (key: string) => { drop(key); device.remove(key); },
 };
+/** A send can go on its own only if its complete draft was written to the device. */
+function keepPress(key: string, draft: KeptCommentDraft): void {
+	kept.set(key, draft);
+	if (cell(key).notKept && draft.send) {
+		const withoutSend = { ...draft };
+		delete withoutSend.send;
+		kept.set(key, withoutSend);
+	}
+}
 
 /** Whose drafts memory holds: they are kept on this device under that id. */
 let owner: string | null = null;
@@ -155,22 +143,6 @@ function focused(key: string): boolean {
 	const active = typeof document === 'undefined' ? null : document.activeElement;
 	return Boolean(active) && [...(boxes.get(key) ?? [])].some((box) => box.contains(active));
 }
-/**
- * Whether `box` takes room inside what the person sees now: the visual viewport (a phone's keyboard and pinch zoom
- * shrink it) and the part every clipping ancestor shows (`clippedWindow`), so a box its scroller has scrolled away is not
- * on screen. Nor is a box drawn invisible where it lies: hidden (`visibility`, which it inherits) or inside an inert
- * surface (a Popover not yet placed is inert as well as clipped away).
- */
-function onScreen(box: Element): boolean {
-	if (getComputedStyle(box).visibility !== 'visible' || box.closest('[inert]')) return false;
-	const rect = box.getBoundingClientRect(), view = window.visualViewport, { rect: clip } = clippedWindow(box);
-	const left = Math.max(rect.left, view?.offsetLeft ?? 0, clip.left);
-	const top = Math.max(rect.top, view?.offsetTop ?? 0, clip.top);
-	const right = Math.min(rect.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth), clip.right);
-	const bottom = Math.min(rect.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight), clip.bottom);
-	return right > left && bottom > top;
-}
-
 /** `use:showsDraft={key}` on a box's root: registered under the draft's key while mounted (`keptCommentDrafts.shown`). */
 export function showsDraft(node: Element, key: string) {
 	let drop = register(key, node);
@@ -180,27 +152,14 @@ export function showsDraft(node: Element, key: string) {
 	};
 }
 
-/** One document, whichever tab or viewer shows it. */
-export function documentDraftKey(target: Pick<DocViewerTarget, 'path' | 'projectId'> | null): string {
-	return target ? `document:${JSON.stringify([target.projectId ?? '', target.path])}` : '';
-}
-/** One image: an image artifact, or one image inside a document. */
-export function imageDraftKey(artifactId: string | null, image = ''): string {
-	return artifactId ? `image:${JSON.stringify([artifactId, image])}` : '';
-}
-/** A new comment on one passage of a chat: the chat, the message and the passage's offsets, so two passages never share a draft. */
-export function chatDraftKey(threadId: string, messageId: string, anchor: { from_off: number; to_off: number }): string {
-	return `chat:${JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off])}`;
-}
-/** The scope of a reply to a chat's comment thread (`replyDraftKey`): the thread's id is a comment's own UUID, so it keys the reply wherever the card is shown. */
-export const CHAT_REPLY_SCOPE = 'chat';
-/** A reply to one thread, under the document or image it is written on (`documentDraftKey`, `imageDraftKey`); a thread's id alone keys it where there is neither. */
-export function replyDraftKey(scope: string, commentId: string): string {
-	return `reply:${JSON.stringify([scope, commentId])}`;
-}
+export { CHAT_REPLY_SCOPE, chatDraftKey, chatDraftOf, documentDraftKey, imageDraftKey, replyDraftKey } from './commentDraftKeys';
 
 export const keptCommentDrafts = {
 	get(key: string): KeptCommentDraft | undefined { return key ? kept.get(key) : undefined; },
+	/** The keys of every draft held now, including an empty body holding an id; callers check the body. */
+	keys(): string[] { return [...cells].filter(([, found]) => found.draft).map(([key]) => key); },
+	/** The keys of the drafts pressed and not yet posted, refused or edited since (`send`), whose post may go on its own. */
+	pressed(): string[] { return [...cells].filter(([, found]) => found.draft?.send).map(([key]) => key); },
 	/** What the line under the draft's box says while this device does not keep it (`NOT_KEPT_MESSAGE`), else ''. */
 	notKept(key: string): string {
 		const why = key ? cell(key).notKept : null;
@@ -216,18 +175,34 @@ export const keptCommentDrafts = {
 		for (const box of (key && boxes.get(key)) || []) if (onScreen(box)) return true;
 		return false;
 	},
-	/** The box's text and the tags it holds; an empty box with no failure to show keeps nothing. */
-	keep(key: string, body: string, mentionSelection: MentionSelection): void {
+	/** The box's text, the tags it holds, its passage and its image area (`edited`); an empty box with no failure to show keeps nothing. */
+	keep(key: string, body: string, mentionSelection: MentionSelection, place?: KeptPlace | null, region?: ImageRegion | null): void {
 		if (!key) return;
 		const prior = kept.get(key);
-		if (body || prior?.error) kept.set(key, { ...prior, body, mentionSelection });
+		if (body || prior?.error || prior?.clientId) kept.set(key, edited(prior, body, mentionSelection, { place, region }));
 		else kept.delete(key);
 	},
-	/** A reply's field. A reply has no Cancel: emptying its field clears it, reason and id included. */
+	/** A reply's field (`edited`): an emptied reply keeps the id of a press that may have posted. */
 	keepReply(key: string, body: string, mentionSelection: MentionSelection): void {
 		if (!key) return;
-		if (body) kept.set(key, { ...kept.get(key), body, mentionSelection });
-		else kept.delete(key);
+		const prior = kept.get(key);
+		if (body) kept.set(key, edited(prior, body, mentionSelection));
+		else if (prior?.clientId) {
+			const empty = edited(prior, body, mentionSelection);
+			if (empty.toast) toasts.dismiss(empty.toast);
+			delete empty.error; delete empty.toast;
+			kept.set(key, empty);
+		} else kept.delete(key);
+	},
+	/** The post of the press under `clientId` can go with no box open (`send`, known once its document's id is): only while the draft holds that press's text. */
+	sends(key: string, clientId: string, body: string, send: DraftSend): void {
+		const prior = key ? kept.get(key) : undefined;
+		if (prior?.clientId === clientId && prior.body === body) keepPress(key, { ...prior, send });
+	},
+	/** The server refused the draft's post: it is never sent again without the person. */
+	unsend(key: string): void {
+		const prior = key ? kept.get(key) : undefined;
+		if (prior?.send) { const next = { ...prior }; delete next.send; kept.set(key, next); }
 	},
 	/** Where the caret was in a kept field, so the field opens with it there. */
 	select(key: string, selection: [number, number] | null): void {
@@ -240,7 +215,7 @@ export const keptCommentDrafts = {
 	 */
 	fail(key: string, body: string, mentionSelection: MentionSelection, error: string, freshId = false): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection, toast: prior?.toast });
+		if (key) kept.set(key, { body, mentionSelection, error, clientId: freshId ? undefined : prior?.clientId, selection: prior?.selection, toast: prior?.toast, place: prior?.place, region: prior?.region, send: freshId ? undefined : prior?.send });
 	},
 	/**
 	 * The toast telling why the draft's post failed (`id`), or none because its box says why (null). The draft holds it
@@ -255,7 +230,7 @@ export const keptCommentDrafts = {
 	/** A new press: the reason goes from the box, and its toast stays until that press ends one way or the other. */
 	clearError(key: string): void {
 		const prior = key ? kept.get(key) : undefined;
-		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection, toast: prior.toast });
+		if (prior?.error) kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection, clientId: prior.clientId, selection: prior.selection, toast: prior.toast, place: prior.place, region: prior.region, send: prior.send });
 	},
 	/** What a box opening from this draft carries with it: the draft's id once Comment was pressed, with the text and tags it held. */
 	origin(key: string): DraftOrigin | undefined {
@@ -268,16 +243,21 @@ export const keptCommentDrafts = {
 	 * from the draft (`origin`) whose post was stored meanwhile, in a viewer since closed, presses under the same id while
 	 * its text and tags are as it opened: the server answers with the stored comment. Any edit since posts fresh.
 	 */
-	claim(key: string, body: string, mentionSelection: MentionSelection, origin?: DraftOrigin): { clientId: string; again: boolean } {
+	claim(key: string, body: string, mentionSelection: MentionSelection, origin?: DraftOrigin, send?: DraftSend): { clientId: string; again: boolean } {
 		const prior = key ? kept.get(key) : undefined;
-		if (prior?.clientId) return { clientId: prior.clientId, again: true };
+		// What the post needs with no box open is kept from this press, so the draft is sent again on its own if this one fails.
+		const sending = send ? { send } : {};
+		if (prior?.clientId) {
+			if (send && key) keepPress(key, { ...prior, ...sending });
+			return { clientId: prior.clientId, again: true };
+		}
 		if (!prior && origin && origin.body === body && origin.tags === tagsOf(mentionSelection, body)) {
 			// Kept under that id, as a first press keeps its own, so a press after this one failing reuses it.
-			if (key) kept.set(key, { body, mentionSelection, clientId: origin.clientId });
+			if (key) keepPress(key, { body, mentionSelection, clientId: origin.clientId, ...sending });
 			return { clientId: origin.clientId, again: true };
 		}
 		const clientId = newClientId();
-		if (key) kept.set(key, { ...prior, body, mentionSelection, clientId });
+		if (key) keepPress(key, { ...prior, body, mentionSelection, clientId, ...sending });
 		return { clientId, again: false };
 	},
 	/** Cancel, or the server stored the comment. */
@@ -292,7 +272,7 @@ export const keptCommentDrafts = {
 		if (!prior) return false;
 		if (prior.body.trim() === sent.trim() && sameTags(prior.mentionSelection, prior.body, sentTags)) { kept.delete(key); return true; }
 		if (prior.toast) toasts.dismiss(prior.toast);
-		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection });
+		kept.set(key, { body: prior.body, mentionSelection: prior.mentionSelection.copy(), selection: prior.selection, place: prior.place, region: prior.region });
 		return false;
 	},
 	/** Tests only: a fresh page. */

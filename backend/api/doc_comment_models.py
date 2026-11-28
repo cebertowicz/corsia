@@ -24,6 +24,9 @@ class CommentCreate(BaseModel):
     tagged_agent_mentions: list[TaggedAgentMention] = Field(default_factory=list)
     thread_id: str | None = None
     live_capture: StrictBool = False
+    # The 32-character sides of the passage, kept with the draft; with both, a post whose capture is gone is placed by them.
+    anchor_prefix: str | None = None
+    anchor_suffix: str | None = None
     # {x, y, w, h} in fractions of an image artifact; w = h = 0 (or omitted) is a point.
     region: dict | None = None
     diagram_source: str | None = None

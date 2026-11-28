@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from llm.providers import omlx
+from llm.providers import omlx, omlx_settings
 from omlx_provider_fixtures import CFG_PUBLIC, CFG_WITH_KEY, _patch_httpx, _resp, _Router
 
 
@@ -75,6 +75,86 @@ def test_omlx_get_settings_with_key_pulls_global_settings(monkeypatch):
     assert out["ok"] is True
     assert out["readonly"] is True
     assert "max_process_memory" in out["settings"]
+
+
+def test_omlx_get_settings_never_returns_key_values(monkeypatch):
+    """oMLX's /global-settings carries its admin key, sub keys and third-party keys in plain text."""
+    admin, sub, brave, hf = "omlx-admin-0123456789", "omlx-sub-9876543210", "brave-abcdef012345", "hf_zyxwvu98765"
+    router = _Router({
+        ("GET", "/admin/api/global-settings"): _resp(200, {
+            "server": {"host": "0.0.0.0", "port": 8210},
+            "network": {
+                "http_proxy": "http://proxyuser:proxypass@proxy.example:3128",
+                "https_proxy": "proxyuser:proxypass@proxy.example:3128",
+                "no_proxy": "localhost,127.0.0.1",
+            },
+            "huggingface": {"endpoint": "https://hf.example", "hf_token": hf},
+            "sampling": {"max_tokens": 32768},
+            "auth": {
+                "api_key_set": True,
+                "api_key": admin,
+                "skip_api_key_verification": False,
+                "allow_unauthenticated_inference": True,
+                "sub_keys": [{"key": sub, "name": "Laptop", "created_at": "2026-11-17T00:00:00"}],
+            },
+            "integrations": {"web_search_brave_api_key": brave, "web_search_searxng_url": "https://searx.example"},
+        }),
+    })
+    _patch_httpx(monkeypatch, router)
+    out = asyncio.run(omlx.get_settings(CFG_WITH_KEY))
+    text = repr(out)
+    for secret in (admin, sub, brave, hf, "proxypass", "proxyuser"):
+        assert secret not in text
+    settings = out["settings"]
+    assert settings["auth"] == {
+        "api_key_set": True,
+        "skip_api_key_verification": False,
+        "allow_unauthenticated_inference": True,
+        "sub_keys": [{"name": "Laptop", "created_at": "2026-11-17T00:00:00"}],
+    }
+    assert settings["network"]["http_proxy"] == "http://proxy.example:3128"
+    assert settings["network"]["https_proxy"] == "proxy.example:3128"
+    assert settings["network"]["no_proxy"] == "localhost,127.0.0.1"
+    assert settings["sampling"]["max_tokens"] == 32768
+    assert settings["server"] == {"host": "0.0.0.0", "port": 8210}
+    assert settings["integrations"] == {"web_search_searxng_url": "https://searx.example"}
+
+
+@pytest.mark.parametrize("key,raw,shown", [
+    ("http_proxy", "  http://proxyuser:proxypass@proxy.example:3128", "http://proxy.example:3128"),
+    ("https_proxy", "\thttps://proxyuser:proxypass@proxy.example:3128/path?q=1", "https://proxy.example:3128/path?q=1"),
+    ("https_proxy", " proxyuser:proxypass@proxy.example:3128 ", "proxy.example:3128"),
+    ("http_proxy", "http://proxyuser:proxy@pass@proxy.example:3128", None),
+    ("http_proxy", "http://a@b:proxypass@proxy.example", None),
+    ("http_proxy", "http://proxyuser:pa/proxypass@proxy.example:3128", None),
+    ("http_proxy", "http://proxyuser:pa?proxypass@proxy.example:3128", None),
+    ("https_proxy", "proxyuser:pa#proxypass@proxy.example:3128", None),
+    ("http_proxy", "http://us@er:pa/proxypass@proxy.example:3128", None),
+    ("http_proxy", "http://us@er:pa#proxypass@proxy.example", None),
+    ("https_proxy", "us@er:pa?proxypass@proxy.example:3128", None),
+    ("endpoint", "https://hf.example/models/name@rev", None),
+    ("endpoint", "https://hf.example/models/name", "https://hf.example/models/name"),
+    ("no_proxy", "localhost,127.0.0.1", "localhost,127.0.0.1"),
+])
+def test_omlx_settings_url_sign_in_is_removed_or_value_omitted(key, raw, shown):
+    out = omlx_settings.display_safe({"network": {key: raw}})
+    if shown is None:
+        assert out == {"network": {}}
+    else:
+        assert out == {"network": {key: shown}}
+    assert "proxypass" not in repr(out)
+
+
+def test_omlx_settings_drop_key_fields_by_last_word_but_keep_counts():
+    raw = {
+        "admin_key": "proxypass", "secret_key": "proxypass", "access_key": "proxypass",
+        "master_key": "proxypass", "api_keys": ["proxypass"], "tokens": {"a": "proxypass"},
+        "auth.key": "proxypass", "Secrets": "proxypass",
+        "max_tokens": 32768, "api_key_set": True, "key_count": 2, "token_limit": 10, "monkey": "ok",
+    }
+    out = omlx_settings.display_safe(raw)
+    assert "proxypass" not in repr(out)
+    assert out == {"max_tokens": 32768, "api_key_set": True, "key_count": 2, "token_limit": 10, "monkey": "ok"}
 
 
 def test_omlx_get_settings_without_key_returns_empty_readonly(monkeypatch):

@@ -55,16 +55,16 @@ def test_registration_completeness_uses_real_owner_and_surfacing(isolated_db, tm
         db.close()
 
 
-def test_can_fetch_uses_designated_scope_coordinator(monkeypatch):
+def test_is_scope_coordinator_uses_designated_scope_coordinator(monkeypatch):
     from library import pack_fetch
 
     calls = []
     monkeypatch.setattr(pack_fetch, "get_scope_coordinator", lambda scope, db: calls.append(scope) or {"workspace": "workspace-owner", "project": "project-owner"}.get(scope))
     db = object()
-    assert pack_fetch.can_fetch("workspace-owner", None, db)
-    assert pack_fetch.can_fetch("project-owner", "project", db)
-    assert not pack_fetch.can_fetch("workspace-owner", "project", db)
-    assert not pack_fetch.can_fetch("worker", "missing", db)
+    assert pack_fetch.is_scope_coordinator("workspace-owner", None, db)
+    assert pack_fetch.is_scope_coordinator("project-owner", "project", db)
+    assert not pack_fetch.is_scope_coordinator("workspace-owner", "project", db)
+    assert not pack_fetch.is_scope_coordinator("worker", "missing", db)
     assert calls == ["workspace", "project", "project", "missing"]
 
 
@@ -73,7 +73,7 @@ def test_tool_returns_fetch_owner_authorization(monkeypatch):
     from library import pack_fetch
     from tools import skill_library
 
-    monkeypatch.setattr(pack_fetch, "can_fetch", lambda *args: False)
+    monkeypatch.setattr(pack_fetch, "is_scope_coordinator", lambda *args: False)
     monkeypatch.setattr(skill_library, "_item", lambda *args: (SimpleNamespace(index_age="just now"), fixture_pack()[0]))
     assert skill_library._fetch_pack("demo", "worker", "project", object())["error"] == "not_conductor"
 

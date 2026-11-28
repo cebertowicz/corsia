@@ -143,6 +143,7 @@ async def test_a_run_is_sized_once_and_hard_if_reaches_the_start_reply(isolated_
 
     refused = await run.update("add", {
         "kind": "phase", "title": "Run ship", "acceptance_criteria": "Recorded", "workflow_ref": "ship",
+        "parent_id": await run.work(),
     })
     assert refused == f"Error: invalid request, fix and resend - {TASK_SIZE_REQUIRED}"
     assert run.node_count() == 0

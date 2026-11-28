@@ -151,7 +151,7 @@ function rank(position: number, reason: string): ActivityRank {
 	return { position, reason, ranked_by: 'thread-conductor', ranked_at: '2026-11-24T04:10:00Z' };
 }
 
-const RENDERER = { review: 'review', decision: 'decision', task: 'task', document: 'document', message: 'held-reply', chat: 'chat' } as const;
+const RENDERER = { review: 'review', decision: 'decision', task: 'task', document: 'document', message: 'held-reply', chat: 'chat', draft: 'draft' } as const;
 
 export function activityItem(
 	over: Partial<ActivityQueueItem> & Pick<ActivityQueueItem, 'key' | 'kind'>,

@@ -12,4 +12,15 @@ export function selectionButtonPlace(box: { top: number; bottom: number }, coars
 	return { top: above ? box.top - GAP : box.bottom + GAP, above };
 }
 
+/**
+ * `top` held inside the band the reader can see, so a selection taller than the window, or one the document has scrolled away
+ * from, keeps its button on screen at the band's edge nearest the selection. A button placed `above` hangs up from `top`, one
+ * placed below hangs down from it, so each keeps its whole height inside the band.
+ */
+export function keepInBand(place: { top: number; above: boolean }, band: { top: number; bottom: number }, height: number, edge: number): number {
+	const least = band.top + edge + (place.above ? height : 0);
+	const most = Math.max(least, band.bottom - edge - (place.above ? 0 : height));
+	return Math.min(Math.max(place.top, least), most);
+}
+
 export const coarsePointer = (): boolean => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;

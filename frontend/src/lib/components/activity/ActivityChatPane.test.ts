@@ -33,6 +33,21 @@ it('shows the answer and Done marks the displayed chat read', async () => {
 	await tick();
 });
 
+it.each([1, 3])('names the jump control for %i unread replies', async (count) => {
+	const answers = Array.from({ length: count }, (_, i) => ({
+		author_kind: 'agent', text: `Answer ${i}`, created_at: '2026-11-25T12:00:00Z', unread: true,
+		user_message_id: 'u', cid: 'c1', assistant_message_id: `a${i}`,
+	}));
+	vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ messages: [{
+		id: 'm', seq: 1, content: 'text', created_at: '2026-11-24T12:00:00Z',
+		chat_comments: [{ id: 'one', cid: 'c1', user_message_id: 'u', from_off: 0, to_off: 0,
+			quote: '', note: 'Why?', created_at: '2026-11-24T12:01:00Z', answers }],
+	}] }), { status: 200 })));
+	component = mount(ActivityChatPane, { target: host, props: { item: row, detail: row.detail as ActivityChatDetail, onDone: vi.fn(), onOpenChat: vi.fn(), onClose: vi.fn() } });
+	await vi.waitFor(() => expect(host.querySelector('[data-doc-jump] button')?.getAttribute('aria-label'))
+		.toBe(`Go to ${count} new ${count === 1 ? 'reply' : 'replies'} below`));
+});
+
 it('renders threads with the same comment id from different messages', async () => {
 	const comment = { cid: 'c1.1', from_off: 0, to_off: 0, quote: '', created_at: '2026-11-24T12:01:00Z', answers: [] };
 	vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ messages: [{

@@ -8,13 +8,14 @@
 	import ReviewBarShell from './ReviewBarShell.svelte';
 	import { createReviewBarState, DRAFT_OPEN, REVIEW_ANSWERED, REVIEW_REPLIES, type ReviewBarState } from '$lib/reviewBarState.svelte';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
+	import { ACTIVITY_EMAIL_REVIEW, type ActivityEmailReview } from '$lib/activityEmailReview';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
-		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean;
+	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, docked = false, emailReview = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
+		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean; emailReview?: boolean;
 		/** Answered from the card docked to the document canvas's bottom edge. The caller docks only on a phone or a short touch screen; without it the ask keeps its row in the header (also an image's). */
 		docked?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
@@ -26,6 +27,7 @@
 		onAnswered?: () => void;
 	} = $props();
 
+	const emailActions = getContext<ActivityEmailReview | undefined>(ACTIVITY_EMAIL_REVIEW);
 	const activityAnswered = getContext<(() => void) | undefined>(REVIEW_ANSWERED);
 	const activityReplies = getContext<(() => string) | undefined>(REVIEW_REPLIES);
 	function answered() { onAnswered?.(); activityAnswered?.(); }
@@ -152,7 +154,7 @@
 		}
 		void settle('approved');
 	}
-	async function requestChanges() {
+	export async function requestChanges() {
 		if (blocked()) return;
 		bar.openNote();
 		await tick();
@@ -161,7 +163,8 @@
 	async function cancelNote() {
 		bar.cancelNote();
 		await tick();
-		requestButton?.focus();
+		if (emailReview) emailActions?.focusRequest();
+		else requestButton?.focus();
 	}
 	function sendNote() {
 		if (blocked()) return;
@@ -179,7 +182,7 @@
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
 		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}
-		{suppressed} {docked} bind:capsuleClearance
+		{suppressed} {docked} {emailReview} bind:capsuleClearance
 		receipt={{ icon: bar.receipt?.verdict === 'changes_requested' ? 'changes' : 'check', label: 'Review answered', segments: receiptText }}
 		stale={{ label: 'Review request ended', text: 'This review request has ended', sub: 'Refreshing' }}
 	>
@@ -191,7 +194,7 @@
 					<Button size="sm" variant="ghost" disabled={busy} onclick={cancelNote}>Cancel</Button>
 					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>{SEND_BACK}</Button>
 				</div>
-			{:else}
+			{:else if !emailReview}
 				{#if alsoAccepts}<p class="rb-derived">{alsoAccepts}</p>{/if}
 				<div class="rb-actions">
 					<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>{SEND_BACK}</Button>

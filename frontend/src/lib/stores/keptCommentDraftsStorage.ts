@@ -1,9 +1,28 @@
 // Where `keptCommentDrafts` keeps a draft on this device, so it outlives a reload, a quit and an update restart: one
 // browser storage entry per draft, under the signed-in person's id. Only `keptCommentDrafts` calls this, so a draft has
-// one writer. Stored: the text, its tagged agents and its one client id; never the caret or why a post failed.
+// one writer. Stored: the text, its tagged agents, its one client id, the passage or image area it was written on and, once
+// pressed, what its post needs; never the caret or why a post failed.
 import type { MentionOccurrence } from '$lib/components/comments/mentionSelection';
+import type { ImageRegion } from '$lib/api/docs';
+import type { KeptPlace } from '$lib/keptPlace';
 
-export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string };
+/**
+ * Where a chat comment or a chat reply goes: its chat, the message it is on (by id and by `seq`, as the post names it) and
+ * the passage, as its box captured it; a reply also names the comment it answers (`root_user_message_id`, `root_cid`).
+ */
+export type ChatSend = {
+	threadId: string; messageId: string; seq: number; from_off: number; to_off: number; quote: string; anchor_prefix: string; anchor_suffix: string;
+	root_user_message_id?: string; root_cid?: string;
+};
+/**
+ * What a pressed draft's post needs once no box holds it: kept from its press until it posts, is refused or is edited.
+ * A document's or an image's names its artifact; a chat's, where it goes (`chat`). `diagramSource`: the diagram an image
+ * pin was drawn on. `name`: what a notice calls the item when its key does not say.
+ */
+export type DraftSend =
+	| { artifactId: string; threadId: string | null; diagramSource?: string; name?: string; chat?: never }
+	| { chat: ChatSend; name?: string; artifactId?: never };
+export type StoredDraft = { body: string; tags: MentionOccurrence[]; clientId?: string; place?: KeptPlace; region?: ImageRegion; send?: DraftSend };
 
 export const DRAFT_STORAGE_PREFIX = 'corsia:commentDraft:v1:';
 /**
@@ -16,10 +35,64 @@ export const DRAFTS_MAX_CHARS = 2_000_000;
 export const DRAFT_MAX_CHARS = 200_000;
 /** Why a draft is not kept on this device: longer than one draft may be, the drafts' share is full, or storage refused it. */
 export type NotKept = 'too-long' | 'full' | 'refused';
+/** What the line under a box says when this device does not keep its draft: what happened, and what keeps the text. */
+export const NOT_KEPT_MESSAGE: Record<NotKept, string> = {
+	'too-long': 'Too long to keep on this device. Post it or copy it before you close CORSIA.',
+	full: 'This device has no room left to keep this draft. Post it or copy it before you close CORSIA.',
+	refused: 'Couldn’t keep this draft on this device. Post it or copy it before you close CORSIA.',
+};
 /** Written and removed in one go by a Sign out, so every other window of this origin hears whose drafts went. */
 export const SIGN_OUT_KEY = 'corsia:commentDraftSignOut:v1';
 
-/** A stored entry read back, or null when it is not one this version wrote (sign-in removes it). */
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isOffset = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
+/** A stored passage, or nothing when it is not one: the draft then comes back with its words and no place. */
+function parsePlace(value: unknown): KeptPlace | undefined {
+	const place = value as Partial<KeptPlace> | null | undefined;
+	if (!place || !isOffset(place.from) || !isOffset(place.to) || place.to < place.from) return undefined;
+	if (!isText(place.quote) || !place.quote || !isText(place.prefix) || !isText(place.suffix)) return undefined;
+	return { from: place.from, to: place.to, quote: place.quote, prefix: place.prefix, suffix: place.suffix };
+}
+const isFraction = (value: unknown): value is number => typeof value === 'number' && value >= 0 && value <= 1;
+/** A stored image area, or nothing when it is not one: the draft then comes back with its words and no area. */
+function parseRegion(value: unknown): ImageRegion | undefined {
+	const region = value as Partial<ImageRegion> | null | undefined;
+	if (!region || !isFraction(region.x) || !isFraction(region.y) || !isFraction(region.w) || !isFraction(region.h)) return undefined;
+	return { x: region.x, y: region.y, w: region.w, h: region.h };
+}
+/** A stored chat send, or nothing when it is not one. */
+function parseChatSend(value: unknown): ChatSend | undefined {
+	const chat = value as Partial<ChatSend> | null | undefined;
+	if (!chat || !isText(chat.threadId) || !chat.threadId || !isText(chat.messageId) || !chat.messageId || !Number.isInteger(chat.seq)) return undefined;
+	if (!isOffset(chat.from_off) || !isOffset(chat.to_off) || chat.to_off <= chat.from_off) return undefined;
+	if (![chat.quote, chat.anchor_prefix, chat.anchor_suffix].every(isText) || !chat.quote) return undefined;
+	const root = chat.root_user_message_id !== undefined || chat.root_cid !== undefined;
+	if (root && !(isText(chat.root_user_message_id) && chat.root_user_message_id && isText(chat.root_cid) && chat.root_cid)) return undefined;
+	return {
+		threadId: chat.threadId, messageId: chat.messageId, seq: chat.seq as number, from_off: chat.from_off, to_off: chat.to_off,
+		quote: chat.quote as string, anchor_prefix: chat.anchor_prefix as string, anchor_suffix: chat.anchor_suffix as string,
+		...(root ? { root_user_message_id: chat.root_user_message_id, root_cid: chat.root_cid } : {}),
+	};
+}
+/** A stored send, or nothing when it is not one: the draft then comes back typed, and waits for a press. */
+function parseSend(value: unknown): DraftSend | undefined {
+	const send = value as { artifactId?: unknown; threadId?: unknown; diagramSource?: unknown; name?: unknown; chat?: unknown } | null | undefined;
+	if (!send || !(send.name === undefined || isText(send.name))) return undefined;
+	const name = send.name ? { name: send.name } : {};
+	if (send.chat !== undefined) {
+		const chat = parseChatSend(send.chat);
+		return chat ? { chat, ...name } : undefined;
+	}
+	if (!isText(send.artifactId) || !send.artifactId || !(send.threadId === null || isText(send.threadId))) return undefined;
+	if (!(send.diagramSource === undefined || isText(send.diagramSource))) return undefined;
+	return { artifactId: send.artifactId, threadId: send.threadId,
+		...(send.diagramSource !== undefined ? { diagramSource: send.diagramSource } : {}), ...name };
+}
+
+/**
+ * A stored entry read back, or null when it is not one this version wrote (sign-in removes it). An entry from before a
+ * draft kept its passage reads as it did; a place or a send that does not read goes alone, and the words stay.
+ */
 export function parseStoredDraft(value: string | null): StoredDraft | null {
 	if (!value) return null;
 	try {
@@ -29,7 +102,12 @@ export function parseStoredDraft(value: string | null): StoredDraft | null {
 		if (clientId !== undefined && typeof clientId !== 'string') return null;
 		const valid = tags.every((tag) => tag && typeof tag.agent_id === 'string' && Number.isInteger(tag.start) && Number.isInteger(tag.end)
 			&& tag.start >= 0 && tag.start < tag.end && tag.end <= body.length);
-		return valid ? { body, tags: tags.map(({ agent_id, start, end }) => ({ agent_id, start, end })), ...(clientId ? { clientId } : {}) } : null;
+		if (!valid) return null;
+		const place = parsePlace(parsed.place), region = parseRegion(parsed.region), send = parseSend(parsed.send);
+		return {
+			body, tags: tags.map(({ agent_id, start, end }) => ({ agent_id, start, end })),
+			...(clientId ? { clientId } : {}), ...(place ? { place } : {}), ...(region ? { region } : {}), ...(send ? { send } : {}),
+		};
 	} catch {
 		return null;
 	}

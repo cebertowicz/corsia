@@ -8,24 +8,36 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- A comment on an image, or on any text, that the server refuses now says why in its box in a document that is not live, as it already did in a live one, and a refused image comment names the image by its folder and file name instead of a path on your computer.
+- A comment or reply you pressed Comment or Send on that didn't post now goes again on its own, reading Sending…, when you open its document, image or chat, when the connection comes back, or when you return to the app, and it is never posted twice. Its box opens on its own text; if that text is gone or could be more than one place, the box opens with no place, keeps your words and says why. Words you typed but never sent come back in place and are never sent for you.
+- A comment posted while the app is busy with other requests, as on a phone reaching CORSIA remotely, now waits up to a minute for its turn to be sent instead of failing after 12 seconds without being sent; a server that never answers now takes up to 3 minutes, not 30 seconds, to say it couldn’t confirm the comment.
+- A comment that fails to post is now logged with how it was refused (its status and short code, never its words), so a failed comment can be traced to its cause.
 - A host access request now shows its details as plain labelled sections, with Reject as a button beside Approve and, when it can't be approved, one red line kept in the footer above the buttons, with Retry when CORSIA couldn’t check that the request is still current; Reject stays available in that case. Before, each detail sat in its own box, Reject was a red button across from Approve, and Reject was disabled when the check failed.
 - A long press on suggested text, or on a word in a table cell, on a touch screen now keeps the word selected so Comment can be offered; before, the selection could vanish a moment after it formed.
 - A new project set up in the desktop app starts from CORSIA's published default coordination model; the app had left those files out, so setup drafted each project from scratch.
 - Access tokens are now hidden from agents in three more forms: a signed web token (JWT) anywhere in a command or message; an Authorization header written with quotes, as in a headers list or JSON; and a password, token or key field in JSON carried as text inside other JSON, such as the details an agent sends with an action. It also applies when an agent reads back an earlier chat. Other tokens, such as one after --token or in a custom header, stay visible unless their shape is one CORSIA already recognizes.
 - Activity keeps the item you're reading and your comment draft in place when the list changes, and tells you when it is no longer waiting on you.
+- Activity opens a shared-browser task in the asking chat's browser when it is still available, and uses the chat's compact document header on a phone.
 - Activity opens review documents even when they no longer appear in the asking chat's files.
 - Activity orders new items roughly by urgency until its agent sets their order.
+- Activity refreshes quickly again however many documents and comments you have, reading only the documents you commented in, and keeps one refresh open at a time, so a comment or other post from a phone over remote access is no longer held waiting for a free connection until it fails.
 - Activity separates your tasks from document reply notifications, groups replies by document, and lets you mark them read there. Each notification names its document by its title rather than its file name, and its count and the bar count only the replies to your comments; marking a document read there still clears all of its unread items, not just the counted replies. Decisions and messages to review are now in Activity instead of above the chat input; Activity also tells you when the list may be out of date.
+- Activity shows email drafts waiting for you in Your tasks, where you can open and send them.
 - Activity shows instructions for tasks assigned to you.
 - An unsent chat comment or reply now comes back after a reload, a quit and relaunch, or an update restart, the same as document comment drafts; before, it was lost.
 - An update that leaves too little room for its safety copy after preparing now explains that it needs more room before CORSIA restarts.
 - Browse a project's documents from its pane even when no chat is open.
+- Commenting on an image or text taller than the window no longer makes the screen jump: opening its comment moves the document once, and scrolling or typing afterward leaves it where you put it. Comment stays in the window beside a tall selection, including after you scroll.
+- Comments and suggestions that span more than one line stay on their text when the document changes elsewhere, and can be accepted.
 - Comments that need your decision no longer sit over the document: their count shows in Details, where Dismiss all clears them, and on an image in its comments list, where Dismiss all sits in the heading. Details turns amber while one is waiting, and the Comments count is unchanged.
 - Document tables no longer leave an empty band underneath on touch screens.
 - First run is shorter and shows how you steer your agents: your profile becomes yours when you approve your About you doc (or at the end of setup if you skip it), agents then suggest changes to it for you to accept, setup explains workflows, the access step drops the Auto-approve paragraph, and the opening message is cut from 241 words to 143: what an agent is, that CORSIA is one too, and a one-line project.
 - If an approved host-access request cannot start, CORSIA now says why and what to do next.
 - On a touch screen, Comment is again the round accent button, centred at the bottom of the screen above the keyboard, with no bar behind it; a selected last line still never sits under it.
+- On a touch screen, the Comment button no longer covers the buttons of a task or review request at the bottom of a document, or the new-comments jump button on a narrow screen: it sits just above them while they show, and goes back to the bottom of the screen when they leave.
 - On a phone, the bar at the top of the screen is now evenly frosted over the chat as it scrolls beneath it; before, its lower part let the chat show through unblurred and ended in a hard line.
+- On a phone, the New chat button in the menu no longer carries an orange dot that could read as unread; the menu's rows and the button that opens the menu still mark what needs you.
+- On macOS, CORSIA's server appears as CORSIA in Activity Monitor instead of python3.
 - On macOS, new CORSIA logs go to Library/Logs/CORSIA, where agents can read them. Existing logs stay where they are.
 - Opening a finished workflow step in a chat's list of completed tasks shows where it sits in the plan and Open in plan, no longer the instructions the agent followed for that step.
 - Phone header sits closer to the top of the screen when CORSIA is added to the Home Screen.
@@ -36,6 +48,9 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
 - The Send button on comment replies is the app's standard button and is easier to tap on a phone.
+- The update progress bar no longer immediately moves into restart when a status check fails while agents are still finishing.
+- Three skills written for software work (product-thinking, engineering-standards and agent-experience) no longer come with CORSIA, so projects without software stop paying for them on every turn. A project that needs them installs them from the skill library, which offers CORSIA's own skills whether or not you turned on community improvements. An install that updates loses them until they are installed there.
+- Pressing Show earlier replies in a document's comment sheet on a phone no longer makes the sheet grow or the page scroll: the sheet keeps its height and the earlier replies scroll inside it.
 - Email drafts have Send now and Don’t send buttons: one click sends the draft exactly as you see it.
 - Agents send a saved email, invite or text draft themselves, without waiting for a reply from you in chat; a draft changed since it was saved still isn't sent.
 

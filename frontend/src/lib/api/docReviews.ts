@@ -1,4 +1,5 @@
-import { ok, fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
+import { ok, fetchWithTimeout } from './docs';
+import { REVIEW_REQUEST_TIMEOUT_MS } from './boundedRequest';
 import { apiFetch } from './request';
 
 export type DocumentReviewLifecycleState = 'forked' | 'submitted' | 'withdrawn' | 'handed_back' | 'failed';
@@ -41,11 +42,11 @@ export async function requestDocumentReview(artifactId: string, threadId: string
 	const response = await fetchWithTimeout('/api/doc-reviews', {
 		method: 'POST', headers: headers(),
 		body: JSON.stringify({ artifact_id: artifactId, thread_id: threadId, reviewer, note: note || null, client_id: clientId }),
-	}, COMMENT_POST_TIMEOUT_MS);
+	}, REVIEW_REQUEST_TIMEOUT_MS);
 	await ok(response);
 }
 export async function cancelDocumentReview(id: string): Promise<void> {
-	await ok(await fetchWithTimeout(`/api/doc-reviews/${encodeURIComponent(id)}`, { method: 'DELETE', headers: headers() }, COMMENT_POST_TIMEOUT_MS));
+	await ok(await fetchWithTimeout(`/api/doc-reviews/${encodeURIComponent(id)}`, { method: 'DELETE', headers: headers() }, REVIEW_REQUEST_TIMEOUT_MS));
 }
 /** Plain refusals from the canonical service; transport failures get local recovery copy. */
 export function reviewFailure(error: unknown, fallback: string): string {

@@ -2,6 +2,10 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import EmailSendBar from '$lib/components/EmailSendBar.svelte';
 import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
+import { EMAIL_DRAFT_SETTLED } from '$lib/emailDraft';
+import { ACTIVITY_EMAIL_REVIEW } from '$lib/activityEmailReview';
+import { get } from 'svelte/store';
+import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 
 const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('$lib/api/request', () => ({ apiFetch }));
@@ -12,10 +16,49 @@ const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('b
 const press = (name: string) => { button(name)!.click(); flushSync(); };
 const render = (props: Record<string, unknown> = {}) => { component = mount(EmailSendBar, { target: host, props: { artifactId: 'a/1', text: () => 'To: a@example.com\n\nExact ✉\n', targetVersion: 'shown-target', readAt: 'read-time', ...props } }); flushSync(); };
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); flushSync(); };
-beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); apiFetch.mockReset(); });
+beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); apiFetch.mockReset(); emailDraftHeaders.set({}); });
 afterEach(() => { if (component) unmount(component); component = null; host.remove(); });
 
 describe('email send bar', () => {
+	it.each([
+		['send', 'sent', false], ['discard', 'discarded', false],
+		['send', 'sent', true], ['discard', 'discarded', true], ['send', 'sending', true],
+	] as const)('preserves %s state %s after reconstruction (recovery: %s)', async (action, state, recovery) => {
+		emailDraftHeaders.set({ 'a/1': { id: 'd', state: 'open', header: { text: '', recipients: [] } } });
+		if (recovery) apiFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+		else apiFetch.mockResolvedValue(response(state));
+		render({ draftId: 'd', readState: vi.fn().mockResolvedValue(state) });
+		if (action === 'send') press('Send now'); else { press('Don’t send'); press('Don’t send'); }
+		await settle();
+		expect(get(emailDraftHeaders)['a/1'].state).toBe(state);
+		unmount(component!); host.replaceChildren();
+		render({ draftId: 'd', initialState: get(emailDraftHeaders)['a/1'].state });
+		expect(button('Send now')).toBeUndefined();
+	});
+	it('places the existing review action before the email actions in Activity', () => {
+		const requestChanges = vi.fn();
+		component = mount(EmailSendBar, { target: host, context: new Map([[ACTIVITY_EMAIL_REVIEW, { enabled: true, noting: false, requestChanges, registerRequest: () => () => {}, focusRequest: () => {} }]]), props: { artifactId: 'a', text: () => '' } }); flushSync();
+		expect([...host.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual(['Send back', 'Don’t send', 'Send now']);
+		press('Send back'); expect(requestChanges).toHaveBeenCalledTimes(1); expect(apiFetch).not.toHaveBeenCalled();
+	});
+	it('acknowledges an unconfirmed Activity draft and reloads only after 204', async () => {
+		const settled = vi.fn();
+		apiFetch.mockResolvedValue({ status: 204 });
+		component = mount(EmailSendBar, { target: host, context: new Map([[EMAIL_DRAFT_SETTLED, settled]]), props: { artifactId: 'a', draftId: 'd/1', text: () => '', initialState: 'sending' } }); flushSync();
+		press('Done'); await settle();
+		expect(apiFetch).toHaveBeenCalledWith('/api/attention/drafts/d%2F1/acknowledge', { method: 'POST' });
+		expect(settled).toHaveBeenCalledTimes(1);
+	});
+	it.each([404, 409, 'network'])('keeps the unconfirmed Activity draft visible when acknowledgement fails: %s', async (failure) => {
+		const settled = vi.fn();
+		if (failure === 'network') apiFetch.mockRejectedValue(new Error('offline'));
+		else apiFetch.mockResolvedValue({ status: failure });
+		component = mount(EmailSendBar, { target: host, context: new Map([[EMAIL_DRAFT_SETTLED, settled]]), props: { artifactId: 'a', draftId: 'd', text: () => '', initialState: 'sending' } }); flushSync();
+		press('Done'); await settle();
+		expect(host.textContent).toContain('Couldn’t confirm the email left.');
+		expect(host.textContent).toContain('Couldn’t mark this done.');
+		expect(button('Done')).toBeTruthy(); expect(settled).not.toHaveBeenCalled();
+	});
 	it('retains the context read time and state from the server', async () => {
 		apiFetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'ready', state: 'open', read_at: 'server-time', conversation: [], attachments: [], notes: [] }) });
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ state: 'open', readAt: 'server-time' });

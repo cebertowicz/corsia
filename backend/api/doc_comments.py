@@ -30,7 +30,7 @@ from doceditor import (
     image_regions, snapshot_reanchor,
 )
 from doceditor.comment_anchoring import anchored_threads
-from doceditor.comment_action_errors import CommentSelectionChanged
+from doceditor.comment_action_errors import CLIENT_ID_CLASH_KIND, CommentSelectionChanged
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
 from doceditor.comment_recipients import TagValidationError, trim_mentions
@@ -140,7 +140,7 @@ async def create_comment(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
-        region=region, diagram_source=body.diagram_source,
+        region=region, diagram_source=body.diagram_source, kept_prefix=body.anchor_prefix, kept_suffix=body.anchor_suffix,
         delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
         tagged_agent_mentions=mentions,
     )
@@ -154,16 +154,16 @@ async def create_comment(
         # Its kind tells the browser which of the known causes to name.
         return decision_refusal(exc)
     except CommentActionError as exc:
-        raise HTTPException(400, exc.message) from exc
+        # Its kind rides along (as it does on a selection refusal) so the browser's timing report can name the refusal.
+        return JSONResponse({"detail": exc.message, "kind": exc.kind}, status_code=400)
     except CommentSelectionChanged as exc:
         return selection_refusal(exc)
     except AppLoopUnavailable as exc:
         raise HTTPException(409, str(exc)) from exc
-    except CrossArtifactIdError as exc:
-        raise HTTPException(
-            409,
-            "client_id collides with another artifact's comment — re-mint and retry",
-        ) from exc
+    except CrossArtifactIdError:
+        # Its kind tells a draft sent again on its own to go once more under a new id.
+        return JSONResponse({"detail": "client_id collides with another artifact's comment — re-mint and retry",
+                             "kind": CLIENT_ID_CLASH_KIND}, status_code=409)
     return {"comment": row, **feedback}
 
 

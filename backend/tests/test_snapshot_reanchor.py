@@ -162,7 +162,7 @@ def test_mismatched_snapshot_uses_legacy_resolution_and_reports_reason(caplog):
     assert 'mismatched' in caplog.text and 'quote_mismatch' in caplog.text
 
 
-def test_restored_duplicate_attaches_and_multiline_uses_existing_rule(monkeypatch):
+def test_restored_duplicate_and_unchanged_multiline_attach(monkeypatch):
     old = 'header\ntarget\nseparator\ntarget\nend\n'
     deleted = 'header\ntarget\nend\n'
     duplicate = row(old, 'target', old.index('target'))
@@ -181,7 +181,9 @@ def test_restored_duplicate_attaches_and_multiline_uses_existing_rule(monkeypatc
     multi = row(old, 'target\nseparator', old.index('target'))
     snapshot_reanchor.resolve([multi], old, old)
     assert calls == [1]
-    assert multi['orphaned']  # The existing rule rejects a span across lines.
+    assert not multi['orphaned']
+    assert (multi['from_off'], multi['to_off']) == (old.index('target'), old.index('target') + len('target\nseparator'))
+    assert old[multi['from_off']:multi['to_off']] == multi['anchor_text']
 
 
 def test_surviving_line_moves_with_insertion():

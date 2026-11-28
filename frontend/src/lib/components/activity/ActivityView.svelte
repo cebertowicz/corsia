@@ -4,18 +4,21 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { createActivityQueue } from '$lib/stores/activityQueue.svelte';
 	import { activityPhoneItem } from '$lib/stores/activityPhoneItem';
+	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { emailTabTitle } from '$lib/emailDraft';
 	import { activityOpenRequest } from '$lib/stores/activityOpen';
-	import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
+	import { threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveTab } from '$lib/stores/artifactWorkspace';
+	import ArtifactTabSheet from '$lib/components/ArtifactTabSheet.svelte';
 	import { activityWorkspaceKey } from '$lib/stores/activityWorkspace';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import { emitProductEvent } from '$lib/product_events';
 	import { activityChatJump } from '$lib/stores/activityChatJump';
 	import type { AttentionDestination } from '$lib/api/attentionQueue';
-	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
+	import type { ActivityQueueItem } from '$lib/api/activityQueue';
 	import ActivityList from './ActivityList.svelte';
 	import ActivityItemPane from './ActivityItemPane.svelte';
-	import { EMPTY_LINE, chatDetailOf, documentDetailOf, documentOf, followerOf, keepInPlace, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
-
+	import { EMPTY_LINE, documentDetailOf, documentOf, followerOf, keepInPlace, matchingDocumentRows, settledArtifact, tabOf, type ActivityTab, type DecisionDraft } from './activityItems';
+	import { ActivityRead } from './activityRead.svelte';
 	/**
 	 * Activity: two lists beside the pane the chat uses. Your tasks holds everything waiting on the person, ranked by
 	 * the scope's conductor (CORSIA in the workspace); Notifications holds documents where agents answered the person's
@@ -42,22 +45,22 @@
 
 	const store = createActivityQueue(() => projectId);
 	const workspaceKey = $derived(activityWorkspaceKey(projectId));
-
 	/** The item open in the pane; on a phone, the item marked in the list until it is tapped open. */
 	let openKey = $state<string | null>(null);
 	let paneClosed = false;
 	/** Phone only: the item is on screen instead of the list. */
 	let phoneOpen = $state(false);
+	let phoneTabsOpen = $state(false);
 	/** The tab showing; the open item may belong to the other one. */
 	let tab = $state<ActivityTab>('tasks');
 	/** Each list's order as the person last saw it, so an item that leaves is followed by what came after it. */
 	let seen: Record<ActivityTab, string[]> = { tasks: [], notifications: [] };
 	/** Each tab's own scroll, restored when the person comes back to it. */
 	const scrolls: Record<ActivityTab, number> = { tasks: 0, notifications: 0 };
-	/** Rows whose dismiss failed, with the line they show; Mark all read's own failure line. */
-	let dismissFailed = $state<Record<string, string>>({});
-	let markAllFailed = $state(false);
-	let markingAll = $state(false);
+	const read = new ActivityRead({
+		notifications: () => notifications, openKey: () => openKey, paneInstance: () => paneInstance,
+		acted: (instance) => acted(instance), reload: () => store.reload(),
+	});
 	/** The open item, kept where it was while the person reads why the server let it go; released when they move on. */
 	let kept = $state<ActivityQueueItem | null>(null);
 	let arrived = false;
@@ -83,8 +86,8 @@
 			phoneOpen = false;
 			tab = 'tasks';
 			seen = { tasks: [], notifications: [] };
-			dismissFailed = {};
-			markAllFailed = false;
+			read.dismissFailed = {};
+			read.markAllFailed = false;
 			kept = null;
 			lastOpen = null;
 			refusedKeep = false;
@@ -103,6 +106,10 @@
 	const notifications = $derived(keepInPlace(store.queue?.notifications.items ?? [], keptIn('notifications'), seen.notifications));
 	const loading = $derived(store.status === 'loading');
 	const openItem = $derived([...tasks, ...notifications].find((item) => item.key === openKey) ?? null);
+	const workspace = $derived($threadWorkspaces[workspaceKey] ?? emptyWorkspace());
+	const activeTab = $derived(getActiveTab(workspace));
+	// The phone's tab sheet only makes sense over open tabs, as in a thread: closing the last one closes it.
+	$effect(() => { if (workspace.tabs.length === 0) phoneTabsOpen = false; });
 	/** The open item has left the server's lists and is kept where it was while the person stays on it. */
 	const openGone = $derived(!!kept && kept.key === openKey
 		&& ![...(store.queue?.items ?? []), ...(store.queue?.notifications.items ?? [])].some((item) => item.key === openKey));
@@ -148,12 +155,7 @@
 			} else if (openKey && !keys.includes(openKey) && advancing === openKey && lastOpen) {
 				advance(lists[tabOf(lastOpen)], openKey);
 			} else if (openKey && !keys.includes(openKey) && lastOpen) {
-				const doc = documentOf(lastOpen);
-				const matches = doc ? current.filter((item) => {
-					const candidate = documentOf(item);
-					return item.kind === lastOpen?.kind && candidate?.artifactId === doc.artifactId
-						&& candidate.commentId === doc.commentId && item.source.thread_id === lastOpen?.source.thread_id;
-				}) : [];
+				const matches = matchingDocumentRows(lastOpen, current);
 				if (matches.length === 1) {
 					openKey = matches[0].key;
 					kept = null;
@@ -166,8 +168,8 @@
 				notifications: keepInPlace(lists.notifications, keptFor('notifications'), seen.notifications).map((item) => item.key),
 			};
 			const listed = new Set(keys);
-			if (Object.keys(dismissFailed).some((key) => !listed.has(key))) {
-				dismissFailed = Object.fromEntries(Object.entries(dismissFailed).filter(([key]) => listed.has(key)));
+			if (Object.keys(read.dismissFailed).some((key) => !listed.has(key))) {
+				read.dismissFailed = Object.fromEntries(Object.entries(read.dismissFailed).filter(([key]) => listed.has(key)));
 			}
 			if (row && top !== undefined && row.getClientRects().length) void tick().then(() => {
 				if (paneInstance !== instance) return;
@@ -200,7 +202,7 @@
 	function advance(current: readonly ActivityQueueItem[], key: string) {
 		advancing = null;
 		kept = null;
-		const artifact = lastOpen?.kind === 'review' ? documentOf(lastOpen)?.artifactId : undefined;
+		const artifact = settledArtifact(lastOpen);
 		const document = artifact ? store.queue?.notifications.items.find((item) => documentDetailOf(item)?.artifact_id === artifact) : undefined;
 		if (document) { openKey = document.key; return; }
 		const list = lastOpen ? tabOf(lastOpen) : tab;
@@ -215,6 +217,16 @@
 		const key = openKey;
 		const keep = refusedKeep;
 		refusedKeep = false;
+		// A send claim can remove the draft before its review settles. Read the final lists first,
+		// so an unread document that returns to Notifications remains open.
+		if (!keep && key && lastOpen?.kind === 'draft') {
+			await store.reload();
+			await tick();
+			if (instance !== paneInstance || openKey !== key || store.failure !== null) return;
+			const current = store.queue?.items ?? [];
+			if (!current.some((item) => item.key === key)) advance(current, key);
+			return;
+		}
 		if (!keep && key) {
 			advancing = key;
 			const queue = store.queue;
@@ -228,7 +240,7 @@
 	}
 
 	function open(key: string) {
-		markAllFailed = false;
+		read.markAllFailed = false;
 		const kind = [...tasks, ...notifications].find((item) => item.key === key)?.kind;
 		moveTo(key);
 		if (get(isMobile)) phoneOpen = true;
@@ -248,50 +260,6 @@
 		if (listScroll) listScroll.scrollTop = scrolls[to];
 	}
 
-	const through = (item: ActivityQueueItem) => {
-		const detail = documentDetailOf(item);
-		return detail ? { artifact_id: detail.artifact_id, through_reply_id: detail.latest_reply_id } : null;
-	};
-
-	/** × or a swipe: the same call as Done, without opening the document. The open one is acted on as Done is. */
-	async function dismiss(key: string) {
-		markAllFailed = false;
-		const item = notifications.find((row) => row.key === key);
-		const read = item && through(item);
-		const chat = item && chatDetailOf(item);
-		if (!read && !chat) return;
-		const { [key]: _, ...rest } = dismissFailed;
-		dismissFailed = rest;
-		try {
-			await markDocumentsRead(read ? [read] : [], chat ? [{ thread_id: chat.thread_id, through: chat.through }] : []);
-		} catch {
-			dismissFailed = { ...dismissFailed, [key]: 'Couldn’t mark these replies read. Try again.' };
-			return;
-		}
-		emitProductEvent('activity', 'dismissed');
-		if (key === openKey) await acted(paneInstance);
-		else await store.reload();
-	}
-
-	/** Every listed document in one call; the open one stays open, reading "All replies read." */
-	async function markAllRead() {
-		if (markingAll) return;
-		const documents = notifications.map(through).filter((read) => read !== null);
-		const chats = notifications.map(chatDetailOf).filter((chat) => chat !== null).map(({ thread_id, through }) => ({ thread_id, through }));
-		if (!documents.length && !chats.length) return;
-		markingAll = true;
-		markAllFailed = false;
-		try {
-			await markDocumentsRead(documents, chats);
-			emitProductEvent('activity', 'marked_all_read', { count: documents.length + chats.length });
-			await store.reload();
-		} catch {
-			markAllFailed = true;
-		} finally {
-			markingAll = false;
-		}
-	}
-
 	async function openChat(threadId: string, destination?: AttentionDestination) {
 		await onSelectThread(threadId);
 		if (destination) activityChatJump.set({ threadId, destination });
@@ -300,8 +268,24 @@
 	// A phone shows one screen at a time; the header gives the open item its way back to the list it came from.
 	$effect(() => {
 		const showing = $isMobile && phoneOpen && openItem !== null;
+		const document = showing && openItem && documentOf(openItem);
+		const browserThread = openItem?.kind === 'task' && 'browser_thread_id' in openItem.detail ? openItem.detail.browser_thread_id : null;
+		const tabForItem = document && activeTab?.kind === 'document' && activeTab.artifactId === document.artifactId
+			? activeTab : browserThread && activeTab?.kind === 'browser' && activeTab.threadId === browserThread ? activeTab : null;
 		activityPhoneItem.set(showing
-			? { backLabel: tab === 'notifications' ? 'Notifications' : 'Your tasks', onBack: () => { phoneOpen = false; void tick().then(() => { if (listScroll) listScroll.scrollTop = scrolls[tab]; }); } }
+			? {
+				backLabel: tab === 'notifications' ? 'Notifications' : 'Your tasks',
+				tabsOpen: phoneTabsOpen,
+				onBack: () => {
+					if (phoneTabsOpen) { phoneTabsOpen = false; return; }
+					phoneOpen = false;
+					void tick().then(() => { if (listScroll) listScroll.scrollTop = scrolls[tab]; });
+				},
+				...(tabForItem ? { artifact: {
+					title: emailTabTitle(tabForItem.artifactId ? $emailDraftHeaders[tabForItem.artifactId] : undefined, tabForItem.title), tabCount: workspace.tabs.length,
+					anyChanged: hasChangedTab(workspace), onTabs: () => { phoneTabsOpen = !phoneTabsOpen; },
+				} } : {}),
+			}
 			: null);
 	});
 
@@ -318,7 +302,7 @@
 	});
 </script>
 
-<div class="activity" class:phone={$isMobile} class:phone-item={$isMobile && phoneOpen && openItem}>
+<div class="activity" class:phone={$isMobile} class:phone-item={$isMobile && phoneOpen && openItem} class:phone-artifact={$isMobile && phoneOpen && !!$activityPhoneItem?.artifact}>
 	<section class="list-col" aria-label="Activity">
 		<div class="list-scroll" bind:this={listScroll}>
 			<ActivityList
@@ -331,16 +315,16 @@
 				ranker={store.queue?.ranker ?? null}
 				{openKey}
 				{allReadKey}
-				{dismissFailed}
-				{markingAll}
-				markAllFailed={markAllFailed ? 'Couldn’t mark these read. Try again.' : null}
+				dismissFailed={read.dismissFailed}
+				markingAll={read.markingAll}
+				markAllFailed={read.markAllFailed ? 'Couldn’t mark these read. Try again.' : null}
 				{loading}
 				failure={store.status === 'error' ? store.failure : null}
 				stale={store.status === 'ready' && store.failure !== null}
 				onTab={(to) => void switchTab(to)}
 				onOpen={open}
-				onDismiss={(key) => void dismiss(key)}
-				onMarkAllRead={() => void markAllRead()}
+				onDismiss={(key) => void read.dismiss(key)}
+				onMarkAllRead={() => void read.markAllRead()}
 				onOpenRanker={() => { const ranker = store.queue?.ranker; if (ranker) openChat(ranker.thread_id); }}
 				onRetry={() => void store.reload()}
 			/>
@@ -352,13 +336,20 @@
 			{#key paneInstance}
 				{@const mountedInstance = paneInstance}
 				{@const mountedKey = openItem.key}
-				<ActivityItemPane item={openItem} {workspaceKey} seenAnswers={reachedFor(mountedKey)} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && allReadKey === null} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} onCloseChat={() => { const next = !$isMobile && openKey ? followerOf(seen.notifications, openKey, notifications.filter(item => item.key !== openKey)) : null; if (next) moveTo(next); else { paneClosed = true; openKey = null; kept = null; phoneOpen = false; paneInstance += 1; } }} />
+				<ActivityItemPane item={openItem} {workspaceKey} phone={$isMobile} showBrowser={!$isMobile || phoneOpen} seenAnswers={reachedFor(mountedKey)} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && allReadKey === null && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} onCloseChat={() => { const next = !$isMobile && openKey ? followerOf(seen.notifications, openKey, notifications.filter(item => item.key !== openKey)) : null; if (next) moveTo(next); else { paneClosed = true; openKey = null; kept = null; phoneOpen = false; paneInstance += 1; } }} />
 			{/key}
 		{:else if !loading && store.status === 'ready' && !(tab === 'tasks' ? tasks : notifications).length}
 			<div class="nothing">{EMPTY_LINE[tab]}</div>
 		{/if}
 	</section>
 </div>
+
+{#if $isMobile && phoneOpen && phoneTabsOpen}
+	<ArtifactTabSheet tabs={workspace.tabs} activeKey={workspace.activeTabId}
+		onSelect={(id) => setActiveTab(workspaceKey, id)}
+		onClose={(id) => { const tab = workspace.tabs.find((entry) => entry.instanceId === id); if (tab) void requestArtifactTabClose(workspaceKey, tab, () => { phoneTabsOpen = false; }); }}
+		onCloseSheet={() => { phoneTabsOpen = false; }} />
+{/if}
 
 <style>
 	.activity { flex: 1; min-height: 0; display: flex; overflow: hidden; }
@@ -381,6 +372,7 @@
 	.phone .list-col { width: 100%; border-right: 0; }
 	.phone .pane-col { display: none; }
 	.phone.phone-item .list-col { display: none; }
-	/* On a phone the app bar carries back, so the item's tab row sits below it rather than in it. */
+	/* Ordinary items start below the app bar; an artifact leaf provides its own header clearance. */
 	.phone.phone-item .pane-col { display: flex; margin-top: var(--header-bottom); }
+	.phone.phone-item.phone-artifact .pane-col { margin-top: 0; }
 </style>
