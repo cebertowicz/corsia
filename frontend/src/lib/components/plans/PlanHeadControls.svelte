@@ -47,7 +47,7 @@
 </script>
 
 {#if plan}
-	<span class="plan-head-controls">
+	<span class="plan-head-controls" class:drawer-lead-size={show === 'pause'}>
 		{#if show === 'both' && open > 0}
 			<!-- One count of unfinished work above the line; the agent-read budget is a hint on it, never a second number. -->
 			<span
@@ -74,6 +74,8 @@
 	.plan-head-controls { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-1); }
 	/* Pause reads as the plan's other trailing actions (Open, Show 3): caption, tertiary, primary on hover. */
 	.plan-head-controls :global(.btn.ghost) { padding: 0 2px 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-regular, 400); }
+	/* In the phone drawer Pause sits opposite Done in the same header, so it takes Done's text size. */
+	.plan-head-controls.drawer-lead-size :global(.btn.ghost) { font-size: var(--text-subhead); }
 	@media (hover: hover) { .plan-head-controls :global(.btn.ghost:hover:not(:disabled)) { color: var(--text-primary); } }
 	.progress { color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.progress.oversize { text-decoration: underline dotted; cursor: help; }
