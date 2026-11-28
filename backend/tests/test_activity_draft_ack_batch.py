@@ -29,4 +29,4 @@ async def test_projection_queries_are_batched(mail):
     finally:
         db.set_trace_callback(None)
     selects = [s for s in statements if s.lstrip().upper().startswith(('SELECT', 'WITH'))]
-    assert len(selects) == 3  # one draft read, two 500-key identity batches
+    assert len(selects) == 2  # one draft read, one identity lookup

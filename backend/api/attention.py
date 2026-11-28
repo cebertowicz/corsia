@@ -225,7 +225,7 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
         started = time.perf_counter()
         rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
         dedupe_ms = (time.perf_counter() - started) * 1000
-        rows, draft_reviews = merge_draft_reviews(rows, draft_rows(db, user_id, subjects=draft_subjects))
+        rows, draft_reviews = merge_draft_reviews(rows, draft_rows(db, user_id, subjects=draft_subjects, project_id=project_id))
         # A reviewed document's replies ride on its review row; Approve ends the review and
         # the next read lists the document in Notifications.
         unread = {d['detail']['artifact_id']: d['detail']['unread'] for d in documents}

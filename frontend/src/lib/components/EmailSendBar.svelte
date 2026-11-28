@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { getContext, onDestroy, untrack } from 'svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import { discardEmailDraft, sendEmailDraft, type DraftActionResult } from '$lib/api/emailDrafts';
-	import { apiFetch } from '$lib/api/request';
+	import { acknowledgeEmailDraft, discardEmailDraft, sendEmailDraft, type DraftActionResult } from '$lib/api/emailDrafts';
 	import { ACTIVITY_EMAIL_REVIEW, type ActivityEmailReview } from '$lib/activityEmailReview';
 	import { EMAIL_DRAFT_SETTLED, type ConversationFailure, type EmailDraftState } from '$lib/emailDraft';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
@@ -34,8 +33,7 @@
 		if (!draftId || acknowledging || acknowledged) return;
 		acknowledging = true; acknowledgeError = '';
 		try {
-			const response = await apiFetch(`/api/attention/drafts/${encodeURIComponent(draftId)}/acknowledge`, { method: 'POST' });
-			if (response.status !== 204) throw new Error('Acknowledgement failed');
+			await acknowledgeEmailDraft(draftId);
 			acknowledged = true; onSettled?.();
 		} catch {
 			acknowledgeError = 'Couldn’t mark this done. Try again.';

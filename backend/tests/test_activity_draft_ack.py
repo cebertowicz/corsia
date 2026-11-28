@@ -8,9 +8,10 @@ from fastapi import FastAPI
 from api.attention import router, _acknowledge_draft
 from infra.activity_draft_rows import draft_rows
 from infra.auth import require_user
-from infra.database import get_db
+from infra.database import get_db, write_transaction
 from infra.migration_211_to_212_activity_draft_ack import migrate_211_to_212
 from infra.schema import SCHEMA_SQL
+from tools.action_drafts import claim_for_send, release_claim
 from tests.test_email_drafts_api import _artifact, _owner
 from tests.test_google_email import _draft, client_file, conductor, google, mail  # noqa: F401
 from tests.test_google_sign_in import _REAL_CLIENT
@@ -62,6 +63,37 @@ async def test_acknowledgement_lifecycle_and_authorization(mail):
     db.execute("UPDATE action_drafts SET state='sent' WHERE id=?", (draft_id,))
     db.commit()
     assert not draft_rows(db, owner)
+
+
+@pytest.mark.asyncio
+async def test_acknowledgement_does_not_hide_a_later_send(mail):
+    saved = await _draft(mail)
+    _artifact(saved)
+    draft_id = saved['draft_id']
+    owner = _owner(mail.thread)['id']
+    db = get_db()
+    claim_for_send(draft_id, db=db)
+    assert _acknowledge_draft(draft_id, owner) == 204
+    assert not draft_rows(db, owner)
+    release_claim(draft_id, db=db)
+    claim_for_send(draft_id, db=db)
+    assert [row['external_id'] for row in draft_rows(db, owner)] == [draft_id]
+
+
+@pytest.mark.asyncio
+async def test_rolled_back_release_keeps_acknowledgement(mail):
+    saved = await _draft(mail)
+    draft_id = saved['draft_id']
+    owner = _owner(mail.thread)['id']
+    db = get_db()
+    claim_for_send(draft_id, db=db)
+    assert _acknowledge_draft(draft_id, owner) == 204
+    with pytest.raises(RuntimeError, match='rollback'):
+        with write_transaction(db, scope='test_release_rollback'):
+            release_claim(draft_id, db=db)
+            raise RuntimeError('rollback')
+    assert db.execute('SELECT state FROM action_drafts WHERE id=?', (draft_id,)).fetchone()['state'] == 'sending'
+    assert db.execute('SELECT 1 FROM activity_draft_acknowledgements WHERE user_id=? AND draft_id=?', (owner, draft_id)).fetchone()
 
 
 @pytest.mark.asyncio

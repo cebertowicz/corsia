@@ -38,6 +38,24 @@ async def test_open_draft_follows_document_and_owner(mail):
 
 
 @pytest.mark.asyncio
+async def test_project_scope_does_not_read_other_projects_drafts(mail, monkeypatch):
+    from infra import activity_draft_rows
+
+    saved = await _draft(mail)
+    _artifact(saved)
+    owner = _owner(mail.thread)['id']
+    db = get_db()
+    calls = []
+    original = activity_draft_rows._read_bytes
+    monkeypatch.setattr(activity_draft_rows, '_read_bytes', lambda path: (calls.append(path), original(path))[1])
+    # Keep out-of-scope identities for review coalescing; the caller filters them later.
+    assert [row['external_id'] for row in draft_rows(db, owner, project_id='another-project')] == [saved['draft_id']]
+    assert calls == []
+    assert [row['external_id'] for row in draft_rows(db, owner)] == [saved['draft_id']]
+    assert calls == [saved['path']]
+
+
+@pytest.mark.asyncio
 async def test_subject_comes_from_live_file_and_sweep_does_not_read_it(mail, monkeypatch):
     from infra import activity_draft_rows
 

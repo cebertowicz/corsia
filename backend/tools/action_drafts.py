@@ -107,6 +107,8 @@ def _transition(draft_id: str, before: str, after: str, db, **columns) -> None:
         )
         if cursor.rowcount != 1:
             raise DraftError(f"The draft is not {before}.")
+        if before == "sending":
+            conn.execute("DELETE FROM activity_draft_acknowledgements WHERE draft_id=?", (draft_id,))
         _notify_after_commit(conn, draft_id)
 
 

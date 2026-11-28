@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { discardEmailDraft } from '$lib/api/emailDrafts';
-	import { apiFetch } from '$lib/api/request';
+	import { acknowledgeEmailDraft, discardEmailDraft } from '$lib/api/emailDrafts';
 	import { Button } from '$lib/components/ui';
 	import type { Snippet } from 'svelte';
 
@@ -11,8 +10,7 @@
 		if (sending) return;
 		sending = true; failure = false;
 		try {
-			const response = await apiFetch(`/api/attention/drafts/${encodeURIComponent(draftId)}/acknowledge`, { method: 'POST' });
-			if (response.status !== 204) throw new Error('Acknowledgement failed');
+			await acknowledgeEmailDraft(draftId);
 			await onActed();
 		} catch { failure = true; }
 		finally { sending = false; }

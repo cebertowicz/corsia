@@ -1,6 +1,7 @@
 """Project unsettled email drafts into Activity's existing task queue."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import stat
 
@@ -11,18 +12,10 @@ from infra.workspace_paths import WorkspaceReference, workspace_selection_for_ro
 from tools.action_gate import _read_bytes
 
 
-_IDENTITY_BATCH = 500
-
-
 def _identities(db, external_ids: set[str], user_id: str) -> dict[str, dict]:
-    """Resolve accessible document identities in batches, never one query per draft."""
-    found = {}
-    ids = sorted(external_ids)
-    for start in range(0, len(ids), _IDENTITY_BATCH):
-        batch = ids[start:start + _IDENTITY_BATCH]
-        marks = ','.join('?' for _ in batch)
-        rows = db.execute(
-            f"""WITH docs AS (
+    """Resolve accessible document identities with one bound list."""
+    rows = db.execute(
+        """WITH docs AS (
                   SELECT i.id, i.external_id, i.title,
                          (SELECT r.parent_thread_id FROM artifact_registrations r
                            WHERE r.artifact_id=i.id AND r.relationship_state IN ('owner-pinned','owner-active')
@@ -33,15 +26,14 @@ def _identities(db, external_ids: set[str], user_id: str) -> dict[str, dict]:
                      AND (i.state='active' OR (i.state IN ('archived', 'tombstone')
                           AND json_valid(i.metadata)
                           AND json_extract(i.metadata, '$.retired_cause')='file_gone'))
-                     AND i.external_id IN ({marks})
+                     AND i.external_id IN (SELECT value FROM json_each(?))
                 )
                 SELECT docs.id, docs.external_id, docs.title FROM docs
                  LEFT JOIN threads owner_thread ON owner_thread.id=docs.owner
                 WHERE docs.owner='ui' OR substr(docs.owner,1,8)='project:' OR owner_thread.user_id=?""",
-            (*batch, user_id),
-        )
-        found.update({row['external_id']: dict(row) for row in rows})
-    return found
+        (json.dumps(sorted(external_ids)), user_id),
+    )
+    return {row['external_id']: dict(row) for row in rows}
 
 
 def _subject(raw: bytes | None, fallback: str) -> str:
@@ -61,7 +53,7 @@ def merge_draft_reviews(rows: list[dict], drafts: list[dict]) -> tuple[list[dict
             + drafts, reviewed)
 
 
-def draft_rows(db, user_id: str, *, subjects: bool = True) -> list[dict]:
+def draft_rows(db, user_id: str, *, subjects: bool = True, project_id: str | None = None) -> list[dict]:
     """Return unsettled email drafts in owned threads; callers run this off the event loop.
 
     The keys-only sweep sets ``subjects=False`` and never reads draft files.
@@ -112,11 +104,13 @@ def draft_rows(db, user_id: str, *, subjects: bool = True) -> list[dict]:
             except (FileNotFoundError, NotADirectoryError):
                 continue
         fallback = (artifact['title'] if artifact else None) or 'email draft'
-        raw = _read_bytes(row['path']) if subjects else None
-        missing = subjects and raw is None
+        # Keep out-of-scope identities for review coalescing, but read only in-scope subjects.
+        load_subject = subjects and (project_id is None or row['project_id'] == project_id)
+        raw = _read_bytes(row['path']) if load_subject else None
+        missing = load_subject and raw is None
         if missing and not artifact_id:
             continue
-        title = ('email draft' if missing else _subject(raw, fallback)) if subjects else fallback
+        title = ('email draft' if missing else _subject(raw, fallback)) if load_subject else fallback
         result.append({
             'key': f"draft:{row['id']}", 'external_id': row['id'],
             'renderer': 'draft', 'kind': 'draft', 'title': 'Email draft' if missing else clip_title(f'Send: {title}'),
