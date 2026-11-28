@@ -91,7 +91,7 @@ def outlives_document(args: Sequence[str]) -> bool:
 
 @asynccontextmanager
 async def agent_command(thread_id: str, session: str | None, endpoint: str, args: Sequence[str], *,
-                        navigation: bool = False) -> AsyncIterator[Callable[[bool], None]]:
+                        navigation: bool = False, profile: str | None = None) -> AsyncIterator[Callable[[bool], None]]:
     """Mark before an agent command (before_agent_command), and after it check the document its script ran in.
 
     The body calls the yielded function with True once the command finished in the browser. A command that
@@ -110,6 +110,8 @@ async def agent_command(thread_id: str, session: str | None, endpoint: str, args
         return
     seen: set[str] = set()
     watch = _watch(seen.add, browser_page_watch.WATCH_TIMEOUT)
+    from host_access import browser_grant_records
+    watch.on_url = lambda url: browser_grant_records.observe_session(profile, url)
     try:
         await watch.start(endpoint)
     except BaseException:

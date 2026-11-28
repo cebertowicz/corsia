@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_control, browser_fill_marks, browser_login_page as page
-from host_access import browser_saved_fills, browser_session_commands, browser_step_lifecycle
+from host_access import browser_grant_records, browser_saved_fills, browser_session_commands, browser_step_lifecycle
 from host_access.browser_domain import registrable_domain
 from host_access.browser_session_state import COMMAND_TIMEOUT, BrowserSessionError
 from infra import saved_login_fills, saved_login_results, saved_logins
@@ -126,6 +126,8 @@ async def fill_saved_login(thread_id: str, login_id: str, *, requested_seconds: 
     except BrowserSessionError:
         return NO_BROWSER
     async with runtime.action_lock:
+        if browser_grant_records.fenced(runtime.record.site_profile):
+            return NO_BROWSER  # A site clear fences agent commands on browsers holding its site.
         try:
             status = await _fill(thread_id, login, runtime, partial(browser_session_commands._command, owner, runtime, None))
         except Exception as exc:  # noqa: BLE001 - any failure is the fixed page line; nothing typed escapes in it

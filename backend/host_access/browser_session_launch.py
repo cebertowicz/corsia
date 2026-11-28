@@ -116,6 +116,8 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
         record=(owner.socket_dir, runtime.record.session))
     runtime.chrome.release_stream()
     if runtime.record.profile:
+        from host_access.browser_grant_cleanup import recover_launch
+        await recover_launch(runtime)
         await apply_kept_signins(runtime)
     runtime.attempt_started_at = time.time()
     runtime.attempt = browser_cli.CommandResult(-1, "", "", completion="unknown")
@@ -247,7 +249,10 @@ async def seed_copy(owner: Any, runtime: Any) -> None:
             # Read in place, never agent-browser's `state save`: it loads each visited site in a new tab of
             # the holder's browser and can stall there past its limit.
             state = await asyncio.wait_for(browser_copy_state.read(holder.chrome.endpoint), _COPY_READ_TIMEOUT)
-        await asyncio.to_thread(_write_private_json, target, state)
+        from host_access.browser_grant_copy import write_state
+        if record.site_profile is None:
+            raise RuntimeError("browser profile unavailable")
+        await asyncio.to_thread(write_state, record.site_profile, target, state)
     except Exception:
         logger.warning("browser sign-in copy failed", exc_info=True)
         with contextlib.suppress(OSError):
@@ -292,6 +297,8 @@ def _write_private_json(path: Path, data: Mapping[str, Any]) -> None:
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         json.dump(data, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
 
 
@@ -317,24 +324,34 @@ async def keep_copy_signins(owner: Any, runtime: Any) -> None:
                   and seeded.get(_cookie_key(cookie), object()) != cookie.get("value")]
         if not gained:
             return
-        kept = kept_signins_path(profile)
-        # One synchronous read-merge-write, so copies closing together cannot drop each other's cookies.
-        _write_cookies(kept, list({_cookie_key(cookie): cookie
-                                   for cookie in [*_read_cookies(kept), *gained]}.values()))
+        from host_access.browser_grant_copy import merge
+        await asyncio.to_thread(merge, profile, gained)
     except Exception:
         logger.warning("browser sign-in made on a copy could not be kept", exc_info=True)
         return
     holder = next((item for item in owner._sessions.values() if item.record.profile == profile
                    and item.chrome is not None and item.record.terminal_state == "running"), None)
-    if holder is not None:
-        await apply_kept_signins(holder)
+    if holder is None:
+        return
+    # Under the lock a site clear takes, so no clear runs between reading the kept file and setCookies.
+    from host_access.browser_grant_cleanup import _acquire
+    try:
+        await _acquire(holder.command_lock)
+    except TimeoutError as exc:
+        logger.warning("kept browser sign-ins wait for the next launch (%s)", type(exc).__name__)
+        return
+    try:
+        if holder.record.terminal_state == "running" and holder.chrome is not None:
+            await apply_kept_signins(holder)
+    finally:
+        holder.command_lock.release()
 
 
 async def apply_kept_signins(runtime: Any) -> None:
     """Write kept cookies into the saved profile's browser; Storage.setCookies never navigates a page."""
+    from host_access import browser_grant_copy
     from host_access.browser_cdp import CdpClient
-    kept = kept_signins_path(runtime.record.profile)
-    cookies = await asyncio.to_thread(_read_cookies, kept)
+    cookies = await asyncio.to_thread(browser_grant_copy.kept, runtime.record.profile)
     if not cookies or runtime.chrome is None:
         return
     params = [{key: cookie[key] for key in _COOKIE_PARAMS if key in cookie
@@ -347,9 +364,8 @@ async def apply_kept_signins(runtime: Any) -> None:
         return
     applied = {json.dumps(cookie, sort_keys=True) for cookie in cookies}
     try:
-        _write_cookies(kept, [cookie for cookie in _read_cookies(kept)
-                              if json.dumps(cookie, sort_keys=True) not in applied])
-    except OSError:
+        await asyncio.to_thread(browser_grant_copy.forget_applied, runtime.record.profile, applied)
+    except (OSError, ValueError):
         # The cookies are in the browser; a file left behind is applied again, harmlessly, next launch.
         logger.warning("applied browser sign-ins could not be cleared from the kept file", exc_info=True)
 

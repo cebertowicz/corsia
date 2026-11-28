@@ -79,8 +79,13 @@ async def watch_targets(thread_id: str, notify: Callable[[], None], known: list[
 
 
 async def watch_page_metadata(thread_id: str, connection_token: str, report: Callable[[dict], Awaitable[None]]) -> None:
-    """Forward CDP main-frame metadata changes for this connected shared pane."""
-    await browser_cdp.watch_page_metadata(await _page_endpoint(thread_id, connection_token, "This page couldn't be checked"), report)
+    """Forward metadata and retain matching origins already seen by this pane."""
+    async def report_metadata(message: dict) -> None:
+        from host_access import browser_grant_records
+        await browser_grant_records.observe_session(PROCESS_OWNER.browser_sessions().site_profile(thread_id), message.get("url"))
+        await report(message)
+
+    await browser_cdp.watch_page_metadata(await _page_endpoint(thread_id, connection_token, "This page couldn't be checked"), report_metadata)
 
 
 def clear_page_endpoint(thread_id: str, connection_token: str) -> None:

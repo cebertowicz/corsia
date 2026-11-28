@@ -103,7 +103,7 @@ def _mark(thread_id: str, loader: str) -> None:
     _state(thread_id).marks[loader] = None
 
 
-async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> PageWatch:
+async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str], profile: str | None = None) -> PageWatch:
     """Start rule 7's watch before an agent command runs; settle it before the pane gets the page back.
 
     A command that can't type marks nothing. A batch that types and switches tabs marks every document.
@@ -116,6 +116,8 @@ async def agent_writes(thread_id: str, endpoint: str, args: Sequence[str]) -> Pa
     state = _state(thread_id)
     marks, state.watches = state.marks, state.watches + 1  # a late settle can't mark the next session
     writes = PageWatch(marks.setdefault, browser_page_watch.WATCH_TIMEOUT, done=partial(_watch_done, thread_id))
+    from host_access import browser_grant_records
+    writes.on_url = lambda url: browser_grant_records.observe_session(profile, url)
     try:
         await writes.start(endpoint)
     except BaseException:

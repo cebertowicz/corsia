@@ -39,7 +39,7 @@ from typing import Any
 
 from loguru import logger
 
-from host_access.browser_domain import url_domain
+from infra.saved_login_fill_public import public as _public_row
 from infra import product_events, saved_logins
 from infra.host_access_leases import MAX_LEASE_DURATION_SECONDS
 from infra.key_store_values import KeyStoreError
@@ -153,10 +153,15 @@ def thread_record(thread_id: str) -> tuple[str, str, str]:
 
 
 def _prune(now: float) -> list[_Approval]:
-    """Drop what has run out and return it. Only a grant runs out; a waiting request stays until decided."""
-    expired = [item for item in _approvals.values() if not item.live(now)]
-    for item in expired:
-        del _approvals[item.id]
+    """Drop what has run out and return it; a grant whose end fails stays, not live, for the next prune."""
+    from host_access.browser_grant_effects import end
+    expired = []
+    for item in [item for item in _approvals.values() if not item.live(now)]:
+        try:
+            end(item, lambda: _approvals.pop(item.id), "expired")
+            expired.append(item)
+        except Exception as exc:  # noqa: BLE001 - one profile's record must not fail every person's reads
+            logger.warning("saved-login grant end retried at the next prune: approval {} ({})", item.id, type(exc).__name__)
     return expired
 
 
@@ -169,6 +174,15 @@ def _emit_expired(expired: list[_Approval]) -> None:
     """A grant is recorded as expired when the next read drops it; a restart first drops it uncounted."""
     for item in expired:
         _emit("fill_expired", item)
+
+
+def _expire_deadline(approval_id: str) -> None:
+    with _lock:
+        item = _approvals.get(approval_id)
+        expired = _prune(time.monotonic()) if item is not None and not item.live(time.monotonic()) else []
+    _emit_expired(expired)
+    for item in expired:
+        _notify(item)
 
 
 def _minutes(seconds: int) -> int | float:
@@ -184,11 +198,15 @@ def _login_usable(login_id: str, user_id: str) -> bool:
     return login.status == saved_logins.STATUS_OK and login.saved_by == user_id
 
 
-def _remove(predicate) -> list[_Approval]:
+def _remove(predicate, cause: str) -> list[_Approval]:
     with _lock:
         ended = [item for item in _approvals.values() if predicate(item)]
         for item in ended:
-            del _approvals[item.id]
+            if item.state == ACTIVE:
+                from host_access.browser_grant_effects import end
+                end(item, lambda: _approvals.pop(item.id), cause)
+            else:
+                del _approvals[item.id]
     return ended
 
 
@@ -196,7 +214,7 @@ def end_for_login(login_id: str, *, deleted: bool) -> None:
     """End every request and grant for the login, standing ones included: ``fill_revoked`` on a delete,
     ``fill_expired`` when it goes out of date. The paths that make a login unusable call this as they do,
     so a re-save can't revive a grant."""
-    ended = _remove(lambda item: item.login_id == login_id)
+    ended = _remove(lambda item: item.login_id == login_id, "login_deleted" if deleted else "login_out_of_date")
     for item in ended:
         _emit("fill_revoked" if deleted else "fill_expired", item)
         logger.info("saved-login fill ended with its login: approval {}", item.id)
@@ -204,28 +222,8 @@ def end_for_login(login_id: str, *, deleted: bool) -> None:
 
 
 def _public(item: _Approval) -> dict[str, Any]:
-    """What the person's surface shows: never a password, never the login's secret."""
-    return {
-        "id": item.id,
-        "kind": "fill",
-        "state": item.state,
-        "thread_id": item.thread_id,
-        "root_thread_id": item.root_thread_id,
-        "agent": item.agent,
-        "site": item.site,
-        #: The site's registrable domain from the Public Suffix List, so a shortened site always keeps it whole.
-        "domain": url_domain(item.site),
-        "username": item.username,
-        "revision": item.revision,
-        "application_hash": item.application_hash,
-        "max_duration_seconds": MAX_GRANT_SECONDS,
-        "requested_duration_seconds": item.requested_duration_seconds,
-        "duration_seconds": item.duration_seconds,
-        "standing": item.standing,
-        "expires_at": item.expires_at,
-        "created_at": item.created_at,
-        "updated_at": item.updated_at,
-    }
+    """What the person's surface shows: never the login's secret."""
+    return _public_row(item, MAX_GRANT_SECONDS)
 
 
 def _notify(item: _Approval) -> None:
@@ -259,9 +257,9 @@ def request_fill(thread_id: str, login_id: str, *, requested_seconds: object = N
         raise FillApprovalError(_OUT_OF_DATE.format(site=login.site, username=login.username))
     now_iso = utc_now_iso()
     with _lock:
-        expired = _prune(time.monotonic())
+        expired = _prune(now := time.monotonic())
         existing = next(
-            (item for item in _approvals.values() if item.thread_id == clean_thread and item.login_id == login.id),
+            (item for item in _approvals.values() if item.thread_id == clean_thread and item.login_id == login.id and item.live(now)),
             None,
         )
         if existing is None:
@@ -309,10 +307,10 @@ def listed(user_id: str, root_thread_id: str | None = None) -> list[dict[str, An
     A standing grant is left out: the chat's lock chip is for timed grants only.
     """
     with _lock:
-        expired = _prune(time.monotonic())
+        expired = _prune(now := time.monotonic())
         items = [
             item for item in _approvals.values()
-            if item.user_id == user_id and not item.standing
+            if item.user_id == user_id and not item.standing and item.live(now)
             and (root_thread_id is None or root_thread_id in (item.root_thread_id, item.thread_id))
         ]
     _emit_expired(expired)
@@ -368,6 +366,8 @@ def approve_fill(
                 expires_at=(utc_now() + timedelta(seconds=seconds)).isoformat(),
                 deadline=time.monotonic() + seconds,
             )
+        from host_access.browser_grant_effects import arm_and_schedule
+        arm_and_schedule(item, _expire_deadline)
         _approvals[item.id] = item
     _emit("fill_approved", item, {"standing": True} if seconds is None else {"duration_minutes": _minutes(seconds)})
     logger.info("saved-login fill approved: approval {} for {}", item.id, "until revoked" if seconds is None else f"{seconds}s")
@@ -378,13 +378,15 @@ def approve_fill(
 def _end(approval_id: str, user_id: str, state: str, revision: int, application_hash: str, verb: str) -> dict[str, Any]:
     with _lock:
         item = _current(approval_id, user_id, state, revision, application_hash)
-        del _approvals[item.id]
+        if item.state == ACTIVE:
+            from host_access.browser_grant_effects import end
+            end(item, lambda: _approvals.pop(item.id), verb)
+        else:
+            del _approvals[item.id]
     _emit(f"fill_{verb}", item)
     logger.info("saved-login fill {}: approval {}", verb, item.id)
     _notify(item)
-    ended = _public(item)
-    ended["state"] = verb
-    return ended
+    return {**_public(item), "state": verb}
 
 
 def deny_fill(approval_id: str, *, user_id: str, revision: int, application_hash: str) -> dict[str, Any]:

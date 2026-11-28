@@ -30,6 +30,8 @@ class BrowserSessionRecord:
     profile: str | None = field(default=None, repr=False)
     # The thread whose open session holds that profile; this session starts from a copy of its sign-in.
     copy_of: str | None = field(default=None, repr=False)
+    # The saved profile whose sign-in this session holds, in it or in a copy; a site clear there fences it.
+    site_profile: str | None = field(default=None, repr=False)
     profile_notice: str | None = field(default=None, repr=False)
 
     @property

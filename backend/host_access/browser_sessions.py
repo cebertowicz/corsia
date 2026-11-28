@@ -53,6 +53,7 @@ class BrowserSessionOwner(BrowserSessionIO):
         self._user_agent: str | None = None
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
+        self._grant_cleanup_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
         self._closed_leases: set[str] = set()
         self._restart_notices: dict[str, str] = {}
@@ -143,6 +144,9 @@ class BrowserSessionOwner(BrowserSessionIO):
                                 isinstance(exc, BrowserSessionCleanupError) and runtime.record.terminal_state != "running"):
                 raise  # Admission rejection has no new session effects.
             if launching and await self._close_one(runtime) is None:
+                from host_access.browser_grant_cleanup import PendingClearError
+                if isinstance(exc, PendingClearError):
+                    raise BrowserSessionError("browser session unavailable") from exc
                 logger.warning("managed browser startup failed: %s: %s", type(exc).__name__, browser_orphan.startup_message(exc))
                 detail = "; saved sign-in could not be restored" if isinstance(exc, launch.CopyRestoreError) else ""
                 raise BrowserSessionError(str(exc) if isinstance(exc, browser_orphan.BrowserProfileInUse) else f"managed browser startup failed; its processes were closed{detail}") from exc
@@ -171,7 +175,8 @@ class BrowserSessionOwner(BrowserSessionIO):
                 notice = browser_session_commands.restart_notice(self._restart_notices, thread_id, notice)
                 runtime = BrowserRuntime(BrowserSessionRecord(
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
-                    profile=shared, copy_of=copy_of, profile_notice=notice, shared=bool(show_window)))
+                    profile=shared, copy_of=copy_of, site_profile=profile, profile_notice=notice,
+                    shared=bool(show_window)))
                 self._sessions[thread_id] = runtime
             elif session == "new":
                 raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
@@ -243,6 +248,11 @@ class BrowserSessionOwner(BrowserSessionIO):
         """The runtime identity for pane probes; no page or process inspection."""
         runtime = self._sessions.get(thread_id)
         return runtime.record.session if runtime is not None and runtime.record.terminal_state == "running" else None
+
+    def site_profile(self, thread_id: str) -> str | None:
+        """The saved profile this thread's running browser was admitted with; read from memory, no lookup."""
+        runtime = self._sessions.get(thread_id)
+        return runtime.record.site_profile if runtime is not None and runtime.record.terminal_state == "running" else None
 
     async def close_thread(self, thread_id: str) -> str:
         """Guard agent close, then use the shared producer teardown."""

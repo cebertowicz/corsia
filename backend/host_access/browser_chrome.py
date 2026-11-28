@@ -81,9 +81,19 @@ class ChromeProcess:
         temporary = None
         child = None
         owned = None
+        copy_lock = None
         try:
+            browser_launch.inherited_args()  # Reject unsafe switches before creating private state.
             if profile is None:
-                temporary = Path(tempfile.mkdtemp(prefix="session-", dir=browser_launch.profile_root()))
+                from host_access.browser_copy_sweep import lock_profile_root
+                root = browser_launch.profile_root()
+                locking = asyncio.create_task(asyncio.to_thread(lock_profile_root, root, exclusive=False))
+                try:
+                    copy_lock = await asyncio.shield(locking)
+                except asyncio.CancelledError:
+                    os.close(await locking)
+                    raise
+                temporary = Path(tempfile.mkdtemp(prefix="session-", dir=root))
             target = Path(profile) if profile else temporary
             assert target is not None
             target.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -104,10 +114,19 @@ class ChromeProcess:
             # the dead-owner sweep can find. Only the milliseconds since the spawn are unrecorded.
             from host_access.browser_identity import BrowserPidAbsent
             from host_access.browser_owner_lock import record_launched_chrome
+            recording = asyncio.create_task(asyncio.to_thread(
+                record_launched_chrome, record[0], record[1], owned, profile))
             try:
-                await asyncio.to_thread(record_launched_chrome, record[0], record[1], owned, profile)
+                try:
+                    await asyncio.shield(recording)
+                except asyncio.CancelledError:
+                    await recording
+                    raise
             except BrowserPidAbsent as exc:
                 raise RuntimeError(CHROME_EXITED) from exc  # it exited before it could be recorded
+            if copy_lock is not None:
+                os.close(copy_lock)
+                copy_lock = None
             for _ in range(100):
                 if child.returncode is not None:
                     raise RuntimeError(CHROME_EXITED)
@@ -128,6 +147,9 @@ class ChromeProcess:
             elif temporary is not None:
                 shutil.rmtree(temporary)
             raise
+        finally:
+            if copy_lock is not None:
+                os.close(copy_lock)
 
     @property
     def exited(self) -> bool:

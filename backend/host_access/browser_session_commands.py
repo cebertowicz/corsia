@@ -11,15 +11,13 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_field_values, browser_identity as identity
-from host_access import browser_agent_verbs, browser_fill_marks, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_fill_marks, browser_grant_cleanup, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
-# A pane's own commands: the person's navigation, the page metadata their pane shows, and their pane's size
-# and theme. They are not agent commands, so the password guard (AR3, AR4) does not refuse them.
+# Pane commands are the person's, so the agent password guard does not refuse them.
 _PANE_COMMANDS = {("open",), ("back",), ("forward",), ("reload",), ("get", "url"),
                   ("get", "title"), ("set", "viewport"), ("set", "media")}
-# The secret boundary also applies to sessions without a resolved owner.
 _COOKIE_COMMANDS = {"cookies", "state", "storage", "auth", "profiles", "stream", "dashboard", "connect",
                     ("network", "har"), ("network", "requests"), ("get", "cdp-url")}
 _SECRET_REFUSAL = "browser cookies, saved sign-ins and stored logins are not available to agents"
@@ -160,14 +158,14 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     if (saved_sign_in := bool(runtime.record.profile or runtime.record.copy_of)) or browser_saved_fills.saved_fill_session(thread_id, runtime.record.session):
         if _script_config(config) or not (trusted_navigation or _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(browser_agent_verbs.refusal(args) or (_SCRIPT_REFUSAL if saved_sign_in else browser_saved_fills.SAVED_FILL_SESSION_REFUSED))
-    # Pane and agent commands share this lock, but direct person interaction and
-    # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
+    browser_grant_cleanup.require_unfenced(runtime, pane=pane)
     owner._queued_actions += 1
     try:
         await runtime.action_lock.acquire()
     finally:
         owner._queued_actions -= 1
     try:
+        browser_grant_cleanup.require_unfenced(runtime, pane=pane)
         rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane, trusted_navigation)
         if (show_window or pane) and not rendered.startswith("Error:"):
             # A connected pane already shows the page, so only an agent's share reveals it.
@@ -222,8 +220,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             current_session=partial(owner.session_identity, thread_id))
         note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
     # A command the guard let through marks against a saved-login fill; capture marks each document typing passes through.
-    async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation) as finished,
-                await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes):
+    async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation, profile=runtime.record.site_profile) as finished,
+                await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args, runtime.record.site_profile) as writes):
         if not pane:
             browser_pane_state.agent_acted(thread_id)
         if shared_write:
@@ -324,6 +322,7 @@ async def declare_person_step(owner: Any, thread_id: str, instruction: str) -> N
     """Give the current shared-browser page to the person and arrange its observed completion."""
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=None, show_window=None, session="existing")
+    browser_grant_cleanup.require_unfenced(runtime)
     command = partial(_command, owner, runtime, None)
     endpoint = await browser_cdp.page_endpoint(command)
     await browser_control.declare_person_step(
