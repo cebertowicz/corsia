@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from history.types import AssistantStepBatch, PortableTurn
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,10 +105,21 @@ def _external_boundary(
         if latest.status in _TERMINAL_TURN_STATES:
             return _newer_boundary(projection.sealed_boundary, floor)
         return None
+    # The projection is frozen for this decision; compute each Turn only at its
+    # first original use and discard the results when this call returns.
+    batches_by_turn: dict[int, tuple[AssistantStepBatch, ...]] = {}
+
+    def batches_for_turn(turn: PortableTurn) -> tuple[AssistantStepBatch, ...]:
+        key = id(turn)
+        if key not in batches_by_turn:
+            batches_by_turn[key] = assistant_step_batches(turn)
+        return batches_by_turn[key]
+
     running = latest is not None and latest.status == "running"
-    batches = assistant_step_batches(latest) if running else ()
+    batches = batches_for_turn(latest) if running else ()
     boundary = None if running and not batches else boundary_before_latest_assistant_step(
         projection, floor=floor, step_precedes_start=step_precedes_start,
+        batches_for_turn=batches_for_turn,
     )
     own_input = boundary is not None and any(
         message.role == "user"

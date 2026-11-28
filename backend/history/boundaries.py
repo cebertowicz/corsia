@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from history.turns import (
@@ -10,6 +11,7 @@ from history.turns import (
     turn_interior_cut_points,
 )
 from history.types import (
+    AssistantStepBatch,
     HistoryBoundary,
     PortableHistoryError,
     PortableHistoryProjection,
@@ -20,7 +22,11 @@ from history.types import (
 
 def _legal_slice_boundaries(
     source: PortableHistoryProjection,
+    *,
+    batches_for_turn: Callable[[PortableTurn], tuple[AssistantStepBatch, ...]] | None = None,
 ) -> set[HistoryBoundary]:
+    if batches_for_turn is None:
+        batches_for_turn = assistant_step_batches
     legal = {
         boundary
         for turn in source.turns
@@ -29,7 +35,7 @@ def _legal_slice_boundaries(
             *turn_interior_cut_points(turn),
             *(
                 batch.resume_anchor
-                for batch in assistant_step_batches(turn)
+                for batch in batches_for_turn(turn)
                 if batch.resume_anchor is not None
             ),
         )
@@ -44,6 +50,7 @@ def boundary_before_latest_assistant_step(
     *,
     floor: HistoryBoundary | None = None,
     step_precedes_start: bool = False,
+    batches_for_turn: Callable[[PortableTurn], tuple[AssistantStepBatch, ...]] | None = None,
 ) -> HistoryBoundary | None:
     """Return the newest legal cut before the latest provider-visible Step.
 
@@ -53,11 +60,13 @@ def boundary_before_latest_assistant_step(
     """
     if source.start_exclusive is not None and floor != source.start_exclusive:
         raise PortableHistoryError("a scoped projection must be floored at its start")
+    if batches_for_turn is None:
+        batches_for_turn = assistant_step_batches
     newest = next(
         (
             batches[-1]
             for turn in reversed(source.turns)
-            if (batches := assistant_step_batches(turn))
+            if (batches := batches_for_turn(turn))
         ),
         None,
     )
@@ -87,7 +96,7 @@ def boundary_before_latest_assistant_step(
         candidate = max(
             (
                 boundary
-                for boundary in _legal_slice_boundaries(source)
+                for boundary in _legal_slice_boundaries(source, batches_for_turn=batches_for_turn)
                 if boundary.seq < first_step_seq
             ),
             key=lambda boundary: boundary.seq,
