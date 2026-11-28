@@ -3,6 +3,7 @@ import type { CommentSelection } from './commentSelection';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import type { DraftOrigin } from './keptCommentDrafts.svelte';
+import type { KeptPlace } from '$lib/keptPlace';
 
 /** A name for what a comment is on, or a read of it that waits until a draft is started. */
 export type SelectionLabel = string | (() => string | undefined);
@@ -29,6 +30,10 @@ export interface CommentDraft {
 	origin?: DraftOrigin;
 	request?: AbortController;
 	sequence?: number;
+	/** Its passage as the draft keeps it (`uniquePlaceOf`), or null when another copy of the quote shares a side with it. */
+	place?: KeptPlace | null;
+	/** It came back with no place: its passage is gone, so it is on no text until the person selects where it goes. */
+	unplaced?: boolean;
 }
 
 export const commentDraft = writable<CommentDraft | null>(null);

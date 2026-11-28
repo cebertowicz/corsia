@@ -40,11 +40,13 @@ export interface ActivityTaskDetail {
 	revision: number;
 	/** The step's instructions, when the step carries them. */
 	description?: string | null;
+	/** The thread whose shared browser opened this step, when it is a browser step. */
+	browser_thread_id?: string;
 }
 
 /**
  * A document where agents answered the person's comments. `unread` is the document's unread set, the one its pane
- * and jump button count; Done marks it read up to `latest_reply_id`, so a reply that lands after stays unread.
+ * and jump button count; Done marks through `latest_reply_id`, the newest counted unread comment or reply, so later items stay unread.
  */
 export interface ActivityDocumentDetail {
 	artifact_id: string;
@@ -122,10 +124,11 @@ function isActivityQueue(value: unknown): value is QueueBody {
 	return notifications === undefined || isList(notifications);
 }
 
-export async function fetchActivityQueue(projectId: string | null): Promise<ActivityQueue> {
+export async function fetchActivityQueue(projectId: string | null, signal?: AbortSignal): Promise<ActivityQueue> {
 	const query = new URLSearchParams({ view: 'activity' });
 	if (projectId) query.set('project_id', projectId);
-	const res = await apiFetch(`/api/attention/queue?${query.toString()}`);
+	const url = `/api/attention/queue?${query.toString()}`;
+	const res = await (signal ? apiFetch(url, { signal }) : apiFetch(url));
 	if (!res.ok) throw new ActivityQueueError(res.status);
 	const data: unknown = await res.json().catch(() => null);
 	// Anything else is not this view (an older server's queue, or a broken body): it shows as a failed read, never as

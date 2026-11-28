@@ -1,7 +1,7 @@
 import { fetchContent, markArtifactVerified, RequestRefused } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { ackComment, addReply, EarlierVersionPosted, loadComments, resolveComment } from '$lib/stores/docComments';
+import { EarlierVersionPosted, loadComments } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { commentDraftScope, dropCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -9,9 +9,7 @@ import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
 import { shouldReloadPresenceEdit } from '$lib/docPresence';
 import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
-import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import { DRAFT_KEPT } from '$lib/stores/draftKept';
-import { createMentionSelection, type MentionOccurrence } from '$lib/components/comments/mentionSelection';
 
 /** One message per known reason the server refuses a comment's tags, picked by the refusal's `kind`. */
 export const TAG_REFUSALS: Record<string, string> = {
@@ -137,39 +135,4 @@ export function reloadDocumentFeedback(
 			if (sequence === undefined || sequence === currentSequence()) sync?.sync?.(artifactId, feedback);
 		})
 		.catch((error) => console.error('comments load failed', error));
-}
-
-/** Reply, resolve and agree on the open document's threads; a reply also tells the feedback status a comment arrived. */
-export function createThreadActions(artifactId: () => string | null, commentCreated: () => void, threadId: () => string | null = () => null) {
-	return {
-		/**
-		 * Post a reply kept under `draftKey` (`replyDraftKey`): every press posts under the draft's one id, a failure keeps
-		 * the text with the reason the card shows, and text typed while it posted stays (`keptCommentDrafts.posted`).
-		 */
-		async reply(id: string, text: string, taggedAgentIds: string[] = [], mentions: MentionOccurrence[] = [], draftKey = '') {
-			const artifact = artifactId();
-			if (!artifact) return;
-			keptCommentDrafts.clearError(draftKey);
-			const kept = keptCommentDrafts.get(draftKey);
-			const press = keptCommentDrafts.claim(draftKey, kept?.body ?? text, kept?.mentionSelection ?? createMentionSelection(text));
-			let failure = '', toastId: string | null = null;
-			try {
-				await submitDocumentComment(
-					() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId(), mentions, press.clientId, press.again),
-					(shown, message) => { toastId = shown; failure = message; },
-					undefined, () => keptCommentDrafts.onScreen(draftKey),
-				);
-			} catch (error) {
-				const now = keptCommentDrafts.get(draftKey);
-				if (now && failure) keptCommentDrafts.fail(draftKey, now.body, now.mentionSelection, failure, error instanceof EarlierVersionPosted);
-				if (failure) keptCommentDrafts.toast(draftKey, toastId);
-				throw error;
-			}
-			// Posted: the draft goes with any toast that told an earlier press failed.
-			keptCommentDrafts.posted(draftKey, text, taggedAgentIds);
-			commentCreated();
-		},
-		resolve(id: string, resolved: boolean, wait = false): Promise<boolean> { const artifact = artifactId(); return artifact ? resolveComment(artifact, id, resolved, wait) : Promise.resolve(false); },
-		agree(id: string, agreed: boolean) { const artifact = artifactId(); if (artifact) ackComment(artifact, id, agreed); },
-	};
 }

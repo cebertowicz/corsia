@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from plans import service, status_context
+from plans import plan_cap, service, status_context
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import owner_plan, plan_update, queue_active, revision, task
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
@@ -184,7 +184,9 @@ def test_an_owners_add_gets_the_top_and_a_landing_line(db):
     )
 
 
-def test_an_add_below_the_top_ten_still_shows_its_own_line(db):
+def test_an_add_below_the_top_ten_still_shows_its_own_line(db, monkeypatch):
+    # The listing, not the cap: keep all thirteen above the line (test_plan_cap covers the spill).
+    monkeypatch.setattr(plan_cap, "CAP", 100)
     plan = owner_plan(db)
     for index in range(12):
         task(db, plan.id, f"Item {index}")

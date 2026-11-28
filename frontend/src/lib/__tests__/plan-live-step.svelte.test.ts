@@ -89,7 +89,7 @@ function delegated(): OperatorNode {
 		execution: { ...base.execution, condition: 'waiting', attempts: [firstTry] },
 		child: {
 			available: true, plan_id: 'child-plan', thread_id: 'worker',
-			progress: { done: 0, total: 1, open: 1, liveness: 'advancing' },
+			progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'advancing' },
 		},
 	};
 }

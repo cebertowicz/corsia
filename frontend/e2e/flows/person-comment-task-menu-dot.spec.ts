@@ -9,8 +9,8 @@ import { shoot } from '../support/comment-count-probe';
 
 const repo = path.resolve(process.cwd(), '..');
 
-// A phone hides the menu, so the controls that open it carry the rows' needs-you dot: the header's
-// Toggle sidebar while the menu is closed, the New chat button while it is open. Dismiss all clears both.
+// A phone hides the menu, so the header's Toggle sidebar carries the rows' needs-you dot while the menu is
+// closed. Once it is open the rows carry their own, and the New chat button never does. Dismiss all clears it.
 test('a phone menu carries the needs-you dot until Dismiss all', async ({ page, request }, testInfo) => {
 	test.skip(!testInfo.project.use.hasTouch, 'Phone layout only');
 	test.setTimeout(240_000);
@@ -34,7 +34,6 @@ test('a phone menu carries the needs-you dot until Dismiss all', async ({ page, 
 	const toggle = (name: string) => page.getByRole('button', { name, exact: true });
 	const newChat = page.locator('button.rail-newchat');
 	const toggleDot = page.getByTestId('menu-needs-you-dot');
-	const fabDot = page.getByTestId('fab-needs-you-dot');
 
 	// Menu closed: the toggle carries the dot.
 	await openAppPastLanding(page);
@@ -43,13 +42,13 @@ test('a phone menu carries the needs-you dot until Dismiss all', async ({ page, 
 	await expect(toggleDot).toHaveCSS('width', '8px');
 	await shoot(page, testInfo, '393-menu-closed-dot');
 
-	// Menu open: the New chat button carries it, beside the row's own mark.
+	// Menu open: the row carries its own mark; the New chat button carries none.
 	await toggle('Toggle sidebar · Needs you').click();
 	const row = page.locator('aside.sidebar').getByRole('listitem').filter({ hasText: title });
 	await expect(row.getByRole('button', { name: /Needs you/ })).toBeVisible();
 	await expect(newChat).toBeVisible();
-	await expect(newChat).toHaveAttribute('aria-label', 'New chat · Needs you');
-	await expect(fabDot).toBeVisible();
+	await expect(newChat).toHaveAttribute('aria-label', 'New chat');
+	await expect(newChat.locator('[data-testid="fab-needs-you-dot"]')).toHaveCount(0);
 	await shoot(page, testInfo, '393-menu-open-dot');
 
 	// Dismiss all from the file task's row menu (long-press), as a phone does.
@@ -73,9 +72,8 @@ test('a phone menu carries the needs-you dot until Dismiss all', async ({ page, 
 	await session.detach();
 	await page.getByRole('menuitem', { name: 'Dismiss all' }).click();
 
-	// Nothing needs the person: the live page drops both dots, and a fresh load shows neither.
+	// Nothing needs the person: the live page drops the dot, and a fresh load shows none.
 	await expect(toggleDot).toHaveCount(0);
-	await expect(fabDot).toHaveCount(0);
 	await openAppPastLanding(page);
 	await expect(toggle('Toggle sidebar')).toBeVisible();
 	await expect(toggleDot).toHaveCount(0);
@@ -85,6 +83,5 @@ test('a phone menu carries the needs-you dot until Dismiss all', async ({ page, 
 	await expect(row.getByRole('button', { name: /Needs you/ })).toHaveCount(0);
 	await expect(newChat).toBeVisible();
 	await expect(newChat).toHaveAttribute('aria-label', 'New chat');
-	await expect(fabDot).toHaveCount(0);
 	await shoot(page, testInfo, '393-menu-open-clear');
 });

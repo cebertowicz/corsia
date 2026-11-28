@@ -15,7 +15,9 @@ from plans import public
 from plans.public import (
     read_current_status, PlanActor, ensure_current_plan, mutate, read_current_plan,
 )
-from prompts.plan_tools import CLOSE_NEXT_DESCRIPTION, USER_TASKS_DESCRIPTION
+from prompts.plan_tools import (
+    CLOSE_NEXT_DESCRIPTION, DECISION_DESCRIPTION, USER_TASKS_DESCRIPTION,
+)
 from tools.base import Tool
 from tools.plan_read_events import emit_read
 from tools.plan_schemas import (
@@ -208,11 +210,9 @@ def _mutation_operation(
     try:
         import tools.workflow_task_fields as workflow_task_fields
         actor = _thread_actor(thread_id, actor_row, turn_identity, call_ids)
-        workflow_version, workflow_steps = None, ()
-        if operation in {"add", "insert"}:
-            workflow_task_fields.validate_creation_reference(params, workflows)
-            workflow_version = workflow_task_fields.creation_version(params, workflows)
-            workflow_steps = workflow_task_fields.creation_run(params, workflows)
+        workflow_version, workflow_steps = workflow_task_fields.prepare_mutation(
+            operation, params, workflows, db, plan_id, actor,
+        )
         in_later = public.titles_in_later(db, plan_id, params)
         result = mutate(
             plan_id,
@@ -289,13 +289,7 @@ class PlanDecisionTool(_OperationTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Author structured plan decisions for the user, with 2-4 A/B/C/D "
-            "options; the parent tier reviews before raise. pick \"any\" is for "
-            "independent items; tradeoffs get their own decision. Decisions are for "
-            "choices: a step only the person's hands can take (sign in, pay) is "
-            "never one, even with a 'drop it' option; plan_update says where it goes."
-        )
+        return DECISION_DESCRIPTION
 
     @property
     def contract(self) -> dict[str, Any]:

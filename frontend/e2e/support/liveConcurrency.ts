@@ -93,7 +93,7 @@ export async function holdRequest(page: Page, pattern: string, method = 'POST') 
 export type CreateLoss = 'request' | 'response';
 
 /**
- * Drops one comment create late, inside the client's 12 s COMMENT_POST_TIMEOUT_MS. `request`: the
+ * Drops one comment create late, inside the client's COMMENT_POST_TIMEOUT_MS. `request`: the
  * connection fails before the server sees it. `response`: the real server commits it and the answer is
  * lost on the way back. `committed()` is the id the real server returned, and `clientId()` the one sent.
  */

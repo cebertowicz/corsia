@@ -3,10 +3,11 @@ import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
 import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
-import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
+import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence, type MapPos } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
-import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
+import { liveFailureMessage, postFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import { uniquePlaceOf, type KeptPlace } from '$lib/keptPlace';
 import { regionColor, type ImageRegion } from '$lib/imageRegions';
 import { token } from '$lib/stores/auth';
 import type { DocComment } from '$lib/stores/docComments';
@@ -29,6 +30,8 @@ export interface DocumentImageComments {
 	post: (from: number, to: number, region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], press: ImagePress, diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
+	/** The image's markdown as a kept draft's place, only when no other copy shares a side with it (`uniquePlaceOf`). */
+	placeOf: (from: number, to: number) => KeptPlace | null;
 	/** Snapshot the current diagram using the editor's existing render. */
 	refreshDiagram: (from: number, to: number) => Promise<OpenImageRequest | null>;
 	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
@@ -42,6 +45,8 @@ interface DocViewerImagesOptions {
 	comments: () => DocComment[];
 	artifactId: () => string | null;
 	target: () => DocViewerTarget | null;
+	/** The thread whose tab holds the open image: the leaf's own, which is not the document's thread when the leaf shows another thread's document. */
+	tabThreadId: () => string | null;
 	readOnly: () => boolean;
 	text: () => string;
 	session: () => LiveDocumentSession | undefined;
@@ -70,7 +75,8 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
 			post: (from, to, region, body, taggedAgentIds, mentions, press, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions, press),
-			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
+			failure: options.session() ? liveFailureMessage : postFailureMessage, feedback: options.feedback(),
+			placeOf: (from, to) => uniquePlaceOf(options.session()?.text.toString() ?? options.text(), from, to),
 			refreshDiagram: async (from, to) => {
 				const root = options.root();
 				if (!root) return null;
@@ -104,9 +110,9 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		else void openAt(image, focus).then((opened) => { if (!opened) otherwise(); });
 	}
 	/** The document changed under an open image: it keeps to its markdown. */
-	function remap(mapPos: (pos: number) => number) {
-		const target = options.target();
-		if (target?.threadId) remapTabDocumentImage(target.threadId, target.instanceId, mapPos);
+	function remap(mapPos: MapPos) {
+		const target = options.target(), key = options.tabThreadId();
+		if (target && key) remapTabDocumentImage(key, target.instanceId, mapPos);
 	}
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),

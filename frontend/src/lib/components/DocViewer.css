@@ -8,7 +8,7 @@
 }
 /* While nothing waits, the header row holds only the Details panel (drawn over the text, out of flow) and screen-reader status:
    it has no height, so no gap is left above the text. Any in-flow content (the ask's card, a live notice, an error) brings it back. */
-.doc:not(:has(> .document-header > :not(.doc-panel, .metadata-status.sr-only))):not(:has(.canvas-comment-drawer:not(.margin), .canvas-history-drawer)) { row-gap: 0; }
+.doc:not(:has(> .document-header > :not(.doc-panel, .metadata-status.sr-only, .rb-dock-slot))):not(:has(.canvas-comment-drawer:not(.margin), .canvas-history-drawer)) { row-gap: 0; }
 /* The list keeps its capped height below the editor. */
 .doc:has(.canvas-comment-drawer:not(.margin)), .doc:has(.canvas-history-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
 /* The comment margin column (`--margin-column`: 280px of cards plus gutter), at any desktop width, is drawn on the canvas inside the editor's

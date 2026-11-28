@@ -82,6 +82,8 @@ export interface OperatorProgress {
 	total: number;
 	/** Unsettled leaves in play, shown as "N left": done/total would read 0 of N in a flat plan. */
 	open: number;
+	/** Open leaves above the line (not in Later); the plan header's N left. */
+	open_above: number;
 	liveness: OperatorLiveness;
 	distribution?: OperatorDistribution;
 }
@@ -219,6 +221,10 @@ export interface OperatorNode {
 	branch_progress: { done: number; total: number } | null;
 	/** When the work under this node, all of it quietly set aside by its agent, next comes due (ISO); null if any open work is not. */
 	scheduled_until: string | null;
+	/** Set aside below the plan's cut: the server's one Later flag (`plans.later_fields`). */
+	later: boolean;
+	/** Why the agent set it aside, as written; null when it gave none. */
+	later_reason: string | null;
 	attention_path: string[];
 	completion: OperatorCompletion | null;
 	child: OperatorChildSummary | null;

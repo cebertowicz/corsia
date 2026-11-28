@@ -29,7 +29,7 @@
 	// the same rule on the same row state, so pausing the item lifts both together.
 	const needsYou = $derived(isYourMove($threadPlanStates[threadId]));
 	const chipLabel = $derived(plan && plan.progress.open > 0
-		? `Open plan — ${plan.progress.open} left`
+		? `Open plan — ${plan.progress.open_above} left`
 		: 'Open plan — all work complete');
 	let open = $state(false);
 	let openedFor = $state<string | null>(null);
@@ -82,14 +82,14 @@
 		onclick={() => (open = true)}
 	>
 		<span aria-hidden="true" class="progress-mark"></span>
-		<b>{plan.progress.open > 0 ? `${plan.progress.open} left` : '✓'}</b>
+		<b>{plan.progress.open > 0 ? `${plan.progress.open_above} left` : '✓'}</b>
 	</button>
 {/if}
 {#if open}
 	<AdaptiveDrawer
-		ariaLabel={!plan ? 'Plan' : plan.progress.open > 0 ? `Plan — ${plan.progress.open} left` : 'Plan — all work complete'}
+		ariaLabel={!plan ? 'Plan' : plan.progress.open > 0 ? `Plan — ${plan.progress.open_above} left` : 'Plan — all work complete'}
 		heading="Plan"
-		headingMeta={plan && plan.progress.open > 0 ? `${plan.progress.open} left` : null}
+		headingMeta={plan && plan.progress.open > 0 ? `${plan.progress.open_above} left` : null}
 		onClose={() => (open = false)}
 	>
 		{#snippet leading()}<span class="drawer-pause"><PlanHeadControls {threadId} show="pause" /></span>{/snippet}

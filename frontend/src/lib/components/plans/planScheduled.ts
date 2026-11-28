@@ -26,6 +26,11 @@ export function isScheduledMember(node: OperatorNode, now: number): boolean {
 	return at !== null && at - now > SCHEDULE_HORIZON_MS;
 }
 
+/** Whether the node is set aside below the cut. */
+export function isLaterMember(node: OperatorNode, _now: number): boolean {
+	return node.later === true;
+}
+
 export interface ScheduledCluster {
 	/** The shared moment (epoch ms of its first member's end). */
 	at: number;

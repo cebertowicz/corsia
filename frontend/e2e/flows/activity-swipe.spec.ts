@@ -13,10 +13,13 @@ test('a phone swipe marks the selected document read', async ({ page, request })
 	});
 	expect(reply.ok()).toBeTruthy();
 	const replyId = (await reply.json()).comment.id as string;
+	const taggedId = await comment(request, doc, 'A newer tagged comment', 10);
 	isolatedDb([
 		'changed = connection.execute("UPDATE doc_comments SET author=?, author_kind=\'agent\', author_thread_id=? WHERE id=?", ("Agent", sys.argv[2], sys.argv[3])).rowcount',
 		'assert changed == 1, changed',
-	], doc.threadId, replyId);
+		'changed = connection.execute("UPDATE doc_comments SET author=?, author_kind=\'agent\', author_thread_id=?, tagged_user_id=(SELECT user_id FROM threads WHERE id=?), created_at=\'9999\' WHERE id=?", ("Agent", sys.argv[2], sys.argv[2], sys.argv[4])).rowcount',
+		'assert changed == 1, changed',
+	], doc.threadId, replyId, taggedId);
 	await openAppPastLanding(page);
 	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByRole('navigation', { name: 'Global' }).getByRole('button', { name: 'Activity' }).click();
@@ -32,7 +35,9 @@ test('a phone swipe marks the selected document read', async ({ page, request })
 	await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: start, y }] });
 	await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: end, y }] });
 	await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-	expect((await read).ok()).toBeTruthy();
+	const response = await read;
+	expect(response.ok()).toBeTruthy();
+	expect(response.request().postDataJSON()).toEqual({ documents: [{ artifact_id: doc.artifactId, through_reply_id: taggedId }] });
 	await expect(row).toHaveCount(0);
 	await expect(page.getByText('No unread replies.').first()).toBeVisible();
 });

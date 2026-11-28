@@ -1,5 +1,5 @@
 <!--
-	The face of a level's Scheduled row: the snooze clock in the waiting circle and a
+	The face of a level's Later row: the snooze clock in the waiting circle and a
 	title in the row-title style (the count is on the Show control's accessible name).
 	It never wears the check; that is finished work's.
 	The circle and title repeat `PlanRowFace`'s rules (its styles are scoped to it).
@@ -9,7 +9,7 @@
 </script>
 
 <span class="state-icon waiting" aria-hidden="true"><SnoozeClock /></span>
-<span class="row-copy"><span class="row-line"><span class="row-title">Scheduled</span></span></span>
+<span class="row-copy"><span class="row-line"><span class="row-title">Later</span></span></span>
 
 <style>
 	.state-icon {

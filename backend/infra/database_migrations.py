@@ -268,7 +268,9 @@ from infra.migration_205_to_206_activity_ranking import migrate_205_to_206
 from infra.migration_206_to_207_suggestion_history import migrate_206_to_207
 from infra.migration_207_to_208_comment_source_snapshots import migrate_207_to_208
 from infra.migration_208_to_209_saved_login_fill_audit import migrate_208_to_209
-from infra.migration_209_to_210_activity_draft_ack import migrate_209_to_210
+from infra.migration_209_to_210_later_reviewed_at import migrate_209_to_210
+from infra.migration_210_to_211_queue_read_indexes import migrate_210_to_211
+from infra.migration_211_to_212_activity_draft_ack import migrate_211_to_212
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -368,8 +370,9 @@ class MigrationResult:
 #: build never inherits the ladder.
 MIGRATIONS: dict[int, MigrationStep] = {}
 
-ADDITIVE_STEPS: frozenset[int] = frozenset({208})
-"""From-versions whose steps only create tables or indexes and never branch on data.
+ADDITIVE_STEPS: frozenset[int] = frozenset({208, 209, 210})
+"""From-versions proven to only create tables or indexes, or add nullable columns
+without references, and never branch on data.
 
 The additive-step authorizer proof checks each marked step. An unmarked step
 always takes the full foreign-key validation path.
@@ -973,6 +976,8 @@ MIGRATIONS[206] = migrate_206_to_207
 MIGRATIONS[207] = migrate_207_to_208
 MIGRATIONS[208] = migrate_208_to_209
 MIGRATIONS[209] = migrate_209_to_210
+MIGRATIONS[210] = migrate_210_to_211
+MIGRATIONS[211] = migrate_211_to_212
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

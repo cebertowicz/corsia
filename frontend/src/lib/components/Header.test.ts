@@ -337,20 +337,37 @@ describe('Header glass layers', () => {
 	};
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
-	it('keeps the phone header blur on the masked layer so it fades out at the bottom', () => {
-		// An unmasked blur layer ends in a hard line across the transcript.
-		expect(rule(phone, '.shell-header::before')).not.toMatch(/backdrop-filter: none;/);
+	it('keeps the full blur, in both spellings, on the phone header layer', () => {
+		const phoneLayer = rule(phone, '.shell-header::before');
+		expect(phoneLayer).not.toMatch(/backdrop-filter: none;/);
 		const base = rule(headerSource, '.shell-header::before');
+		expect(base).toMatch(/\n\t\tbackdrop-filter: var\(--glass-blur\);/);
 		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
-		expect(base).toMatch(/mask-image: linear-gradient/);
 	});
 
-	it('keeps the phone glass opaque behind the header row', () => {
-		// The transcript shows through wherever the mask is below 1, so it stays opaque down to
-		// the bottom of the row's glyphs, 9px below the row centre, and only then fades.
-		expect(rule(phone, '.shell-header')).toContain('padding-top: var(--header-pad-top);');
-		expect(rule(phone, '.shell-header::before')).toContain(
-			'mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);',
-		);
+	it('draws the phone header as an even frosted bar with no fade', () => {
+		// WebKit masks the blurred backdrop too: a fading mask shows the unblurred transcript
+		// through the lower header and ends in a hard line, so the phone layer has no mask and
+		// one flat tint over the whole box.
+		const phoneLayer = rule(phone, '.shell-header::before');
+		expect(phoneLayer).toContain('-webkit-mask-image: none;');
+		expect(phoneLayer).toMatch(/\n\t\t\tmask-image: none;/);
+		expect(phoneLayer).toContain('background-image: none;');
+		expect(phoneLayer).toContain('background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);');
+		expect(phoneLayer).not.toMatch(/gradient/);
+	});
+
+	it('sizes the phone header and positions the row using the safe-area inset', () => {
+		const phoneHeader = rule(phone, '.shell-header');
+		expect(phoneHeader).toContain('height: var(--header-bottom);');
+		expect(phoneHeader).toContain('padding-top: max(8px, calc(var(--safe-top) - 28px));');
+	});
+
+	it('makes the phone header solid when transparency is reduced', () => {
+		// Reduced transparency turns --glass-blur off, so a part-transparent tint would show the
+		// transcript sharp through the bar.
+		const at = headerSource.indexOf('@media (max-width: 768px) and (prefers-reduced-transparency: reduce)');
+		expect(at).toBeGreaterThan(-1);
+		expect(rule(headerSource.slice(at), '.shell-header::before')).toContain('background-color: var(--header-top-base);');
 	});
 });

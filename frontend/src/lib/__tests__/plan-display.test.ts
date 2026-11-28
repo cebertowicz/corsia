@@ -6,6 +6,8 @@ import {
 	nodeDisplayState,
 	nodeStateTone,
 	nodeSubline,
+	nodeSublineParts,
+	ordinal,
 	planCardState,
 } from '$lib/components/plans/planDisplay';
 import type {
@@ -45,7 +47,7 @@ function entry(over: Partial<OperatorPlanEntry> = {}): OperatorPlanEntry {
 			state: 'active', revision: 1, updated_at: 'now',
 		},
 		owner: { label: 'Thread', project_id: null, thread_id: 't1' },
-		progress: { done: 0, total: 1, open: 1, liveness: 'idle', distribution: DISTRIBUTION },
+		progress: { done: 0, total: 1, open: 1, open_above: 1, liveness: 'idle', distribution: DISTRIBUTION },
 		display: { label_key: 'waiting', tone_key: 'waiting' },
 		oversize: null,
 		current_node_ids: [],
@@ -83,7 +85,7 @@ describe('contract-v2 server display keys', () => {
 				state: 'paused', revision: 1, updated_at: 'now',
 			},
 			progress: {
-				done: 1, total: 1, open: 0, liveness: 'advancing',
+				done: 1, total: 1, open: 0, open_above: 0, liveness: 'advancing',
 				distribution: { ...DISTRIBUTION, done: 1, pending_ready: 0 },
 			},
 			display: { label_key: 'working', tone_key: 'active' },
@@ -188,4 +190,25 @@ describe('contract-v2 server display keys', () => {
 			expect(cardStateLabel(state)).toBe(label);
 		}
 	});
+});
+
+describe('a Later member subline', () => {
+	const NOW = new Date(2026, 8, 25, 10, 0);
+
+	it('leads with the bare ordinal, then the agent’s reason', () => {
+		const member = node({ later: true, later_reason: 'Waiting on the design review' });
+		expect(nodeSublineParts(member, NOW, undefined, { n: 3 }).lead).toBe('3rd · Waiting on the design review');
+	});
+
+	it('says only the ordinal when the agent gave no reason', () => {
+		expect(nodeSublineParts(node({ later: true }), NOW, undefined, { n: 4 }).lead).toBe('4th');
+	});
+});
+
+describe('ordinal', () => {
+	it.each([
+		[1, '1st'], [2, '2nd'], [3, '3rd'], [4, '4th'], [11, '11th'], [12, '12th'], [13, '13th'],
+		[21, '21st'], [22, '22nd'], [23, '23rd'], [24, '24th'], [101, '101st'], [111, '111th'],
+		[112, '112th'], [113, '113th'], [121, '121st'],
+	] as const)('%i reads %s', (n, want) => expect(ordinal(n)).toBe(want));
 });

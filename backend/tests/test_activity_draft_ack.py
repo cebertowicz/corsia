@@ -9,7 +9,7 @@ from api.attention import router, _acknowledge_draft
 from infra.activity_draft_rows import draft_rows
 from infra.auth import require_user
 from infra.database import get_db
-from infra.migration_209_to_210_activity_draft_ack import migrate_209_to_210
+from infra.migration_211_to_212_activity_draft_ack import migrate_211_to_212
 from infra.schema import SCHEMA_SQL
 from tests.test_email_drafts_api import _artifact, _owner
 from tests.test_google_email import _draft, client_file, conductor, google, mail  # noqa: F401
@@ -22,9 +22,9 @@ def test_schema_on_upgrade_and_new_install():
     upgrade = sqlite3.connect(':memory:')
     upgrade.execute('CREATE TABLE action_drafts (id TEXT PRIMARY KEY, state TEXT NOT NULL)')
     upgrade.execute("INSERT INTO action_drafts VALUES ('existing', 'sending')")
-    assert MIGRATIONS[209] is migrate_209_to_210
-    migrate_209_to_210(upgrade)
-    migrate_209_to_210(upgrade)
+    assert MIGRATIONS[211] is migrate_211_to_212
+    migrate_211_to_212(upgrade)
+    migrate_211_to_212(upgrade)
     assert upgrade.execute('SELECT * FROM action_drafts').fetchall() == [('existing', 'sending')]
     upgrade.execute("INSERT INTO activity_draft_acknowledgements VALUES ('person', 'existing')")
     fresh = sqlite3.connect(':memory:')

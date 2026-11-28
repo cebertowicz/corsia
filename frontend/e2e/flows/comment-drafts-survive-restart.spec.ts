@@ -114,8 +114,12 @@ test.describe('@flow:document-comments an unsent comment outlives the page', () 
 			await composer(page).press('Escape');
 			await expect(composer(page)).toHaveCount(0);
 			page = await leave(page, way, (next) => openLiveDocument(next, document).then(() => undefined));
-			await beginComment(page, QUOTE);
+			if (!phone(page)) await beginComment(page, QUOTE);
 			await expect(composer(page), 'the text typed before is there').toHaveValue('Say which gate has parking');
+			await expect(page.locator('.composer .quote-wrap')).toContainText(QUOTE);
+			await expect(page.locator('.composer').getByRole('button', { name: 'Sending…' })).toHaveCount(0);
+			const response = await request.get(`/api/artifacts/${document.artifactId}/comments`, { params: { token: TEST_TOKEN } });
+			expect((await response.json()).comments).toHaveLength(0);
 		});
 
 		test(`image: a new comment being typed is there again after a ${way}`, async ({ page, request }) => {
@@ -123,14 +127,21 @@ test.describe('@flow:document-comments an unsent comment outlives the page', () 
 			await openThread(page, seeded.sessionTitle, page.viewportSize()!.width);
 			await drawBox(page);
 			await composer(page).fill('The header is too tall');
+			const region = await page.evaluate((prefix) => JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith(prefix))!)!).region, PREFIX);
+			expect(region).toBeTruthy();
 			await composer(page).press('Escape');
 			await expect(composer(page)).toHaveCount(0);
 			page = await leave(page, way, async (next) => {
 				if (next !== page) await restoreImageTab(next, seeded);
 				await openThread(next, seeded.sessionTitle, next.viewportSize()!.width);
 			});
-			await drawBox(page);
+			if (!phone(page)) await drawBox(page);
 			await expect(composer(page), 'the text typed before is there').toHaveValue('The header is too tall');
+			const restoredRegion = await page.evaluate((prefix) => JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith(prefix))!)!).region, PREFIX);
+			expect(restoredRegion).toEqual(region);
+			await expect(page.locator('.composer').getByRole('button', { name: 'Sending…' })).toHaveCount(0);
+			const response = await request.get(`/api/artifacts/${seeded.artifactId}/comments`, { params: { token: TEST_TOKEN } });
+			expect((await response.json()).comments).toHaveLength(0);
 		});
 
 		test(`document: a reply being typed is there again after a ${way}`, async ({ page, request }) => {

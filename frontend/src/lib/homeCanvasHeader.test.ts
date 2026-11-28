@@ -60,6 +60,22 @@ describe('syncCanvasHeader — compact artifact', () => {
 		expect(onTabs).toHaveBeenCalledOnce();
 	});
 
+	it('uses the same document header in Activity, with Back returning to the list', () => {
+		const onBack = vi.fn();
+		const onTabs = vi.fn();
+		const document = compact({ onBack, onTabs });
+		syncCanvasHeader(makeInput({ activeView: 'chat', compactArtifact: document }));
+		const chat = get(canvasHeader)!;
+		activityPhoneItem.set({ backLabel: 'Your tasks', onBack, artifact: document });
+		syncCanvasHeader(makeInput({ activeView: 'activity' }));
+		const activity = get(canvasHeader)!;
+		expect(activity).toEqual({ ...chat, backLabel: 'Your tasks' });
+		activity.onBack?.();
+		activity.titleAction?.onClick();
+		expect(onBack).toHaveBeenCalledOnce();
+		expect(onTabs).toHaveBeenCalledOnce();
+	});
+
 	it('marks the title action when any tab has changed', () => {
 		syncCanvasHeader(makeInput({
 			compactArtifact: compact({ anyChanged: true }),

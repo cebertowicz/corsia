@@ -1,7 +1,8 @@
-"""Traceable formatting for backend and Uvicorn log records."""
+"""Traceable backend log output on stderr: record formats and the fatal-signal stack dump."""
 
 from __future__ import annotations
 
+import faulthandler
 import logging
 import sys
 from copy import deepcopy
@@ -13,6 +14,19 @@ LOGURU_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | pid {process.id} | {
 _LOG_FORMAT = "%(asctime)s.%(msecs)03d | %(levelname)s | pid %(process)d | %(module)s:%(funcName)s:%(lineno)d - %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _UVICORN_FORMATTERS = (("uvicorn", "default"), ("uvicorn.error", "default"), ("uvicorn.access", "access"))
+
+
+def enable_crash_stack_dumps() -> None:
+    """Write every thread's Python stack to stderr when a fatal signal kills the process.
+
+    SIGSEGV, SIGABRT, SIGBUS, SIGFPE and SIGILL inside native code end the process with no
+    line of their own in the service log, so no one can read afterwards which Python code
+    was running. faulthandler dumps the stacks to stderr at the moment of the signal, and
+    every launch mode sends stderr to its service log. Idempotent, and it leaves an existing
+    enabler alone so pytest's faulthandler plugin and PYTHONFAULTHANDLER keep their settings.
+    """
+    if not faulthandler.is_enabled():
+        faulthandler.enable(all_threads=True)
 
 
 def uvicorn_log_config() -> dict:

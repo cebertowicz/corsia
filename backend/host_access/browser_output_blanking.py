@@ -31,8 +31,10 @@ UNCHECKED = "Error: this browser result was withheld because it couldn't be chec
 # Python's quote never encodes letters, digits or "-_.~", so the browser's encoders are written out below.
 _URL_SAFE = ("", "-_.!~*'()", "-_.!~*'();,/?:@&=+$#", "-_.*", "/")
 # What the browser's own serialisers (the WHATWG URL standard) encode besides controls, DEL and non-ASCII:
-# the query, and the path with and without "^", which the standard added later. Everything else stays as it is.
-_BROWSER_ENCODED = (' "#<>\'', ' "#<>?`{}^', ' "#<>?`{}')
+# the query, the path with and without "^", which the standard added later, and the fragment (the part after
+# "#"). Everything else stays as it is.
+_QUERY, _PATH, _PATH_BEFORE_CARET, _FRAGMENT = ' "#<>\'', ' "#<>?`{}^', ' "#<>?`{}', ' "<>`'
+_BROWSER_ENCODED = (_QUERY, _PATH, _PATH_BEFORE_CARET, _FRAGMENT)
 # The form encoder (URLSearchParams and a submitted form) keeps only letters, digits and "*-._", so it writes
 # "~" as %7E, and a space as "+".
 _FORM_KEPT = frozenset("*-._")
@@ -46,11 +48,28 @@ def _percent_encode(value: str, encoded: Callable[[str], bool]) -> str:
     return "".join("".join(f"%{byte:02X}" for byte in char.encode()) if encoded(char) else char for char in value)
 
 
-def _browser_url_forms(value: str) -> set[str]:
-    def serialiser(chars: str) -> Callable[[str], bool]:
-        return lambda char: not " " < char < "\x7f" or char in chars
+def _serialiser(chars: str) -> Callable[[str], bool]:
+    return lambda char: not " " < char < "\x7f" or char in chars
 
-    forms = {_percent_encode(value, serialiser(chars)) for chars in _BROWSER_ENCODED}
+
+def _parsed(value: str, path: str | None) -> str:
+    """The value written raw into a URL's path (encoded with `path`) or, when `path` is None, its query, as the
+    browser's parser serialises it: "?" moves a path on to the query and "#" moves either on to the fragment.
+    Each separator stays as it is, and each part is encoded with its own set."""
+    sets = {"path": path or "", "query": _QUERY, "fragment": _FRAGMENT}
+    part, out = ("path" if path is not None else "query"), []
+    for char in value:
+        if (char == "?" and part == "path") or (char == "#" and part != "fragment"):
+            part = "query" if char == "?" else "fragment"
+            out.append(char)
+        else:
+            out.append(_percent_encode(char, _serialiser(sets[part])))
+    return "".join(out)
+
+
+def _browser_url_forms(value: str) -> set[str]:
+    forms = {_percent_encode(value, _serialiser(chars)) for chars in _BROWSER_ENCODED}
+    forms |= {_parsed(value, path) for path in (_PATH, _PATH_BEFORE_CARET, None)}
     form = _percent_encode(value, lambda char: char != " " and not (
         char.isascii() and (char.isalnum() or char in _FORM_KEPT)))
     return forms | {form.replace(" ", "+")}
@@ -113,9 +132,10 @@ def encodings(value: str) -> set[str]:
 def blank(text: str, values: Iterable[str]) -> str:
     """The text with every form of each value replaced by BLANK, the longest forms first.
 
-    One str.replace per form, deliberately: measured on a 200 KB snapshot, about 14 ms at 100 saved logins and
-    143 ms at 1000. A single compiled alternation was 4 to 8 times slower, and a trie-shaped one is faster
-    only when kept between commands, which would hold every saved password's forms in memory.
+    One str.replace per form, deliberately: measured on a 200 KB snapshot with 16-character passwords (Nov 25,
+    with every URL form), about 37 ms at 100 saved logins and 425 ms at 1000. A single compiled alternation was 4
+    to 8 times slower on the earlier, smaller form set, and a trie-shaped one is faster only when kept between
+    commands, which would hold every saved password's forms in memory.
     """
     forms = sorted({form for value in values for form in encodings(value)}, key=len, reverse=True)
     for form in forms:

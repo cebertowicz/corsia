@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from infra import saved_logins
+from infra import saved_login_fills, saved_logins
 from infra.database import write_transaction
 from infra.key_store_values import KeyStoreError
 from infra.time import utc_now_iso
@@ -35,8 +35,9 @@ def fill_succeeded(thread_id: str, login_id: str) -> str:
 
 
 def fill_failed(thread_id: str, login_id: str) -> str:
-    """Record a rejected fill and mark the login out of date."""
+    """Record a rejected fill and mark the login out of date, ending its grants so a re-save can't revive one."""
     login = _record(thread_id, login_id, "rejected")
+    saved_login_fills.end_for_login(login.id, deleted=False)
     return REJECTED.format(site=login.site, username=login.username)
 
 

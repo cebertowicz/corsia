@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from host_access import browser_cdp, browser_clipboard, browser_dom_write
+from host_access import browser_cdp, browser_cdp_targets, browser_clipboard, browser_dom_write
 from host_access.browser_cli import CommandResult
 
 
@@ -174,7 +174,7 @@ def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
         def __exit__(self, *_args):
             pass
 
-    monkeypatch.setattr(browser_cdp, "urlopen", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(browser_cdp_targets, "urlopen", lambda *_args, **_kwargs: Response())
     assert browser_cdp._page_endpoint("ws://browser.test/devtools/browser/1", "https://example.test/current", "Current") == "ws://page.test/devtools/page/current"
 
 

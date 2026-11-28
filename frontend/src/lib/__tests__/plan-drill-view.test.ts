@@ -134,7 +134,7 @@ describe('PlanDrillView', () => {
 				plans: [{
 					plan: { id: 'child-plan', owner_kind: 'thread', owner_id: 'child', state: 'active', revision: 1, updated_at: 'now' },
 					owner: { label: 'Child', project_id: null, thread_id: 'child' },
-					progress: { done: 1, total: 2, open: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
+					progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
 					display: planDisplay('working', 'active'),
 					current_node_ids: [], next_node_ids: [],
 					nodes: [node({ id: 'child-step', title: 'Child step' })], folds: [], root_count: 1,
@@ -146,13 +146,15 @@ describe('PlanDrillView', () => {
 			node({ id: 'root', title: 'Root', depth: 0 }),
 			node({
 				id: 'delegated', title: 'Delegated', parent_id: 'root', depth: 1,
-				child: { available: true, plan_id: 'p2', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, liveness: 'advancing' } },
+				child: { available: true, plan_id: 'p2', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: 'advancing' } },
 			}),
 		];
 		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes: withChild, rootId: 'root', onBack: () => {} }) });
 		flushSync();
 		const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
 		expect(chip.getAttribute('aria-expanded')).toBe('false');
+		expect(chip.textContent).toContain('1 left');
+		expect(chip.getAttribute('aria-label')).toContain('1 subtask left');
 		chip.click();
 		await settle();
 		expect(chip.getAttribute('aria-expanded')).toBe('true');

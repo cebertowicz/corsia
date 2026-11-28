@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 
+from websockets.exceptions import ConnectionClosed
+
 from host_access import browser_cdp_frames, browser_pane_state, browser_saved_fills, browser_step_lifecycle
-from host_access.browser_saved_fills import (mark_saved_fill as mark_saved_fill, saved_fill_document as _saved_fill_document,
-                                         saved_fill_session as saved_fill_session)
+from host_access.browser_saved_fills import saved_fill_document as _saved_fill_document
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
@@ -22,11 +23,24 @@ PASSWORD_PAGE = (
     "list, and you get a turn once they finish or decline it; end your turn. If they decline, tell them in "
     "chat what you needed the page for and stop."
 )
+# A tab list on such a page opens no task (browser_step_lifecycle R9), and nor does a failed store write, so
+# the person has nothing in Needs you: the refusal promises no task, and asks the person only when the work needs it.
+PASSWORD_PAGE_NO_STEP = (
+    "This page asks for a password, so it is the person's to complete, and they have no task for it. "
+    "Carry on without this browser if your work doesn't need it; only if it does, ask them in chat to sign in "
+    "in the shared browser and try again once they reply."
+)
 # A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
 PASSWORD_READ_REFUSED = (
     "This page has shown a password field, so running scripts on it and reading that field stay refused."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
+# The agent's refusal when its own page check fails: every command re-checks the same page, so it names the way out.
+# Session teardown passes a failed check (browser_session_commands.guard_close).
+PAGE_CHECK_REFUSED = (
+    PAGE_CHECK_FAILED + ". If this keeps happening on this page, close the browser with browser_close and open the "
+    "page again."
+)
 # A failed plan write loses at most the person's task for the page, never the browser itself. What became of
 # the row is unknown (a failed read or emit leaves it in place), so the wording claims neither state.
 STEP_NOT_RECORDED = (
@@ -94,16 +108,13 @@ _FILLED_FIELD_GETS = frozenset({"title", "url", "text", "count", "attr", "box", 
 # wait's options that take one operand and run no script; --fn evaluates one and --download writes a file.
 _FILLED_FIELD_WAIT_OPTIONS = frozenset({"--load", "--url", "--text", "--state"})
 _FILLED_FIELD_SNAPSHOTS = frozenset({("snapshot",), ("snapshot", "-i")})
+# The commands that only list the open tabs; `tab <ref>` switches and `tab new`/`tab close` change them.
+_TAB_LISTS = frozenset({("tab",), ("tab", "list")})
 # Where each command takes its element. A CSS selector can test a value attribute some frameworks keep in step
 # with what was typed (input[value^=a]), so any command's match or failure would answer it; a snapshot ref can't.
 _FILLED_FIELD_TARGET_AT = {"click": 1, "dblclick": 1, "hover": 1, "focus": 1, "fill": 1, "type": 1, "select": 1,
                            "check": 1, "uncheck": 1, "scrollintoview": 1, "get": 2, "is": 2}
 _SNAPSHOT_REF = re.compile(r"@e\d+")
-# Snapshot roles that hold typed text; the value follows the line's ref and attributes after ": ".
-_FIELD_LINE = re.compile(r"^(?P<indent>\s*)- (?:textbox|searchbox|combobox|spinbutton)\b")
-_REF = re.compile(r"\[ref=e\d+\]")
-_ATTRIBUTES = re.compile(r"(?:\s*\[[a-z-]+(?:=[^\]\s]*)?\])*")
-VALUE_HIDDEN = "[value hidden]"
 # Locates an agent's ref or CSS selector on the page as a backendNodeId, or None when it can't.
 Resolve = Callable[[str], Awaitable[int | None]]
 
@@ -174,7 +185,8 @@ async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, arg
     path with one showing refuses first. Once a password step ended on the visit (finished_visit), only
     _filled_field_allows commands run until the visit ends, with or without a visible field.
     """
-    result, note = await _guarded_probe(thread_id, probe, session=session, current_session=current_session)
+    result, note = await _guarded_probe(thread_id, probe, session=session, current_session=current_session,
+                                        lists_tabs=tuple(args) in _TAB_LISTS)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
     saved = _saved_fill_document(thread_id, session, result.visit)
@@ -211,32 +223,6 @@ def _filled_field_allows(args: tuple[str, ...]) -> bool:
     return args[0] in _FILLED_FIELD_COMMANDS
 
 
-def hide_field_values(snapshot: str) -> str:
-    """Replace every text field's value in a snapshot, and drop the text nodes beneath it.
-
-    Reads no value and needs no node identity: anything after a field's ref and attributes is hidden, so a
-    line it can't parse fails closed.
-    """
-    lines, field_indent = [], None
-    for line in snapshot.split("\n"):
-        indent = len(line) - len(line.lstrip())
-        if field_indent is not None and indent > field_indent and line.strip():
-            continue
-        field_indent = None
-        if (match := _FIELD_LINE.match(line)) is None:
-            lines.append(line)
-            continue
-        field_indent = len(match.group("indent"))
-        ref = _REF.search(line, match.end())
-        if ref is None:
-            lines.append(f"{line[:match.end()]} {VALUE_HIDDEN}")
-            continue
-        attributes = _ATTRIBUTES.match(line, ref.end())
-        kept = attributes.end() if attributes is not None else ref.end()
-        lines.append(line if not line[kept:].strip() else f"{line[:kept]}: {VALUE_HIDDEN}")
-    return "\n".join(lines)
-
-
 async def reopen_held_page(thread_id: str, probe: browser_pane_state.Probe, reopen: Callable[[], Awaitable[None]]) -> None:
     """After back or forward, load the page again as a new navigation once the session has held a page.
 
@@ -248,7 +234,7 @@ async def reopen_held_page(thread_id: str, probe: browser_pane_state.Probe, reop
     try:
         result = await probe(_known_nodes(thread_id))
     except Exception as exc:
-        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+        raise BrowserSessionError(PAGE_CHECK_REFUSED) from exc
     if result.visible_nodes or _guarded_visits.get(thread_id) or browser_step_lifecycle.held_pages(thread_id):
         await reopen()
 
@@ -268,7 +254,8 @@ async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, i
 
 async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, session: str | None = None,
                          instruction: str | None = None,
-                         current_session: Callable[[], str | None] | None = None) -> tuple[PasswordProbe, str | None]:
+                         current_session: Callable[[], str | None] | None = None,
+                         lists_tabs: bool = False) -> tuple[PasswordProbe, str | None]:
     """Share the agent probe and failure mapping between commands and declarations.
 
     A step that can't be written is logged and a live step is kept (the next call or re-probe recovers it);
@@ -280,11 +267,11 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         result = await probe(_known_nodes(thread_id))
     except Exception as exc:
         if isinstance(exc, BrowserSessionError) and str(exc) == PAGE_CHECK_FAILED:
-            raise
-        log.warning("browser page check failed for thread %s: %s", thread_id, type(exc).__name__)
-        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+            raise BrowserSessionError(PAGE_CHECK_REFUSED) from exc
+        log.warning("browser page check failed for thread %s: %s%s", thread_id, type(exc).__name__, _close_codes(exc))
+        raise BrowserSessionError(PAGE_CHECK_REFUSED) from exc
     event = browser_step_lifecycle.Event(
-        "declare" if instruction is not None else "probe", result,
+        "declare" if instruction is not None else "list_tabs" if lists_tabs else "probe", result,
         session=session, instruction=instruction or "",
     )
     try:
@@ -303,13 +290,22 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
             raise BrowserSessionError(PERSON_STEP + seen_by_person(thread_id))
         # With no step held, the lifecycle's own visible-password test (R9) still marks the page as the person's.
         if result.visible_nodes:
-            raise BrowserSessionError(PASSWORD_PAGE_UNRECORDED)
+            raise BrowserSessionError(PASSWORD_PAGE_NO_STEP if lists_tabs else PASSWORD_PAGE_UNRECORDED)
         return result, STEP_NOT_RECORDED
     messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP + seen_by_person(thread_id),
-                "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED}
+                "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED,
+                "password_no_step": PASSWORD_PAGE_NO_STEP}
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
     return result, None
+
+
+def _close_codes(exc: BaseException) -> str:
+    """A closed DevTools socket's close codes, numbers only: 1009 is our own size limit, 1006 a lost connection."""
+    if not isinstance(exc, ConnectionClosed):
+        return ""
+    sent, received = exc.sent, exc.rcvd
+    return f" (close sent {sent.code if sent else None}, received {received.code if received else None})"
 
 
 def _page_source(thread_id: str, probe: browser_pane_state.Probe,

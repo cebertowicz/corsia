@@ -268,7 +268,7 @@ describe('HostAccessLeaseControl', () => {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
 			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
-			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
 		};
 		let state: HostAccessFill | null = waitingFill;
@@ -299,7 +299,9 @@ describe('HostAccessLeaseControl', () => {
 		const dialog = host.querySelector('[role="dialog"]')!;
 		expect(dialog.textContent).toContain('Bookkeeper');
 		expect(dialog.textContent).toContain('me@example.com');
-		dialog.querySelector<HTMLButtonElement>('[data-seconds="1800"]')!.click();
+		const duration = dialog.querySelector<HTMLSelectElement>('select[id^="fill-duration-"]')!;
+		duration.value = '1800';
+		duration.dispatchEvent(new Event('change', { bubbles: true }));
 		flushSync();
 		Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
 			.find((button) => button.textContent?.trim() === 'Approve')!.click();
@@ -320,7 +322,7 @@ describe('HostAccessLeaseControl', () => {
 		expect(activeDialog.querySelector('.decision-head .head-label')?.textContent).toBe('Sign in with a saved login');
 		expect(activeDialog.querySelector('.decision-head h2')?.textContent).toBe('Bookkeeper');
 		expect([...activeDialog.querySelectorAll('dt.section-label')].map((label) => label.textContent))
-			.toEqual(['Site', 'Username', 'For how long', 'Time remaining']);
+			.toEqual(['Site', 'Username', 'Duration', 'Time remaining']);
 		expect([...activeDialog.querySelectorAll('dd')].slice(0, 2).map((value) => value.textContent))
 			.toEqual(['https://example.com', 'me@example.com']);
 		Array.from(activeDialog.querySelectorAll<HTMLButtonElement>('button'))
@@ -1325,7 +1327,7 @@ describe('HostAccessLeaseControl', () => {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
 			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
-			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
 		};
 		const fetchMock = vi.fn()
@@ -1441,7 +1443,7 @@ describe('HostAccessLeaseControl', () => {
 		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
 		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 		revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
-		max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+		max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 		created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
 	};
 	async function openDrawerFor(item: HostAccessItem): Promise<HTMLElement> {
@@ -1540,7 +1542,7 @@ describe('HostAccessLeaseControl', () => {
 			id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
 			agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
 			revision: 1, application_hash: 'fill-hash', decision_capability: 'fill-decision',
-			max_duration_seconds: 1800, duration_seconds: null, expires_at: null,
+			max_duration_seconds: 1800, requested_duration_seconds: null, duration_seconds: null, standing: false, expires_at: null,
 			created_at: '2026-07-18T16:00:00Z', updated_at: '2026-07-18T16:00:00Z',
 		};
 		const fetchMock = vi.fn()
@@ -1845,4 +1847,31 @@ describe('HostAccessLeaseControl — fixed sentences, never raw errors', () => {
 	});
 	// A decision that fails (no connection, a refusal, a 409) shows its one drawer line from decisionFailure;
 	// those cases are pinned by the decision-failure tests above.
+});
+
+it('offers Until I turn it off on a saved-login request only, never on a host-access lease request', async () => {
+	const { default: HostAccessPendingRequestDrawer } = await import('./HostAccessPendingRequestDrawer.svelte');
+	const fill: HostAccessFill = {
+		id: 'fill-1', kind: 'fill', state: 'awaiting_user', thread_id: 'thread-1', root_thread_id: 'thread-1',
+		agent: 'Bookkeeper', site: 'https://example.com', domain: 'example.com', username: 'me@example.com',
+		revision: 1, application_hash: 'hash-fill', decision_capability: 'decision-fill',
+		max_duration_seconds: 1800, requested_duration_seconds: 900, duration_seconds: null, standing: false, expires_at: null,
+		created_at: '2026-07-18T16:00:00+00:00', updated_at: '2026-07-18T16:00:00+00:00',
+	};
+	const seen: Record<string, string> = {};
+	for (const lease of [waitingLease, fill] as HostAccessItem[]) {
+		const target = document.createElement('div');
+		document.body.appendChild(target);
+		const drawer = mount(HostAccessPendingRequestDrawer, { target, props: {
+			lease, stale: false, deciding: false, rejectDisabled: false, approveDisabled: false,
+			onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(), onClose: vi.fn(),
+		} });
+		flushSync();
+		seen[lease.kind ?? 'lease'] = target.textContent ?? '';
+		await unmount(drawer);
+		target.remove();
+	}
+	expect(seen.lease).toContain('5 minutes');
+	expect(seen.lease).not.toContain('Until I turn it off');
+	expect(seen.fill).toContain('Until I turn it off');
 });

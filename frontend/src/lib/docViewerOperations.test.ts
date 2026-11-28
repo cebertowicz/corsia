@@ -18,7 +18,8 @@ vi.mock('$lib/stores/docComments', async (importOriginal) => ({
 import { addReply } from '$lib/stores/docComments';
 import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshness';
 import { emit } from '$lib/ws/events';
-import { createThreadActions, isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
+import { isNotCommentable, markFreshnessVerified, notCommentableMessage, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
+import { createThreadActions } from './threadActions';
 import { toasts } from '$lib/stores/toast';
 import { RequestRefused, type ServerComment } from '$lib/api/docs';
 import { EarlierVersionPosted, EARLIER_VERSION_POSTED } from '$lib/stores/docComments';

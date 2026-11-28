@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import plistlib
@@ -7,6 +8,8 @@ import re
 import stat
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -3405,6 +3408,100 @@ def test_unhealthy_backend_retains_prepared_release_before_drain(tmp_path: Path)
     assert Path(f"{stage}.prepared").exists()
     assert "STEP:drain" not in trace.read_text()
     assert "drain ownership cannot be proven" in trace.read_text()
+
+
+def _run_update_health_probe(tmp_path: Path, responses: str):
+    trace = tmp_path / "health-probe-trace"
+    result = _run_bash(
+        """
+fail() { printf 'FAIL:%s\\n' "$*" >> "$TRACE"; }
+warn() { :; }
+source scripts/corsia.d/runtime.sh
+SELF_CHECKOUT="$CHECKOUT"
+BACKEND_PORT=1
+FORCE=false
+service_installed() { return 1; }
+require_port_served_by_this_checkout() { return 0; }
+curl() {
+    printf 'probe:%s\\n' "$*" >> "$TRACE"
+    count=$(grep -c '^probe:' "$TRACE")
+    response=$(printf '%s' "$RESPONSES" | cut -d, -f "$count")
+    return "$response"
+}
+drain_and_wait() { printf 'drain\\n' >> "$TRACE"; }
+bounce_server() { printf 'bounce\\n' >> "$TRACE"; }
+restart_prepared
+""",
+        env={"CHECKOUT": str(tmp_path), "TRACE": str(trace), "RESPONSES": responses},
+    )
+    return result, trace.read_text().splitlines()
+
+
+@pytest.mark.parametrize("app_mode", [False, True])
+def test_update_waits_for_slow_health_probe_before_drain(tmp_path: Path, app_mode: bool) -> None:
+    class SlowHealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            time.sleep(4)
+            try:
+                self.send_response(200)
+                self.end_headers()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowHealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    trace = tmp_path / "health-probe-trace"
+    try:
+        result = _run_bash(
+            """
+fail() { printf 'FAIL:%s\\n' "$*" >> "$TRACE"; }
+warn() { :; }
+ok() { :; }
+source scripts/corsia.d/app_mode.sh
+source scripts/corsia.d/runtime.sh
+SELF_CHECKOUT="$CHECKOUT"
+BACKEND_PORT="$PORT"
+FORCE=false
+service_installed() { return 1; }
+require_port_served_by_this_checkout() { return 0; }
+drain_and_wait() { printf 'drain\\n' >> "$TRACE"; }
+bounce_server() { printf 'bounce\\n' >> "$TRACE"; }
+if [ "$APP_MODE" = true ]; then
+    service_is_loaded() { return 0; }
+    require_owned_service_definition() { return 0; }
+    require_loaded_service_owns_port() { return 0; }
+    service_loaded_pid() { :; }
+    service_domain() { printf domain; }
+    service_label() { printf label; }
+    launchctl() { printf 'bounce\\n' >> "$TRACE"; }
+    app_mode_service_restart
+else
+    restart_prepared
+fi
+""",
+            env={"CHECKOUT": str(tmp_path), "PORT": str(server.server_port),
+                 "TRACE": str(trace), "APP_MODE": str(app_mode).lower()},
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+    assert result.returncode == 0, result.stderr
+    assert trace.read_text().splitlines() == ["drain", "bounce"]
+
+
+def test_update_refuses_connection_failure_without_retry(tmp_path: Path) -> None:
+    result, trace = _run_update_health_probe(tmp_path, "7")
+
+    assert result.returncode != 0
+    assert sum(line.startswith("probe:") for line in trace) == 1
+    assert "drain" not in trace
+    assert any("drain ownership cannot be proven" in line for line in trace)
 
 
 def test_failed_drain_still_completes_the_update(

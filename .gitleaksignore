@@ -1,0 +1,2 @@
+# Test fixture, not a key: the RFC 6455 sample Sec-WebSocket-Key nonce in a WebSocket upgrade test.
+294b6a719ea6122ee731d3eda4a2cada1c514ed0:backend/tests/test_devices_server.py:generic-api-key:357

@@ -71,7 +71,7 @@ def _u16(s: str) -> int:
     return len(s.encode("utf-16-le")) // 2
 
 
-def _span16(text: str, start_cp: int, quote: str) -> tuple[int, int]:
+def span16(text: str, start_cp: int, quote: str) -> tuple[int, int]:
     """A code-point match start → ``(from_off, to_off)`` in UTF-16 code units."""
     frm = _u16(text[:start_cp])
     return frm, frm + _u16(quote)
@@ -116,6 +116,14 @@ def _cp_at_u16(text: str, offset16: object) -> int | None:
         return None
 
 
+# Code points kept on each side of a comment's quote; a side is shorter only at the document's start or end.
+CONTEXT = 32
+
+
+def _sides(text: str, start: int, end: int) -> tuple[str, str]:
+    return text[max(0, start - CONTEXT):start], text[end:end + CONTEXT]
+
+
 def anchor_context(
     text: str, from16: int, to16: int, quote: str | None = None
 ) -> tuple[str, str] | None:
@@ -126,7 +134,24 @@ def anchor_context(
         return None
     if quote is not None and text[start:end] != quote:
         return None
-    return text[max(0, start - 32):start], text[end:end + 32]
+    return _sides(text, start, end)
+
+
+def kept_place(text: str, quote: str, *, prefix: str, suffix: str) -> tuple[int, int] | None:
+    """Where a comment sent again from a kept draft goes: ``(from_off, to_off)`` in UTF-16, or None.
+
+    It goes only on the one occurrence of ``quote`` whose sides, taken as ``anchor_context`` takes them, both
+    equal the kept ``prefix`` and ``suffix``. One matching side is never enough, so a deleted passage never
+    moves onto a copy of its words elsewhere; and two or more such occurrences are None too, since nothing in
+    the text tells them apart. The caller refuses rather than guess.
+    """
+    if not quote:
+        return None
+    hits = [start for start in _overlapping_occurrences(text, quote)
+            if _sides(text, start, start + len(quote)) == (prefix, suffix)]
+    if len(hits) != 1:
+        return None
+    return span16(text, hits[0], quote)
 
 
 def reanchor_edited(
@@ -197,7 +222,7 @@ def reanchor(
     if not quote:
         return None
     candidates = [
-        (start, *_span16(text, start, quote))
+        (start, *span16(text, start, quote))
         for start in _overlapping_occurrences(text, quote)
     ]
     if not candidates:
@@ -267,7 +292,7 @@ def resolve_quote(text: str, quote: str, near: str | None = None) -> tuple[int, 
 
     matches = _occurrences(text, quote)
     if len(matches) == 1:
-        return _span16(text, matches[0], quote)
+        return span16(text, matches[0], quote)
     if not matches:
         raise QuoteNotFound(
             f"quote not found in the doc: {quote!r} — re-read and re-anchor",
@@ -302,4 +327,4 @@ def resolve_quote(text: str, quote: str, near: str | None = None) -> tuple[int, 
             f"refine `near` (candidate lines: {match_lines})",
             match_lines,
         )
-    return _span16(text, closest[0], quote)
+    return span16(text, closest[0], quote)

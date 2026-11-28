@@ -3,19 +3,25 @@ import { createMentionSelection, type MentionOccurrence } from '$lib/components/
 import { commentDraft, commentDraftScope, cancelCommentCapture, discardCommentDraft, dropCommentDraft, setCommentBody, type CommentDraft } from '$lib/stores/commentDraft';
 import { documentDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import { CAPTURE_FAILURE, selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
+import { selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import { postLive } from '$lib/stores/liveCommentPost';
 import { forgetDraft, timed, timedPost } from '$lib/stores/commentPostTiming';
 import { EARLIER_VERSION_POSTED } from '$lib/stores/docComments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
-import type { SelectionOffer } from '$lib/cm/widget-selection-types';
-import { plainErrorText } from '$lib/plainError';
-import { isNotCommentable, POST_FAILED, submitDocumentComment } from '$lib/docViewerOperations';
+import { findPlace, uniquePlaceOf } from '$lib/keptPlace';
+import { unsentComments } from '$lib/stores/unsentComments.svelte';
+import { replyOf } from '$lib/unsentCommentSend';
+import { unsentOutcome } from '$lib/unsentCommentOutcome';
 import { DRAFT_KEPT } from '$lib/stores/draftKept';
+import type { SelectionOffer } from '$lib/cm/widget-selection-types';
+import { isNotCommentable, submitDocumentComment } from '$lib/docViewerOperations';
+import { liveFailureMessage, postFailureMessage } from '$lib/commentFailureMessage';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
 export type ViewerSelection = SelectionOffer | null;
+/** What a kept comment whose passage is gone says in its box, which is on no text until the person selects where it goes. */
+export const UNPLACED = `The text this comment was on changed before it sent, so it isn’t placed. ${DRAFT_KEPT} Select where it goes to put it back.`;
 type Context = {
 	scope: () => string;
 	/** The document shown; its draft is kept under `documentDraftKey`, whichever viewer shows it. */
@@ -26,35 +32,17 @@ type Context = {
 	text: () => string;
 	isOpen: () => boolean;
 	ensureArtifactId: () => Promise<string | null>;
+	/** The document is shown with its live text, so a kept draft can come back on its passage. */
+	ready: () => boolean;
+	/** The offer of a kept draft's passage, selected and scrolled to; with `to` = `from`, the view's foot, for one with no place. */
+	offerFor: (from: number, to: number) => SelectionOffer | null;
 	onStart: (anchor: CommentAnchor) => void;
 	onClose: () => void;
 	/** True while a posted comment may still get its first drawn mark; false once it is drawn, cannot be placed (not_placed, orphaned) or is gone. */
 	awaitsMark: (id: string) => boolean;
 };
 const aborted = () => new DOMException('Comment draft closed', 'AbortError');
-/** What a failed post of a comment anchored in a live document says; an image's region comment there says the same. */
-export function liveFailureMessage(error: unknown): string {
-	if (!(error instanceof Error)) return POST_FAILED;
-	if (error.message === SELECTION_LOST) return `The selected text changed or was removed. ${DRAFT_KEPT}`;
-	if (error.message.startsWith('409 ')) return CAPTURE_FAILURE.changed;
-	// A timed-out post may already be committed, and its reservation is released: asking to try again invites a duplicate.
-	if (error.name === 'PostTimeoutError') return `Couldn’t confirm the comment was posted. ${DRAFT_KEPT} Check the comments before you post it again.`;
-	// A lost connection (fetch's own TypeError text) and a server error ("500 <body>") carry wire text, not words for the reader.
-	if (error instanceof TypeError || /^5\d{2}\b/.test(error.message)) return POST_FAILED;
-	if (/^\d{3}\b/.test(error.message)) return refusalMessage(error.message);
-	return error.message;
-}
-
-/** A 4xx refusal ("<status> <body>" from `ok()`): the server's reason through the shared gate, otherwise a plain failure. */
-function refusalMessage(wire: string): string {
-	const [, status, body] = /^(\d{3})\s*([\s\S]*)$/.exec(wire)!;
-	let detail: unknown;
-	try { detail = JSON.parse(body)?.detail; } catch { /* A body that is not JSON has no reason to show. */ }
-	if (detail !== undefined) console.error('[api] request rejected', Number(status), detail);
-	const reason = plainErrorText(detail, '').replace(/\.+$/, '');
-	return reason ? `Couldn’t post the comment: ${reason}. ${DRAFT_KEPT}` : POST_FAILED;
-}
-
+export { liveFailureMessage, postFailureMessage };
 // Once Comment is pressed the post goes on whether or not its composer is still open: closing it, another card, another
 // tab or the viewer going away never aborts it. Only Cancel does (`discardCommentDraft`), and a reconnect, whose old
 // session can no longer place the comment (the composer says so).
@@ -146,9 +134,11 @@ export function createViewerCommentDraft(context: Context) {
 	function setBody(body: string): void {
 		setCommentBody(body, context.scope());
 		const draft = scoped;
-		if (draft?.mentionSelection) keptCommentDrafts.keep(keepKey(), body, draft.mentionSelection);
+		// Its passage goes with it, so it comes back there; a box with no place leaves the kept one as it is.
+		if (draft?.mentionSelection) keptCommentDrafts.keep(keepKey(), body, draft.mentionSelection, draft.unplaced ? undefined : draft.place);
 	}
-	function start(): void {
+	function start(): void { open(false); }
+	function open(unplaced: boolean): void {
 		if (!pending) return;
 		cancelCommentCapture(context.scope());
 		// The next composer on this document starts from what the last one held, its tags and why it did not post.
@@ -159,7 +149,8 @@ export function createViewerCommentDraft(context: Context) {
 		const identity = {};
 		opened.add(identity);
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
-			body, mentionSelection, error: same ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), key: keepKey(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()) });
+			body, mentionSelection, error: unplaced ? UNPLACED : same && !same.unplaced ? same.error : kept?.error, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), key: keepKey(), selection: selected, identity, sequence: 0, origin: keptCommentDrafts.origin(keepKey()),
+			...(unplaced ? { unplaced } : { place: uniquePlaceOf(context.text(), pending.from, pending.to, pending.text) }) });
 		const value = pending;
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
@@ -171,25 +162,44 @@ export function createViewerCommentDraft(context: Context) {
 		const mine = (update: (value: CommentDraft) => CommentDraft | null) => commentDraft.update(value => value && value.identity === draft.identity ? update(value) : value);
 		keptCommentDrafts.clearError(key);
 		mine(value => ({ ...value, error: undefined }));
-		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice.
-		const press = keptCommentDrafts.claim(key, text, tags, draft.origin);
+		// Keep the passage as it is at the press, when it can be told apart, for an automatic resend.
+		const range = draft.selection ? selectionRange(draft.selection) : { from: draft.from, to: draft.to, quote: draft.text };
+		const place = draft.unplaced ? undefined : range && uniquePlaceOf(draft.selection?.session.text.toString() ?? context.text(), range.from, range.to, range.quote);
+		// Every press on this draft posts under its one id, so a press after an unanswered one never stores it twice. From the
+		// press, a draft with a place goes on its own if this post does not (`unsentComments`), until it posts, is refused or is edited.
+		const live = draft.selection && { artifactId: draft.selection.session.artifactId, threadId };
+		const press = keptCommentDrafts.claim(key, text, tags, draft.origin, live || undefined);
+		const pressed = keptCommentDrafts.get(key);
+		if (pressed && place !== undefined) keptCommentDrafts.keep(key, pressed.body, pressed.mentionSelection, place);
+		let waits = false;
 		const id = await timedPost(press.clientId, () => submitDocumentComment(async () => {
-			if (draft.selection) return postLiveComment(draft, text, context, press, taggedAgentIds, threadId, mentions);
-			const artifactId = await timed(press.clientId, 'ens', () => context.ensureArtifactId());
-			if (!artifactId) throw new Error('Document artifact is unavailable.');
-			return addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, press.clientId, taggedAgentIds, threadId, mentions, press.again);
+			try {
+				if (draft.selection) return await postLiveComment(draft, text, context, press, taggedAgentIds, threadId, mentions);
+				const artifactId = await timed(press.clientId, 'ens', () => context.ensureArtifactId());
+				if (!artifactId) throw new Error('Document artifact is unavailable.');
+				if (pressed) keptCommentDrafts.sends(key, press.clientId, pressed.body, { artifactId, threadId });
+				return await addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, press.clientId, taggedAgentIds, threadId, mentions, press.again);
+			} catch (error) {
+				// A failure that passes, on a draft that goes on its own, is not told: its box reads "Sending…", and it is tried
+				// again when the document opens, the connection comes back or the person returns. Any other failure is told as before.
+				waits = !(error instanceof DOMException && error.name === 'AbortError') && unsentOutcome(error) === 'retry' && unsentComments.sending(key);
+				throw error;
+			}
 		}, (toastId, message) => {
+			if (waits) return;
 			// Open or closed, the composer keeps the text with why it did not post, here and in the next composer on this document.
 			// What the field holds now is kept, not the text this press sent: typing while it was out is never lost.
 			// Text changed since an earlier version was stored goes out as a new comment on the next press.
 			const now = keptCommentDrafts.get(key);
 			keptCommentDrafts.fail(key, now?.body ?? text, now?.mentionSelection ?? tags, message, message === EARLIER_VERSION_POSTED);
+			// A failure that is told waits for the person: the draft does not go on its own after it.
+			keptCommentDrafts.unsend(key);
 			// The box showing this draft says why: the one that pressed, or one opened from the kept draft since it closed.
 			// Never a box showing another draft: its reason would tell of the wrong post.
 			commentDraft.update(value => value && value.key === key ? { ...value, error: message } : value);
 			// The draft holds the toast, if one was shown, until its box comes on screen to say why or the draft is posted.
 			keptCommentDrafts.toast(key, toastId);
-		}, draft.selection ? liveFailureMessage : undefined, () => keptCommentDrafts.onScreen(key)));
+		}, draft.selection ? liveFailureMessage : postFailureMessage, () => waits || keptCommentDrafts.onScreen(key)));
 		// Posted: the text is the server's now, so no composer brings it back, whether this one is still open or not. Text
 		// or tags changed since the press (in this composer, or one opened after it closed) stay, with a fresh id for their own post.
 		const stored = keptCommentDrafts.posted(key, text, taggedAgentIds);
@@ -202,6 +212,34 @@ export function createViewerCommentDraft(context: Context) {
 		if (open() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
 		return open() ? id : null;
 	}
+	// Resend this document's pressed replies when its text is shown, independently of a new comment's draft.
+	$effect(() => {
+		const key = keepKey();
+		if (!key || !context.ready()) return;
+		untrack(() => {
+			for (const reply of keptCommentDrafts.pressed()) if (replyOf(reply)?.scope === key) unsentComments.open(reply);
+		});
+	});
+	// A kept draft that knows its passage, or was pressed, opens in its box once its document is shown: on its passage when
+	// that is found as kept (`findPlace`), sending if it was pressed; otherwise on no text, with why, and it is not sent until
+	// the person selects where it goes. One typed on a passage that could not be told apart waits for a selection, as before.
+	let resumed = '';
+	$effect(() => {
+		const key = keepKey(), kept = keptCommentDrafts.get(key);
+		if (!key || resumed === key || !context.ready() || !kept?.body.trim() || !(kept.place || kept.send)) return;
+		untrack(() => {
+			// Already held as the one draft (open here or in another viewer of the document): it is not opened a second time.
+			if (context.isOpen() || context.draft()?.key === key) return;
+			const span = kept.place && findPlace(context.text(), kept.place);
+			const offer = context.offerFor(span ? span[0] : 0, span ? span[1] : 0);
+			if (!offer) return;
+			resumed = key;
+			if (span) select(offer);
+			else { keptCommentDrafts.unsend(key); pending = { ...offer, text: kept.place?.quote ?? '' }; selected = undefined; }
+			open(!span);
+			if (span) unsentComments.open(key);
+		});
+	});
 	return { get pending() { return pending; }, get reason() { return reason; }, get draft() { return scoped; }, get hasText() { return hasText; },
 		get pendingComment() { return pendingComment; }, get keepKey() { return keepKey(); }, select, leave, start, cancel, setBody, submit };
 }

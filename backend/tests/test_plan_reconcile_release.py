@@ -128,8 +128,10 @@ _RELEASE_FIELDS: dict[str, dict[str, Any]] = {
         "owner_id": "user",
     },
     "add_dependency": {},
+    # A watch on an artifact's event (bound in _release_params): a deadline alone is the
+    # agent's own check-back, which still ranks the task above lower work (plans.triage_lines).
     "arm_watch": {
-        "condition": {"type": "deadline", "value": "2099-01-01T00:00:00+00:00"},
+        "condition": {"type": "event", "value": "proof.ready"},
         "expected_event": "proof.ready",
     },
     "request_review": {"evidence": "Focused proof passed"},
@@ -154,11 +156,20 @@ RELEASES = [
 ]
 
 
+def watched_artifact(db, node_id: str) -> str:
+    """Register a pull request the owner's watch on ``node_id`` can wait for."""
+    from tests.plan_scene import _artifact
+
+    return _artifact(db, external_id=f"owner/repo#{node_id[:8]}", owner="owner")
+
+
 def _release_params(db, plan_id: str, operation: str, node_id: str) -> dict:
     """Build boundary params for one transition that makes the node ineligible."""
     params = dict(_RELEASE_FIELDS[operation])
     if operation == "add_dependency":
         params["depends_on_node_id"] = add_task(db, plan_id, "Unaccepted prerequisite").id
+    if operation == "arm_watch":
+        params["artifact_id"] = watched_artifact(db, node_id)
     params.update(node_id=node_id, expected_revision=revision(db, node_id))
     return params
 

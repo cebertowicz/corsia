@@ -4,7 +4,7 @@ import { drawnTableAt } from './widget-blocks';
 /** The widest the Comment offer is (on a phone), and the gap kept around it. */
 export const OFFER_GAP = 6;
 export const OFFER_ROOM = 120 + 2 * OFFER_GAP;
-// Under the table the offer has the table's own bottom margin to fit in, about the offer's height and a few pixels more.
+// In a narrow fine-pointer window, the table's bottom padding leaves room for the offer and a few pixels more.
 const BELOW_GAP = 3;
 
 type Words = { top: number; bottom: number; right: number };

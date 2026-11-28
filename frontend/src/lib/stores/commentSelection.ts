@@ -2,6 +2,8 @@ import * as Y from 'yjs';
 import { encodeUpdate, newClientId, textDigest } from './documentWire';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { DRAFT_KEPT } from './draftKept';
+import { CaptureFailed, type CaptureCode } from './captureFailed';
+import { SERVER_SAVE_MS } from '$lib/api/boundedRequest';
 
 export const SELECTION_LOST = 'The text you selected changed or was removed. Select the text again; your draft will carry over.';
 export const SELECTION_RECONNECTED = 'The document reconnected, so this comment lost its place. Select the text again; your draft will carry over.';
@@ -28,8 +30,18 @@ export function selectionRange(selection: CommentSelection): { from: number; to:
 	const to = Y.createAbsolutePositionFromRelativePosition(selection.to, session.doc)?.index;
 	return from !== undefined && to !== undefined && from < to ? { from, to, quote: session.text.toString().slice(from, to) } : null;
 }
-/** How long a capture keeps asking the server to track its range, counted from its first ask, on a document that keeps moving. */
+/**
+ * How long a capture keeps asking the server to track its range, counted from its start, on a document that keeps moving.
+ * It bounds re-asks only: an ask already out when it runs out waits for its answer up to ANSWER_ALLOWANCE_MS.
+ */
 export const RESERVE_BUDGET_MS = 3000;
+/**
+ * How long one ask may wait for the server's answer, from when it was sent: the comment POST's own allowance for the
+ * server (`SERVER_SAVE_MS`). The ask goes over the document's open socket, so it never waits for a browser connection as
+ * the POST can. A slow but working server answers within it; one that never answers ends the capture `unanswered`, at
+ * most RESERVE_BUDGET_MS + ANSWER_ALLOWANCE_MS (13 s) after the press.
+ */
+export const ANSWER_ALLOWANCE_MS = SERVER_SAVE_MS;
 /** After a refusal, how long a capture waits for the remote update the server already holds before it asks again. */
 export const CATCH_UP_MS = 50;
 /** Why a capture ended without a place for its comment; each is a reason the comment's box shows. */
@@ -41,36 +53,38 @@ export const CAPTURE_FAILURE = {
 } as const;
 const { changed: CHANGED, offline: OFFLINE, unanswered: UNANSWERED } = CAPTURE_FAILURE;
 /** The server already holds a comment, or another person's capture, under the id asked with (`identity_in_use`). */
-export class IdentityInUseError extends Error {
+export class IdentityInUseError extends CaptureFailed {
 	constructor() {
-		super(UNANSWERED);
+		super('identity', UNANSWERED);
 		this.name = 'IdentityInUseError';
 	}
 }
+const failed = (code: CaptureCode, message: string) => new CaptureFailed(code, message);
 
 /**
  * One correlated capture owned by the existing draft. It asks the server to track the selection under the
  * comment's own client id, which succeeds when the server holds, or recently held, the state this browser hashed
  * and the selection still holds the quote sent with it. A hash a
  * remote update interrupts is simply redone. After a refusal it waits for the next applied remote update (or
- * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. Abort, refusal, or
- * an unanswered reservation gives the range back; abort also releases an in-progress hash. `clientId` is the comment
- * draft's own id, the same for every press of Comment on it.
+ * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. An ask still out
+ * then is waited for until ANSWER_ALLOWANCE_MS after it was sent. Abort, refusal, or an unanswered reservation gives
+ * the range back; abort also releases an in-progress hash. `clientId` is the comment draft's own id, the same for
+ * every press of Comment on it. A failure is a `CaptureFailed`, whose code says which way it ended.
  */
 export function captureComment(selection: CommentSelection, seq: number, signal: AbortSignal, clientId = newClientId()): Promise<CapturedComment> {
 	const { session } = selection;
 	return new Promise((resolve, reject) => {
 		const started = performance.now();
 		let done = false, requestId: string | null = null, sent: CapturedComment | null = null;
-		let deadline: ReturnType<typeof setTimeout> | undefined;
+		let deadline: ReturnType<typeof setTimeout> | undefined, answer: ReturnType<typeof setTimeout> | undefined;
 		let stopFrame = () => {}, stopState = () => {}, stopWait = () => {};
 		const finish = (result?: CapturedComment, error?: Error) => {
 			if (done) return;
-			done = true; clearTimeout(deadline); stopFrame(); stopState(); stopWait(); signal.removeEventListener('abort', abort);
+			done = true; clearTimeout(deadline); clearTimeout(answer); stopFrame(); stopState(); stopWait(); signal.removeEventListener('abort', abort);
 			session.cancelReservationRequest(requestId);
 			if (result) { resolve(result); return; }
 			if (sent) session.releaseReservation(clientId);
-			reject(error ?? new Error(CHANGED));
+			reject(error ?? failed('changed', CHANGED));
 		};
 		const abort = () => finish(undefined, new DOMException('Comment selection request cancelled', 'AbortError'));
 		if (signal.aborted) { abort(); return; }
@@ -80,21 +94,22 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 			if (requestId === null || frame.request_id !== requestId) return;
 			if (frame.type === 'doc_error') {
 				if (frame.kind === 'identity_in_use') { finish(undefined, new IdentityInUseError()); return; }
-				finish(undefined, new Error((frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
+				if (frame.kind === 'store_mismatch') { finish(undefined, failed('store_mismatch', CHANGED)); return; }
+				finish(undefined, failed('refused', (frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
 				return;
 			}
 			if (frame.artifact_id !== session.artifactId || frame.store_id !== session.storeId || frame.type !== 'doc_positions' || frame.seq !== seq || !sent) return;
 			if (frame.reserved) finish(sent); else again(true);
 		});
 		stopState = session.subscribe(() => {
-			if (session.connection !== 'connected') finish(undefined, new Error(OFFLINE));
+			if (session.connection !== 'connected') finish(undefined, failed('offline', OFFLINE));
 		});
 		if (done) { stopState(); return; }
-		// An ask still out means the server never answered; otherwise the budget ran out on a document that kept moving.
-		deadline = setTimeout(() => finish(undefined, sent ? new Error(UNANSWERED) : undefined), RESERVE_BUDGET_MS);
+		// With no ask out, the budget ran out on a document that kept moving. An ask still out is left to its own allowance.
+		deadline = setTimeout(() => { if (!sent) finish(); }, RESERVE_BUDGET_MS);
 		void ask();
 		function again(refused: boolean) {
-			sent = null;
+			sent = null; clearTimeout(answer);
 			if (performance.now() - started >= RESERVE_BUDGET_MS) finish(); else if (refused) catchUp(); else void ask();
 		}
 		function catchUp() {
@@ -112,15 +127,16 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 				if (done) return;
 				if (generation !== session.textGeneration || before.localGeneration !== after.localGeneration
 					|| before.ackGeneration !== after.ackGeneration) { again(false); return; }
-				if (!session.durability.clean) { finish(undefined, new Error(CAPTURE_FAILURE.settling)); return; }
+				if (!session.durability.clean) { finish(undefined, failed('settling', CAPTURE_FAILURE.settling)); return; }
 				const range = selectionRange(selection);
-				if (!range) { finish(undefined, new Error(SELECTION_LOST)); return; }
+				if (!range) { finish(undefined, failed('lost', SELECTION_LOST)); return; }
 				const vector = encodeUpdate(Y.encodeStateVector(session.doc));
 				sent = { ...range, clientId };
 				requestId = session.requestPositions(seq, false, { client_id: clientId, from_off: range.from, to_off: range.to,
 					vector, digest, text_length_utf16: text.length, quote: range.quote });
-				if (!requestId) finish(undefined, new Error(OFFLINE));
-			} catch (error) { finish(undefined, error instanceof Error ? error : new Error('Could not check the selection.')); }
+				if (!requestId) { finish(undefined, failed('offline', OFFLINE)); return; }
+				answer = setTimeout(() => finish(undefined, failed('unanswered', UNANSWERED)), ANSWER_ALLOWANCE_MS);
+			} catch (error) { finish(undefined, failed('hash', error instanceof Error ? error.message : 'Could not check the selection.')); }
 		}
 	});
 }

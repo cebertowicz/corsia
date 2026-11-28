@@ -26,7 +26,7 @@
 	import { get } from 'svelte/store';
 	import { untrack } from 'svelte';
 
-	let { threadId }: { threadId: string } = $props();
+	let { threadId, onNoBrowser }: { threadId: string; onNoBrowser?: () => void } = $props();
 	let canvas: HTMLCanvasElement;
 	// An editable key target lets the platform paste run natively; after a finger or pen press the canvas keeps focus, so no on-screen keyboard opens.
 	let keyTarget: HTMLTextAreaElement;
@@ -181,7 +181,7 @@
 		}
 		if (message.type === 'browser_state') {
 			streaming = false;
-			if (message.state === 'no_browser_yet') status = 'No browser yet';
+			if (message.state === 'no_browser_yet') { status = 'No browser yet'; onNoBrowser?.(); }
 			else if (message.state === 'error') {
 				status = `Browser stream unavailable: ${message.reason ?? 'unknown error'}`;
 				ended = true;

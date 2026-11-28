@@ -359,3 +359,45 @@ def _dependent_row(db, node_id: str):
         "JOIN plans pl ON pl.id=n.plan_id WHERE n.id=?",
         (node_id,),
     ).fetchone()
+
+
+def _phase_with_work(db):
+    """Infrastructure's phase of two tasks, and the Plans task that waits on the phase."""
+    infra = service.ensure_plan("thread", "infra", db=db)
+    phase = service.add_node(
+        infra.id, kind="phase", title="Fix the dev tests", acceptance_criteria="Fixed",
+        provenance="test.cross_plan", db=db,
+    )
+    steps = [
+        service.add_node(
+            infra.id, kind="task", title=title, acceptance_criteria="Fixed", parent_id=phase.id,
+            provenance="test.cross_plan", db=db,
+        )
+        for title in ("Fix unit", "Fix e2e")
+    ]
+    db.commit()
+    lane = service.ensure_plan("thread", "lane", db=db)
+    merge = _task(db, lane.id, "Merge my PR")
+    _update(db, lane.id, "add_dependency", {
+        "node_id": merge.id, "depends_on_node_id": phase.id,
+        "expected_revision": _revision(db, merge.id),
+    }, actor=LANE)
+    return infra, phase, steps, merge
+
+
+def _accept(db, plan_id: str, node_id: str) -> None:
+    _submit(db, plan_id, node_id)
+    _update(db, plan_id, "accept", {
+        "node_id": node_id, "verification_result": "passed", "expected_revision": _revision(db, node_id),
+    }, actor=INFRA)
+
+
+def test_a_plain_phase_reads_as_its_stored_state_when_its_work_is_done(db):
+    """#3145 settles workflow runs only: a run's end is recorded once, a plain phase's fold can be undone."""
+    infra, phase, (unit, e2e), merge = _phase_with_work(db)
+    _accept(db, infra.id, unit.id)
+    _accept(db, infra.id, e2e.id)
+
+    assert service._node_row(db, phase.id)["state"] == "pending"
+    assert _cause(db, merge.id)["reason"] == "Waiting for Fix the dev tests (Infrastructure's plan)"
+    assert _wakes(db) == []

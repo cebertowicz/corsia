@@ -136,7 +136,7 @@ def _seed() -> None:
 
 
 async def _read_routes(monkeypatch) -> None:
-    from api import conductor, corsia_agent, model_account_scope, models, plans, projects, thread_messages, threads
+    from api import attention, conductor, corsia_agent, model_account_scope, models, plans, projects, thread_messages, threads
     from api import vendor_accounts
     from connections import harness_refresh
     from infra.runtime_truth import read_runtime_truth
@@ -161,6 +161,9 @@ async def _read_routes(monkeypatch) -> None:
     await _found(plans.read_operator_thread("root", Response(), None, _USER))
     await _found(plans.read_operator_child("node-2", Response(), None, _USER))
     await plans.read_operator_thread_states("root,child", _USER)
+    for view in (None, "activity"):
+        await attention.get_queue(user=_USER, view=view)
+        await attention.get_queue(user=_USER, project_id="proj", view=view)
     for thread_id in ("root", "codex"):
         row = await run_read(_thread_row, thread_id)
         assert isinstance(await read_runtime_truth(thread_id, row), dict)

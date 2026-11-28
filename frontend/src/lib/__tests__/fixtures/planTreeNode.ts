@@ -57,9 +57,11 @@ export function node(over: Partial<OperatorNode>): OperatorNode {
 		status_reason: null,
 		branch_progress: null,
 		scheduled_until: null,
+		later: false,
+		later_reason: null,
 		attention_path: [], completion: null, child: null, review,
 		discussion_artifact_id: null, artifacts: [], user_actions: [], ...over,
 	};
 }
 
-export const CHILD_AVAILABLE = { available: true as const, plan_id: 'cp1', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, liveness: 'advancing' as const } };
+export const CHILD_AVAILABLE = { available: true as const, plan_id: 'cp1', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, open_above: 1, liveness: 'advancing' as const } };

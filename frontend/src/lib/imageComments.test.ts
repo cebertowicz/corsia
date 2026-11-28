@@ -8,7 +8,8 @@ vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.show, dismiss: mocks
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { pickedComments } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
-import { createImageComments, regionLabel } from './imageComments.svelte';
+import { createImageComments } from './imageComments.svelte';
+import { regionLabel } from './imageRegions';
 import { imageDraftKey, keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
@@ -98,6 +99,16 @@ describe('image comments', () => {
 		expect(comments.draft?.body).toBe('Too dark');
 		expect(comments.ui.state).toEqual({ kind: 'draft' });
 		expect(onCreated).not.toHaveBeenCalled();
+	});
+
+	it('names the server\'s reason when it refuses an image comment', async () => {
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"the image shots/a.png couldn’t be found.","kind":"region_target"}', 'region_target'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		await expect(comments.submit('Too dark')).rejects.toThrow('400');
+		expect(mocks.show).toHaveBeenCalledWith('Couldn’t post the comment: the image shots/a.png couldn’t be found. Your draft is kept.', 'error');
+		expect(comments.draftRegion).toEqual(BOX);
 	});
 
 	it('keeps the composer and says why when posting fails', async () => {

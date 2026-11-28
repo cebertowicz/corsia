@@ -10,8 +10,8 @@ from functools import partial
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
-from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_agent_verbs, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
+from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_field_values, browser_identity as identity
+from host_access import browser_agent_verbs, browser_fill_marks, browser_history, browser_login_capture, browser_pane_state, browser_saved_fills, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -155,12 +155,10 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
     if not pane and runtime.chrome is not None and runtime.chrome.exited:
         runtime = await _start_again(owner, runtime, lease_id=lease_id, show_window=show_window, session=session)
+    trusted_navigation = (navigation_url is not None and not pane and not _javascript_url(navigation_url) and
+                          tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'"))
     if (saved_sign_in := bool(runtime.record.profile or runtime.record.copy_of)) or browser_saved_fills.saved_fill_session(thread_id, runtime.record.session):
-        trusted_navigation = (navigation_url is not None and
-                              tuple(args) == ("eval", f"location.href = {json.dumps(navigation_url)}; 'navigating'") and
-                              not _javascript_url(navigation_url))
-        if _script_config(config) or not (trusted_navigation and not pane or
-                _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
+        if _script_config(config) or not (trusted_navigation or _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
             raise BrowserSessionError(browser_agent_verbs.refusal(args) or (_SCRIPT_REFUSAL if saved_sign_in else browser_saved_fills.SAVED_FILL_SESSION_REFUSED))
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
@@ -170,7 +168,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     finally:
         owner._queued_actions -= 1
     try:
-        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane)
+        rendered = await _run_action(owner, runtime, thread_id, args, lease_id, timeout, pane, trusted_navigation)
         if (show_window or pane) and not rendered.startswith("Error:"):
             # A connected pane already shows the page, so only an agent's share reveals it.
             await _share(runtime, thread_id, reveal=not pane)
@@ -204,7 +202,7 @@ async def _start_again(owner: Any, runtime: Any, *, lease_id: str | None, show_w
 
 
 async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[str],
-                      lease_id: str | None, timeout: float, pane: bool) -> str:
+                      lease_id: str | None, timeout: float, pane: bool, navigation: bool = False) -> str:
     command = partial(_command, owner, runtime, lease_id)
     opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
     guarded = not pane and not opening_unlaunched_session
@@ -223,11 +221,11 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session,
             current_session=partial(owner.session_identity, thread_id))
         note, filled_field_visit, saved_fill = access.note, access.filled_field_visit, access.saved_fill
-    if not pane:
-        # Only a command the guard let through puts the agent in the page.
-        browser_pane_state.agent_acted(thread_id)
-    # Capture marks every document a typing command passes through (browser_login_capture_writes).
-    async with await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes:
+    # A command the guard let through marks against a saved-login fill; capture marks each document typing passes through.
+    async with (browser_fill_marks.agent_command(thread_id, runtime.record.session, endpoint, () if pane else args, navigation=navigation) as finished,
+                await browser_login_capture.agent_writes(thread_id, endpoint, () if pane else args) as writes):
+        if not pane:
+            browser_pane_state.agent_acted(thread_id)
         if shared_write:
             try:
                 return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
@@ -249,6 +247,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         async with browser_history.after_history_move(owner, runtime, thread_id, command, active=history):
             try:
                 result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+                finished(not unfinished and not result.timed_out)
             finally:
                 # Rule 7's marks land before the held pane restarts, and it restarts however the command ends.
                 await writes.settle(then=partial(browser_pane_state.page_command_finished, thread_id, tuple(args)))
@@ -284,7 +283,7 @@ def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandRes
     snapshot = data.get("snapshot") if isinstance(data, dict) else None
     if not isinstance(snapshot, str):
         return None
-    stdout = json.dumps({"success": True, "data": {"snapshot": browser_control.hide_field_values(snapshot)}})
+    stdout = json.dumps({"success": True, "data": {"snapshot": browser_field_values.hide_field_values(snapshot)}})
     return replace(result, stdout=stdout, stderr="")
 
 
@@ -361,7 +360,7 @@ async def guard_close(owner: Any, runtime: Any) -> None:
     except BrowserSessionCleanupError:
         return
     except BrowserSessionError as exc:
-        if str(exc) not in {browser_control.PAGE_CHECK_FAILED, browser_cli.BROWSER_BUSY}:
+        if str(exc) not in {browser_control.PAGE_CHECK_FAILED, browser_control.PAGE_CHECK_REFUSED, browser_cli.BROWSER_BUSY}:
             raise
 
 
@@ -374,6 +373,7 @@ async def end_session(thread_id: str, session: str) -> None:
         browser_step_lifecycle.discard_session(thread_id)
     finally:
         browser_control.browser_closed(thread_id)
+        browser_fill_marks.forget(thread_id)
         browser_login_capture.session_ended(thread_id, browser_login_capture.session_key(thread_id, session))
 
 

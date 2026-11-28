@@ -1,15 +1,21 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui';
+	import { Button, Field } from '$lib/components/ui';
 	import HostAccessBlockedLine from './HostAccessBlockedLine.svelte';
 	import HostAccessDrawerHead from './HostAccessDrawerHead.svelte';
-	import { approvalReady, casReady, duration, fillDurations, owner } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessFill } from '$lib/api/hostAccess';
+	import {
+		approvalReady, casReady, duration, fillDurations, fillStartingChoice, owner, UNTIL_TURNED_OFF_LABEL,
+	} from '$lib/hostAccess/leaseFormat';
+	import type { FillChoice, HostAccessFill } from '$lib/api/hostAccess';
 
 	/**
 	 * A pending request to fill a saved login: which agent, which site and username, and for how long.
 	 * HostAccessPendingRequestDrawer renders it and owns the shared sheet layout (.pending-drawer,
 	 * .decision-*); like the script sheet it draws the §0.1 roles: sentence-case section labels, status
-	 * as coloured text, no boxes. The duration is the person's pick, never the agent's.
+	 * as coloured text, no boxes. The duration is the person's pick, never the agent's: the agent's asked-for
+	 * time is only where the choice starts. The choice is one select (DESIGN-SYSTEM §3.4, Field `nested`), in time
+	 * order, with "Until I turn it off" last: offered here only (never on the host-access lease sheet) and never
+	 * where the choice starts. The sheet says nothing about revoking: no screen ends a standing grant yet, so the
+	 * line would be untrue under "Until I turn it off"; a timed grant's chip carries its own revoke.
 	 */
 	let {
 		request,
@@ -29,53 +35,50 @@
 		rejectDisabled: boolean;
 		approveDisabled: boolean;
 		notice?: string | null;
-		onApprove: (event: MouseEvent, durationSeconds?: number) => void;
+		onApprove: (event: MouseEvent, durationSeconds?: FillChoice) => void;
 		onReject: (event: MouseEvent) => void;
 		onRetry: () => void;
 		onClose: () => void;
 	} = $props();
 
 	const ready = $derived(approvalReady(request));
-	const choices = $derived(fillDurations(request.max_duration_seconds));
-	let picked = $state<number | null>(null);
-	const seconds = $derived(picked !== null && choices.includes(picked) ? picked : (choices[0] ?? null));
+	const STANDING = 'until_revoked' as const;
+	const choices = $derived(fillDurations(request.max_duration_seconds, request.requested_duration_seconds));
+	const options = $derived<FillChoice[]>(choices.length ? [...choices, STANDING] : []);
+	let picked = $state<FillChoice | null>(null);
+	const seconds = $derived<FillChoice | null>(
+		picked !== null && options.includes(picked) ? picked : fillStartingChoice(choices, request.requested_duration_seconds),
+	);
 
-	function choiceKey(event: KeyboardEvent): void {
-		const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
-			: event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
-		if (!step || seconds === null) return;
-		event.preventDefault();
-		const next = choices[(choices.indexOf(seconds) + step + choices.length) % choices.length];
-		picked = next;
-		const group = (event.currentTarget as HTMLElement).closest('[role="radiogroup"]');
-		group?.querySelector<HTMLButtonElement>(`[data-seconds="${next}"]`)?.focus();
+	const fieldId = $derived(`fill-duration-${request.id}`);
+
+	function pick(event: Event): void {
+		const value = (event.currentTarget as HTMLSelectElement).value;
+		picked = options.find((choice) => String(choice) === value) ?? null;
 	}
 </script>
 
 <div class="pending-drawer">
 	<HostAccessDrawerHead label="Sign in with a saved login" title={owner(request)} status={stale ? 'Couldn’t check' : 'Needs approval'} {stale} {onClose} />
 	<div class="decision-body fill-body">
-		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it, and you can revoke this approval at any time.</p>
+		<p class="explainer">CORSIA types the password into this site for the agent. The agent never sees it.</p>
 		<section><span class="section-label">Site</span><p>{request.site}</p></section>
 		<section><span class="section-label">Username</span><p>{request.username}</p></section>
-		<section>
-			<span class="section-label" id={`fill-duration-${request.id}`}>For how long</span>
-			<div class="segmented durations" role="radiogroup" aria-labelledby={`fill-duration-${request.id}`}>
-				{#each choices as choice (choice)}
-					<button
-						type="button"
-						class="segment"
-						class:active={seconds === choice}
-						role="radio"
-						data-seconds={choice}
-						aria-checked={seconds === choice}
-						tabindex={seconds === choice ? 0 : -1}
-						onkeydown={choiceKey}
-						onclick={() => { picked = choice; }}
-					>{duration(choice)}</button>
-				{/each}
-			</div>
-		</section>
+		{#if options.length}
+			<section>
+				<!-- The sheet's own section label, like Site and Username; Field keeps the select's accessible name. -->
+				<span class="section-label" aria-hidden="true">Duration</span>
+				<div class="duration">
+					<Field variant="nested" layout="stacked" hideLabel label="Duration" labelFor={fieldId}>
+						<select id={fieldId} value={seconds === null ? '' : String(seconds)} onchange={pick}>
+							{#each options as choice (choice)}
+								<option value={String(choice)}>{choice === STANDING ? UNTIL_TURNED_OFF_LABEL : duration(choice)}</option>
+							{/each}
+						</select>
+					</Field>
+				</div>
+			</section>
+		{/if}
 	</div>
 	<footer class="decision-actions">
 		<HostAccessBlockedLine {stale} incomplete={!ready} kind="fill" rejectable={casReady(request)} {notice} {onRetry} />
@@ -98,9 +101,5 @@
 	/* The last control clears the sticky footer by the same step at every width. */
 	.fill-body { padding-bottom: var(--space-4); }
 	.explainer { margin: 0; }
-	.durations { margin-top: var(--space-2); }
-	/* A finger-sized target on any touch pointer; the sheet sets it on a phone-width sheet too. */
-	@media (pointer: coarse) {
-		.durations .segment { min-height: var(--touch-target); }
-	}
+	.duration { margin-top: var(--space-2); }
 </style>

@@ -9,7 +9,30 @@ afterEach(() => keptCommentDrafts.reset());
 
 const scope = documentDraftKey({ projectId: 'project-1', path: 'notes.md' });
 
+it('keeps the pressed comment identity through an empty edit, without sending the edit', () => {
+	const firstTags = createMentionSelection('@Twin please check');
+	firstTags.select('first-agent', 0, '@Twin');
+	keptCommentDrafts.keep(scope, '@Twin please check', firstTags);
+	const first = keptCommentDrafts.claim(scope, '@Twin please check', firstTags, undefined, { artifactId: 'artifact', threadId: null });
+	keptCommentDrafts.keep(scope, '', createMentionSelection());
+	expect(keptCommentDrafts.get(scope)?.send).toBeUndefined();
+	const changedTags = createMentionSelection('@Twin please check');
+	changedTags.select('second-agent', 0, '@Twin');
+	keptCommentDrafts.keep(scope, '@Twin please check', changedTags);
+	expect(keptCommentDrafts.claim(scope, '@Twin please check', changedTags)).toEqual({ clientId: first.clientId, again: true });
+});
+
 describe('a reply kept while it is typed', () => {
+	it('retains the identity of a pressed reply across an empty edit', () => {
+		const key = replyDraftKey(scope, 'comment-1'), tags = createMentionSelection('first');
+		keptCommentDrafts.keepReply(key, 'first', tags);
+		const press = keptCommentDrafts.claim(key, 'first', tags, undefined, { artifactId: 'artifact', threadId: null });
+		keptCommentDrafts.keepReply(key, '', createMentionSelection());
+		expect(keptCommentDrafts.get(key)?.send).toBeUndefined();
+		keptCommentDrafts.keepReply(key, 'changed', createMentionSelection('changed'));
+		expect(keptCommentDrafts.claim(key, 'changed', createMentionSelection('changed'))).toEqual({ clientId: press.clientId, again: true });
+	});
+
 	it('keeps its text, tags and caret until its field is emptied', () => {
 		const key = replyDraftKey(scope, 'comment-1');
 		const tags = createMentionSelection();
@@ -19,11 +42,12 @@ describe('a reply kept while it is typed', () => {
 		expect(kept.body).toBe('half a reply');
 		expect(kept.mentionSelection).toBe(tags);
 		expect(kept.selection).toEqual([2, 6]);
-		// A reply has no Cancel: emptying its field clears it, its id and reason included.
-		keptCommentDrafts.claim(key, 'half a reply', tags);
+		// Emptying clears the reason but retains the id of a press that may have posted.
+		const press = keptCommentDrafts.claim(key, 'half a reply', tags);
 		keptCommentDrafts.fail(key, 'half a reply', tags, 'Couldn’t post');
 		keptCommentDrafts.keepReply(key, '', tags);
-		expect(keptCommentDrafts.get(key)).toBeUndefined();
+		expect(keptCommentDrafts.get(key)).toMatchObject({ body: '', clientId: press.clientId });
+		expect(keptCommentDrafts.get(key)?.error).toBeUndefined();
 	});
 
 	it('keeps each thread’s reply apart, and a document’s apart from another’s', () => {

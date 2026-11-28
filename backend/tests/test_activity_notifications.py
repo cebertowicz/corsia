@@ -48,6 +48,48 @@ def test_queue_answers_both_lists_and_the_ranker_sees_tasks_only(isolated_db, mo
         db.close()
 
 
+def test_done_clears_newer_tagged_top_level_comment(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc, _, _ = _answered(db)
+        db.execute("INSERT INTO doc_comments(id,artifact_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('tagged',?,'agent','agent','owner','look','owner-token','9999','9999')", (doc,))
+        db.commit()
+        client = _client(monkeypatch)
+        [row] = client.get('/api/attention/queue?view=activity').json()['notifications']['items']
+        # The count is the reply to the person's comment alone; the tagged top-level comment is unread
+        # in the document but not a reply. The read mark still runs through it (#3358): the newest
+        # unread item is never older than the newest counted reply, so Done clears every counted reply.
+        assert row['detail']['unread'] == 1
+        assert row['detail']['latest_reply_id'] == 'tagged'
+        response = client.post('/api/attention/notifications/read', json={'documents': [
+            {'artifact_id': doc, 'through_reply_id': row['detail']['latest_reply_id']},
+        ]})
+        assert response.status_code == 200
+        assert client.get('/api/attention/queue?view=activity').json()['notifications']['count'] == 0
+        from doceditor.feedback_state import unread_item_ids
+        assert doc not in unread_item_ids(db, 'owner-token', [doc])
+    finally:
+        db.close()
+
+
+def test_row_counts_only_replies_to_the_persons_own_comments(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc, _, _ = _answered(db)
+        # Unread items that are not answers to the person's comments: a top-level agent comment, and
+        # an agent reply in a thread the person never entered (tagged, so it still reaches them).
+        agent_root, _ = add_comment(db, doc, author_id='owner')
+        db.execute("INSERT INTO doc_comments(id,artifact_id,parent_id,author,author_kind,author_thread_id,body,tagged_user_id,created_at,updated_at) VALUES ('there',?,?,'agent','agent','owner','also','owner-token','9998','9998')", (doc, agent_root['id']))
+        db.commit()
+        items = _client(monkeypatch).get('/api/attention/queue?view=activity').json()['notifications']['items']
+        [row] = items
+        assert row['detail']['unread'] == 1  # the one qualifying reply; neither unrelated item rides the number
+    finally:
+        db.close()
+
+
 def test_notifications_are_newest_reply_first(isolated_db, monkeypatch):
     db = get_db()
     try:
@@ -117,5 +159,45 @@ def test_a_document_the_caller_cannot_reach_refuses_the_whole_call(isolated_db, 
         # A reply from another document is refused too.
         body = {'documents': [{'artifact_id': mine, 'through_reply_id': their_reply['id']}]}
         assert _client(monkeypatch).post('/api/attention/notifications/read', json=body).status_code == 404
+    finally:
+        db.close()
+
+
+def test_route_returns_the_documents_own_title_and_no_internal_path(isolated_db, monkeypatch, tmp_path):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        doc, _, _ = _answered(db)
+        document = tmp_path / 'Onboarding notes.md'
+        document.write_text('# Onboarding: who owns which file\n\nWho owns what.\n')
+        db.execute("UPDATE artifact_identities SET title=?, path=? WHERE id=?", ('Onboarding notes.md', str(document), doc))
+        db.commit()
+        [row] = _client(monkeypatch).get('/api/attention/queue?view=activity').json()['notifications']['items']
+        assert row['title'] == 'Onboarding: who owns which file'  # the route resolved it
+        assert 'heading_path' not in row['detail']
+    finally:
+        db.close()
+
+
+def test_route_opens_no_file_for_rows_past_the_page_cap(isolated_db, monkeypatch, tmp_path):
+    from api import attention as api_attention
+    from doceditor import activity_reply_rows
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        for i in (1, 2):
+            doc, _, _ = _answered(db)
+            document = tmp_path / f'notes{i}.md'
+            document.write_text(f'# Heading {i}\n\nText.\n')
+            db.execute("UPDATE artifact_identities SET title=?, path=? WHERE id=?", (f'notes{i}.md', str(document), doc))
+        db.commit()
+        monkeypatch.setattr(api_attention, 'QUEUE_ITEMS_CAP', 1)
+        reads = []
+        real = activity_reply_rows._first_heading
+        monkeypatch.setattr(activity_reply_rows, '_first_heading', lambda path: (reads.append(path), real(path))[1])
+        body = _client(monkeypatch).get('/api/attention/queue?view=activity').json()['notifications']
+        assert body['count'] == 2 and len(body['items']) == 1
+        assert reads == [str(tmp_path / 'notes2.md')]  # the row the cut dropped opened no file
+        assert body['items'][0]['title'] == 'Heading 2'
     finally:
         db.close()

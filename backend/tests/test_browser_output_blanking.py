@@ -394,6 +394,24 @@ def test_each_browser_url_encoding_of_a_value_is_blanked(encoder):
         f"https://example.com/a?p={blanking.BLANK}&next=1")
 
 
+# A value with "?" and "#" written raw into a URL, and set as its fragment, as Node's WHATWG URL serialises it
+# (new URL(base + value).href, and url.hash = value), checked against Node 25. Raw, the parser ends a path at "?"
+# and a path or query at "#", and encodes each part with its own set, so no single-set form matches the whole.
+HASH_VALUE = "A`b1 ?u'e{r}y^#`h a\"s<>#2%x"
+HASH_FORMS = {
+    "fragment": ("https://example.com/a#", "A%60b1%20?u'e{r}y^#%60h%20a%22s%3C%3E#2%x"),
+    "raw_in_query": ("https://example.com/a?p=", "A`b1%20?u%27e{r}y^#%60h%20a%22s%3C%3E#2%x"),
+    "raw_in_path": ("https://example.com/", "A%60b1%20?u%27e{r}y^#%60h%20a%22s%3C%3E#2%x"),
+}
+
+
+@pytest.mark.parametrize("where", sorted(HASH_FORMS))
+def test_a_value_with_a_hash_written_into_a_url_is_blanked_whole(where):
+    base, written = HASH_FORMS[where]
+    # Whole: neither the part before "#" nor the one after is left behind.
+    assert blanking.blank(f"{base}{written}", [HASH_VALUE]) == f"{base}{blanking.BLANK}"
+
+
 def test_a_near_match_of_a_saved_value_is_left_alone():
     """Text one character off a saved value, or cut short, in any encoding, isn't blanked."""
     near = ("Ab1%7EcdZq7y", "Ab1~cdZq7y", "Ab1%7EcdZq7", "Ab1+cdZq7x", "Ab1%7ecdZq7y")

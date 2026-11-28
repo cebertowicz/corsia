@@ -31,8 +31,9 @@
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 	import { keptCommentDrafts } from '$lib/stores/keptCommentDrafts.svelte';
 	import { failedLine } from '$lib/stores/draftKept';
+	import { SENDING, unsentComments } from '$lib/stores/unsentComments.svelte';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, ringed = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, inList = false, actionsAbove = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, pressKeepsPlace = false, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection(), replyKey = '' }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -79,6 +80,8 @@
 		/** A multi-selection may mark several cards without moving keyboard focus into each one. */
 		autoFocusSelection?: boolean;
 		onFocus?: () => void;
+		/** A press inside the card already focused only reads it: the page, sheet and column stay where they are. Off by default, so a surface that selects from a press (an image's list) keeps calling `onFocus`. */
+		pressKeepsPlace?: boolean;
 		readOnly?: boolean;
 		/** How the replies show (CommentReplyList's `view`): `recent` by default (a card, popover or sheet opened at its highlight), `summary` for a row in the drawer's list, `all` for the whole thread its replies row opens. A summary row's replies row calls `onOpenThread`. */
 		replyView?: 'recent' | 'all' | 'summary';
@@ -131,6 +134,8 @@
 	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
 	const decidedOpen = $derived(isDecidedOpen(comment));
 	let replyPosting = $state(false);
+	/** A pressed reply going on its own (`unsentComments`), not this field's own press: Send is held and a line says so. */
+	const replySending = $derived(!replyPosting && unsentComments.sending(replyKey));
 	/** A deleted text's quote is read in full unless it is long; then it is clamped with the Show more control chat comments use. */
 	let quoteOpen = $state(false);
 	let resolvedOpen = $state(untrack(() => !chatSurface && (!!comment.newComment || !!comment.newReplyIds?.length)));
@@ -209,7 +214,7 @@
 	function pressCard(event: MouseEvent) {
 		if (notEngaging(event)) return;
 		engage();
-		onFocus?.();
+		if (!(pressKeepsPlace && focused)) onFocus?.();
 	}
 	function pressResolved(event: MouseEvent) {
 		if (!notEngaging(event)) engage();
@@ -217,6 +222,8 @@
 </script>
 
 <!-- Who started it and when: a resolved row says it before its quote is read. -->
+<!-- Under the reply field: why its reply didn't post, else that a pressed reply is going on its own. -->
+{#snippet replyStatus()}{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{:else if replySending}<p class="ct-reply-sending" role="status">{SENDING}</p>{/if}{/snippet}
 {#snippet resolvedMeta()}<div class="ct-head ct-res-meta"><CommentMeta {author} color={avatarColor} at={comment.at} createdAt={comment.createdAt} /></div>{/snippet}
 {#snippet resolvedHead(mark: 'check' | 'cross', label: string)}
 	<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
@@ -238,7 +245,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if isSuggestion}<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />{/if}
 				{#if hasBody}<CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
+				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} keepSheetHeight={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
 	</div>
@@ -252,8 +259,8 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
-				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} onSend={postReply} goesTo={comment.replyGoesTo} />{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}{/if}
+				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} keepSheetHeight={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} sending={replySending} onSend={postReply} goesTo={comment.replyGoesTo} />{@render replyStatus()}{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -305,7 +312,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving && !preview}
-			<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
+			<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={collapseReplyIds} {collapseReplyIds} view={replyView} keepSheetHeight={!chatSurface} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
 		{/if}
 
 		{@render failure?.()}
@@ -313,8 +320,8 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} goesTo={comment.replyGoesTo} />
-			{#if replyLine}<p class="ct-reply-error" role="alert">{replyLine}</p>{/if}
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} shownKey={replyKey} posting={chatSurface && (replyPosting || replyPending)} sending={replySending} onSend={postReply} goesTo={comment.replyGoesTo} />
+			{@render replyStatus()}
 		{/if}
 		<!-- An open suggestion's Accept and Reject are the card's last row, after the reply field: in a popover or a one-thread sheet it stays at the bottom of the card's own scroller. -->
 		{#if isSuggestion && !decidedOpen}<CommentSuggestionActions name={suggestionName(comment.anchor, comment.replacement ?? '', comment.insertAfter)} orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} refusalKind={comment.refusalKind} {readOnly} {decisionError} onDecide={(decision) => { engage(); return onDecision?.(comment.id, decision); }} />{/if}
@@ -357,7 +364,8 @@
 	.ct-orphan { font-size: var(--text-footnote); color: var(--amber); }
 	.ct-decision-error, .ct-reply-error { font-size: var(--text-footnote); color: var(--red-text); }
 	/* The card's gap spaces it, as it spaces the field above it: no paragraph margin of its own. */
-	.ct-reply-error { margin: 0; }
+	.ct-reply-error, .ct-reply-sending { margin: 0; }
+	.ct-reply-sending { font-size: var(--text-footnote); color: var(--text-secondary); }
 	.ct-decided { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {

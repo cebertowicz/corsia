@@ -73,8 +73,9 @@ jobs:
           CORSIA_TEST_CHROME="$CORSIA_NATIVE_CHROME_BINARY" .venv/bin/python -m pytest -c backend/pytest.ini \
             backend/tests/test_browser_frame_password_real.py \
             -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/frame-guard.log"
-          # A skip would pass silently; both frame shapes, the phone-typing check and both touch-field checks must run.
-          grep -q " 5 passed" "$RUNNER_TEMP/frame-guard.log"
+          # A skip would pass silently; both frame shapes, the phone-typing check, both touch-field checks and the
+          # long-list check, the past-the-cap refusal and the saved-login page-address check must run.
+          grep -q " 8 passed" "$RUNNER_TEMP/frame-guard.log"
           mkdir -p "$RUNNER_TEMP/browser-bin"
           ln -sf "$CORSIA_NATIVE_BROWSER_BINARY" "$RUNNER_TEMP/browser-bin/agent-browser"
           PATH="$RUNNER_TEMP/browser-bin:$PATH" CORSIA_BROWSER_E2E=1 env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
@@ -109,11 +110,12 @@ jobs:
             "backend/tests/test_browser_shared_e2e.py::test_a_link_in_an_embed_nested_in_a_cross_site_frame_is_never_written_in_a_look_alike" \
             "backend/tests/test_browser_shared_e2e.py::test_a_shared_click_by_ref_passes_a_layer_that_lets_clicks_through" \
             "backend/tests/test_browser_shared_e2e.py::test_a_fill_on_a_dropdown_with_no_pane_chooses_its_option" \
+            backend/tests/test_browser_login_fill_e2e.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; all twenty-two must actually run (the frame click and the off-screen twins run for
-          # a same-origin and a cross-site frame, the nested embed for a frame on its wrapper's site and on the page's,
-          # the select by ref with the pane closed and open).
-          grep -q " 22 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all twenty-two, and the saved-login fill's nine, must actually run (the frame click
+          # and the off-screen twins run for a same-origin and a cross-site frame, the nested embed for a frame on its
+          # wrapper's site and on the page's, the select by ref with the pane closed and open).
+          grep -q " 31 passed" "$RUNNER_TEMP/setup-steps.log"
       - name: Verify saved logins stay out of agent output and logs on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'

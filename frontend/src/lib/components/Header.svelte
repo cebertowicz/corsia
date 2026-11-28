@@ -176,11 +176,11 @@
 				<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Chat settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Chat settings'}>
 					{@render gearIcon()}
 				</button>
-			{:else if activeView === 'activity' && $uiScope}
+			{:else if activeView === 'activity' && !phoneDocument && $uiScope}
 				<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
 					{@render gearIcon()}
 				</button>
-			{:else if activeView === 'activity' && !$uiScope}
+			{:else if activeView === 'activity' && !phoneDocument && !$uiScope}
 				<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
 					{@render gearIcon()}
 				</button>
@@ -335,11 +335,7 @@
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
 			height: var(--header-bottom);
-			/* Moves the row down by exactly the clearance --header-bottom adds (app.css), so it
-			   keeps its place relative to the bottom edge, below the iOS 27 top-edge blur.
-			   ::before reads it to find the row. */
-			--header-pad-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));
-			padding-top: var(--header-pad-top);
+			padding-top: max(8px, calc(var(--safe-top) - 28px));
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
@@ -352,26 +348,14 @@
 			display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-1);
 		}
 		.h-leading { display: contents; }
-		/* The blur stays on this masked layer so it fades out with no hard edge.
-		   Wherever the mask is below 1 the transcript shows through, so the mask stays opaque
-		   down to the bottom of the row's glyphs and then fades out linearly to the header
-		   bottom, over the same length as the fade below the row had before. The row is
-		   centred in the box below the padding, at 50% + pad / 2, and its 18px icons and the
-		   title end 9px below that centre.
-		   The tint keeps its old profile below the clearance strip: the strip (0 to c) stays
-		   at the first stop, and the old 50% and 80% stops of the old height (100% - c) sit
-		   at c + 50% and c + 80% of it, i.e. 50% + c/2 and 80% + c/5. With no top inset c is
-		   0 and these are the old tint stops. */
+		/* An even frosted bar: full blur and one flat tint over the whole header box, ending at its
+		   bottom edge. No gradient and no mask: WebKit masks the blurred backdrop too, so a fading
+		   mask shows the unblurred transcript through the lower header and ends in a hard line. */
 		.shell-header::before {
-			background-image: linear-gradient(
-				180deg,
-				color-mix(in srgb, var(--header-top-base) 70%, transparent) var(--edge-blur-clearance),
-				color-mix(in srgb, var(--header-top-base) 45%, transparent) calc(50% + var(--edge-blur-clearance) / 2),
-				color-mix(in srgb, var(--header-top-base) 15%, transparent) calc(80% + var(--edge-blur-clearance) / 5),
-				transparent 100%
-			);
-			-webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
-			mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
+			background-image: none;
+			background-color: color-mix(in srgb, var(--header-top-base) 72%, transparent);
+			-webkit-mask-image: none;
+			mask-image: none;
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }
@@ -389,5 +373,9 @@
 		.links .h-back-label { display: inline; }
 		.h-act.overflowable { display: none; }
 		.h-overflow { display: flex; }
+	}
+	/* With reduced transparency --glass-blur is none (app.css), so the phone bar is solid. */
+	@media (max-width: 768px) and (prefers-reduced-transparency: reduce) {
+		.shell-header::before { background-color: var(--header-top-base); }
 	}
 </style>
