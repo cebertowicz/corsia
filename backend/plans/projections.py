@@ -105,6 +105,9 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
             },
             {key: execution["causes"] for key, execution in projected.items()},
         ),
+        set_aside_reason=parked_work.set_aside_reason(
+            execution["causes"] for execution in executions
+        ),
     )
     memo[plan_id] = state
     return state
