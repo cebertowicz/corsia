@@ -255,6 +255,8 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     _register_google_tools(agent)
     register_microsoft_tools(agent)
     register_messages_tools(agent)
+    from tools.push import UrgentPushTool
+    agent.tools.register(UrgentPushTool())
 
 
 def _register_google_tools(agent: CORSIAAgent) -> None:

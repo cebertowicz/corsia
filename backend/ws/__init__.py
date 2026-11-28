@@ -12,7 +12,8 @@ from collections.abc import Awaitable, Callable
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from infra import state
+from infra import here_signal, state
+from infra.ws_session import session_id
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.send_service import send_thread_input
@@ -81,6 +82,9 @@ async def _receive_frames(
                 continue
             if msg_type == "presence":
                 await _handle_presence_impl(ws, user, data, owned_thread_fn=_owned_thread)
+                continue
+            if msg_type == "here":
+                here_signal.apply(session_id(ws), user["id"], data)
                 continue
             if msg_type == "subagent_feed":
                 task = asyncio.create_task(_handle_subagent_feed(

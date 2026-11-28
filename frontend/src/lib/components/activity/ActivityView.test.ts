@@ -681,6 +681,23 @@ describe('opened from another surface', () => {
 		expect(get(activityOpenRequest)).toBeNull();
 	});
 
+	it('a to-do that no longer exists opens the list with a line saying so and nothing selected', async () => {
+		openActivity('decision-answered-elsewhere');
+		render();
+		await settle();
+		expect(openRow()).toBeFalsy();
+		expect(document.body.textContent).toContain('That’s no longer waiting on you.');
+		expect(pane().getAttribute('aria-label')).toBe('Nothing open');
+		expect(get(activityOpenRequest)).toBeNull();
+		// Nothing selects itself afterwards, and opening a row lets the line go.
+		await settle();
+		expect(openRow()).toBeFalsy();
+		rows()[0].click();
+		await settle();
+		expect(openRow()).toBe(rows()[0]);
+		expect(document.body.textContent).not.toContain('That’s no longer waiting on you.');
+	});
+
 	it('with no item named, opens on the top to-do', async () => {
 		openActivity();
 		render();

@@ -6,7 +6,8 @@ from typing import Any
 from fastapi import WebSocket
 from loguru import logger
 
-from infra import state
+from infra import here_signal, state
+from infra.ws_session import session_id
 from infra.auth import authenticate, narrow_to_listener
 from core.turn_core import TurnIdentity
 from core.turn_core import active_turn_thread_ids, active_turns_for_owner
@@ -63,6 +64,7 @@ async def asyncio_wait_for_json(ws: WebSocket, *, timeout: float) -> dict:
 
 def cleanup_ws(user_id: str, ws: WebSocket) -> None:
     release_socket(ws)
+    here_signal.drop(session_id(ws))
     if user_id in state._ws_user_clients:
         try:
             state._ws_user_clients[user_id].remove(ws)

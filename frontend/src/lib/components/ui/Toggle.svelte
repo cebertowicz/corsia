@@ -109,7 +109,8 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
-	.tg.locked { cursor: default; }
+	/* Locked (a change is in flight) reads as unavailable, the same as disabled, but stays focusable. */
+	.tg.locked { opacity: 0.5; cursor: not-allowed; }
 	.tg.held { opacity: 0.5; cursor: default; }
 	.tg:focus-visible {
 		outline: 2px solid var(--accent);
