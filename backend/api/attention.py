@@ -214,6 +214,7 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     document_timings: dict = {}
     notifications: list[dict] = []
     if view == 'activity':
+        from doceditor import activity_chat_reply_rows
         from doceditor.activity_reply_rows import document_rows
         from infra.activity_draft_rows import draft_rows, merge_draft_reviews
         started = time.perf_counter()
@@ -234,7 +235,7 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
             if (row['kind'] == 'review' or (row['kind'] == 'draft' and row['detail']['artifact_id'] in draft_reviews)) and row['detail']['artifact_id'] in unread:
                 row['detail']['unread_replies'] = unread[row['detail']['artifact_id']]
                 reviewed.add(row['detail']['artifact_id'])
-        notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed]
+        notifications = [d for d in documents if d['detail']['artifact_id'] not in reviewed] + activity_chat_reply_rows.chat_rows(db, user_id)
     if project_id:
         rows = [r for r in rows if r['source'].get('project_id') == project_id]
         notifications = [r for r in notifications if r['source'].get('project_id') == project_id]

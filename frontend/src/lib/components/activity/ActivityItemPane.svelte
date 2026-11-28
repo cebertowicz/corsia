@@ -11,8 +11,9 @@
 	import ArtifactLeaf from '$lib/components/ArtifactLeaf.svelte';
 	import ReviewBarShell, { ASKER_AT_REST } from '$lib/components/ReviewBarShell.svelte';
 	import ActivityKindPanel from './ActivityKindPanel.svelte';
+	import ActivityChatPane from './ActivityChatPane.svelte';
 	import ActivityDocumentBar from './ActivityDocumentBar.svelte';
-	import { isPickAny, OTHER_OPTION_ID, type DecisionDetail } from '$lib/api/attentionQueue';
+	import { isPickAny, OTHER_OPTION_ID, type AttentionDestination, type DecisionDetail } from '$lib/api/attentionQueue';
 	import { markDocumentsRead, type ActivityQueueItem } from '$lib/api/activityQueue';
 	import { docComments, commentLoads } from '$lib/stores/docComments';
 	import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
@@ -22,7 +23,7 @@
 	import { newMutationId, sendAnswer } from '$lib/stores/attentionAnswer.svelte';
 	import { emitProductEvent } from '$lib/product_events';
 	import {
-		agentsLabel, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps, answerIsReady,
+		agentsLabel, chatDetailOf, decisionOf, documentDetailOf, documentOf, heldOf, replyPosition, reviewOf, taskOf, taskSteps, answerIsReady,
 		type DecisionDraft, type DocumentLookup,
 	} from './activityItems';
 	import {
@@ -35,7 +36,7 @@
 	 * through the call its own surface already uses; the list then re-reads, and the item leaves only when the server
 	 * stops returning it. Every outcome of a press is reported here; nothing here writes the attention queue's state.
 	 */
-	let { item, workspaceKey, phone = false, showBrowser = true, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, onActed, onKeep, onOpenChat }: {
+	let { item, workspaceKey, phone = false, showBrowser = true, draft, onDraft, onClearDraft, noLonger = false, stale = false, allRead = false, seenAnswers, onActed, onKeep, onOpenChat, onCloseChat }: {
 		item: ActivityQueueItem;
 		workspaceKey: string;
 		phone?: boolean;
@@ -46,12 +47,12 @@
 		noLonger?: boolean;
 		stale?: boolean;
 		/** The open document's replies were all read while it stayed open (elsewhere, or by Mark all read). */
-		allRead?: boolean;
+		allRead?: boolean; seenAnswers?: Set<string>;
 		/** Re-read the queue after an act landed. */
 		onActed: () => Promise<void> | void;
 		/** The server let the item go without doing what was pressed: keep it open, with the reason, until the person moves on. */
 		onKeep: () => void;
-		onOpenChat: (threadId: string) => void;
+		onOpenChat: (threadId: string, destination?: AttentionDestination) => void | Promise<void>; onCloseChat: () => void;
 	} = $props();
 
 	// Every band here, the document's own review band included, names the agent asking at rest.
@@ -59,6 +60,7 @@
 	setContext(REVIEW_ANSWERED, () => void onActed());
 	setContext(EMAIL_DRAFT_SETTLED, untrack(() => item.kind === 'draft') ? () => void onActed() : undefined);
 
+	const chat = $derived(chatDetailOf(item));
 	const decision = $derived(decisionOf(item));
 	const held = $derived(heldOf(item));
 	const task = $derived(taskOf(item));
@@ -166,11 +168,11 @@
 		? press('send', 'send this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED))
 		: press('dont_send', 'decline this message', async () => (held ? decideHeldPress(held.id, verb) : SUCCEEDED));
 	const markTaskDone = () => press('done', 'mark this task done', async () => (task ? markTaskDonePress(task) : SUCCEEDED));
-	/** Done marks the document read up to the latest reply its row showed; one that lands after stays unread. */
-	function markDocumentRead() {
-		if (!document) return;
+	/** Mark only the replies represented by the displayed content. */
+	function markRepliesRead(through?: string) {
+		if (!document && !(chat && through)) return;
 		return press('done', 'mark these replies read', async () => {
-			await markDocumentsRead([{ artifact_id: document.artifact_id, through_reply_id: document.latest_reply_id }]);
+			await markDocumentsRead(document ? [{ artifact_id: document.artifact_id, through_reply_id: document.latest_reply_id }] : [], chat && through ? [{ thread_id: chat.thread_id, through }] : []);
 			return SUCCEEDED;
 		});
 	}
@@ -216,7 +218,7 @@
 	{@render itemNotice()}
 	{#if document}
 		<ActivityDocumentBar who={agentsLabel(document.agents)} label={barLabel} busy={sending}>
-			{#snippet action()}{#if !repliesRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void markDocumentRead()}>{labelFor('done', 'Done')}</Button>{/if}{/snippet}
+			{#snippet action()}{#if !repliesRead}<Button size="sm" variant="primary" loading={sending} onclick={() => void markRepliesRead()}>{labelFor('done', 'Done')}</Button>{/if}{/snippet}
 			{#snippet problem()}{#if failure}<p class="act-failure" role="alert">{failure.text}</p>{/if}{/snippet}
 		</ActivityDocumentBar>
 	{/if}
@@ -252,7 +254,9 @@
 	{#if task}<section class="task-bar" aria-label="Your step">{#if task.description}{@render taskInstructions(task.description)}{/if}{@render taskBand(false)}</section>{/if}
 {/snippet}
 
-{#if browserShown}
+{#if chat}
+	<ActivityChatPane {item} detail={chat} {allRead} {seenAnswers} {sending} readFailed={failure?.retry === 'done'} onDone={markRepliesRead} {onOpenChat} onClose={onCloseChat} />
+{:else if browserShown}
 	<div class="doc-pane"><ArtifactLeaf threadId={workspaceKey} notice={taskNotice} collapsible={false} mode={phone ? 'compact' : 'expanded'} onNoBrowser={() => { browserEnded = true; }} /></div>
 {:else if doc}
 	{#if lookupFailed}
@@ -356,9 +360,6 @@
 <style>
 	.no-longer { margin: 0; padding: var(--space-2) var(--space-5); color: var(--text-secondary); font-size: var(--text-subhead); }
 	.doc-pane { position: relative; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; --comment-jump-margin: var(--space-8); }
-	/* The document bar is in the leaf's notice slot, just below its tab strip. */
-	/* The document's bar: who replied, then where the person is in the replies with Done on the same line. Done's
-	   place keeps its height once the replies are read, so the document does not jump. */
 	.task-bar { padding: var(--space-3) var(--space-5) 0; background: var(--bg-primary); }
 	:global(.activity.phone) .task-bar { padding-inline: var(--space-3); }
 	.task-bar .body { margin: 0 0 var(--space-3); }

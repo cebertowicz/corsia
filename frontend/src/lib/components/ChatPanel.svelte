@@ -15,6 +15,7 @@
 	import { quoteLabel } from './chatUnreadTargets';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
+	import { activityChatJump } from '$lib/stores/activityChatJump';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
 	import { createTranscriptPagerPort } from '$lib/chatTranscriptPagerPort';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
@@ -198,6 +199,13 @@
 		pager: () => pager, runs: () => focusRuns, loads: () => runLoads,
 		loadOlder: loadOlderMessages, loadRun: run => loadRunRange(run, runLoader), element: () => messagesEl,
 		generation: () => pagerGeneration,
+	});
+	$effect(() => {
+		const request = $activityChatJump;
+		if (request && request.threadId === $activeThreadId && !firstLoadPending) {
+			activityChatJump.set(null);
+			jumpToChatReply(request.destination);
+		}
 	});
 	let focusSeen: boolean | undefined; // a changed Focus setting changes what a page holds: start over
 	$effect(() => {

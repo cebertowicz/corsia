@@ -1,5 +1,6 @@
 import type {
 	ActivityDocumentDetail,
+	ActivityChatDetail,
 	ActivityKind,
 	ActivityQueueItem,
 	ActivityReviewDetail,
@@ -15,6 +16,7 @@ export const KIND_LABEL: Record<ActivityKind, string> = {
 	task: 'Task',
 	document: 'Document',
 	message: 'Message',
+	chat: 'Chat',
 	draft: 'Draft',
 };
 
@@ -22,7 +24,7 @@ export const KIND_LABEL: Record<ActivityKind, string> = {
 export type ActivityTab = 'tasks' | 'notifications';
 export const EMPTY_LINE: Record<ActivityTab, string> = { tasks: 'Nothing needs you.', notifications: 'No unread replies.' };
 export type DecisionDraft = { selected: string | null; picked: string[]; other: string };
-export const tabOf = (item: ActivityQueueItem): ActivityTab => (item.kind === 'document' ? 'notifications' : 'tasks');
+export const tabOf = (item: ActivityQueueItem): ActivityTab => (item.kind === 'document' || item.kind === 'chat' ? 'notifications' : 'tasks');
 
 /** "1 unread reply", "5 unread replies". */
 export const unreadRepliesLabel = (count: number) => `${count} unread repl${count === 1 ? 'y' : 'ies'}`;
@@ -160,6 +162,9 @@ export const taskOf = (item: ActivityQueueItem) =>
 	item.kind === 'task' ? (item.detail as ActivityTaskDetail) : null;
 export const reviewOf = (item: ActivityQueueItem) =>
 	item.kind === 'review' || item.kind === 'draft' ? (item.detail as ActivityReviewDetail) : null;
+export const chatDetailOf = (item: ActivityQueueItem): ActivityChatDetail | null =>
+	item.kind === 'chat' ? item.detail as ActivityChatDetail : null;
+
 export function documentDetailOf(item: ActivityQueueItem): ActivityDocumentDetail | null {
 	if (item.kind !== 'document') return null;
 	const detail = item.detail as Partial<ActivityDocumentDetail>;

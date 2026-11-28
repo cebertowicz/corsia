@@ -14,6 +14,7 @@ from core.media_fit import IMAGE_LIMIT_PROVIDER_BY_HARNESS
 from core.thread_identity import root_visible_thread_ids
 import infra.held_replies as held_replies
 from infra.held_reply_messages import UNTITLED_CHAT
+from infra.thread_visibility import VISIBLE_THREAD_SQL
 from plans.attention_detail import HELD_REPLY_PRIORITY
 
 HELD_REPLY_RENDERER = "held-reply"
@@ -42,9 +43,7 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
             "SELECT t.id, t.title, t.project_id, p.name AS project_name FROM threads t "
             "LEFT JOIN projects p ON p.id=t.project_id "
             f"WHERE t.id IN ({','.join('?' for _ in visible_ids)}) AND t.user_id=? "
-            "AND t.purged_at IS NULL AND t.archived_at IS NULL "
-            "AND COALESCE(t.lifecycle_state,'active')!='archived' "
-            "AND COALESCE(p.status,'active')!='archived'",
+            f"AND {VISIBLE_THREAD_SQL}",
             (*visible_ids, user_id),
         )
     }

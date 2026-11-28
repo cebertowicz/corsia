@@ -1642,6 +1642,84 @@ describe('Activity on a phone', () => {
 		expect(listSource).toMatch(/\.link::after \{\n[^}]*height: var\(--touch-target\)/);
 	});
 
+	it('counts a chat once and advances after Done', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 4, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat, activityDocument('next')];
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [] }));
+		alsoServe('/notifications/read', () => { notes = notes.filter(item => item.key !== chat.key); return respond(200, {}); });
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications, 2');
+		expect(rows()[0].textContent).toContain('Chat · 4 unread replies');
+		rows()[0].click(); await settle();
+		buttonNamed('Done')!.click(); await settle();
+		expect(tabNamed('notifications').getAttribute('aria-label')).toBe('Notifications, 1');
+		expect(openRow()?.textContent).toContain('next');
+		expect(emit).toHaveBeenCalledWith('activity', 'acted', { kind: 'chat', action: 'done', outcome: 'succeeded' });
+	});
+
+	it('marks the latest displayed chat reply when another arrives while open', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 1, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat];
+		let answer = 'First answer';
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [{ id: 'm', seq: 1, content: 'text', created_at: '2026-11-25T12:00:00Z',
+			chat_comments: [{ id: 'c', cid: 'c1.1', user_message_id: 'u', from_off: 0, to_off: 0, quote: '', note: 'Question', created_at: '2026-11-25T12:00:00Z',
+				answers: [{ author_kind: 'agent', text: answer, created_at: '2026-11-25T12:00:00Z', unread: true }] }] }] }));
+		let read: unknown;
+		alsoServe('/notifications/read', (init) => { read = JSON.parse(String(init?.body)); notes = []; return respond(200, {}); });
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		rows()[0].click(); await settle();
+		expect(pane().textContent).toContain('First answer');
+		answer = 'Later answer';
+		notes = [{ ...chat, detail: { thread_id: 't', unread: 2, through: '2026-11-25T12:01:00Z' } }];
+		listeners.get('chat_comments_changed')?.(); await settle();
+		await vi.waitFor(() => expect(pane().textContent).toContain('Later answer'));
+		buttonNamed('Done')!.click(); await settle();
+		expect(read).toEqual({ documents: [], chats: [{ thread_id: 't', through: '2026-11-25T12:01:00Z' }] });
+		expect(rows()).toHaveLength(0);
+	});
+
+	it('closing a desktop chat opens the next row, or the row above at the end, without marking it read', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 1, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat, activityDocument('next')];
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [] }));
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		rows()[0].click(); await settle();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Close Planning"]')!.click(); await settle();
+		expect(openRow()?.textContent).toContain('next');
+		expect(rows()).toHaveLength(2);
+		notes = [activityDocument('next'), chat];
+		listeners.get('chat_comments_changed')?.(); await settle();
+		rows()[1].click(); await settle();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Close Planning"]')!.click(); await settle();
+		expect(openRow()?.textContent).toContain('next');
+		expect(rows()).toHaveLength(2);
+	});
+
+	it('closing the only chat leaves the pane empty without claiming the list is empty', async () => {
+		const chat: ActivityQueueItem = { ...activityDocument('chat-source'), key: 'chat-reply:t', external_id: 'chat-reply:t',
+			renderer: 'chat', kind: 'chat', title: 'Planning', open: null,
+			detail: { thread_id: 't', unread: 1, through: '2026-11-25T12:00:00Z' } };
+		notes = [chat];
+		alsoServe('/notifications/chats/', () => respond(200, { messages: [] }));
+		render(); await settle();
+		tabNamed('notifications').click(); await settle();
+		rows()[0].click(); await settle();
+		host.querySelector<HTMLButtonElement>('button[aria-label="Close Planning"]')!.click(); await settle();
+		listeners.get('chat_comments_changed')?.(); await settle();
+		expect(rows()).toHaveLength(1);
+		expect(openRow()).toBeFalsy();
+		expect(pane().textContent).not.toContain('No unread replies.');
+	});
+
 	it('keeps an opened document’s Done at least 44 px high on a phone, on the bar’s own line', () => {
 		expect(documentBarSource).toContain(':global(.activity.phone) .doc-done :global(.btn) { min-height: var(--touch-target); }');
 		expect(documentBarSource).toMatch(/<div class="doc-line">\s*<span class="doc-at"[^>]*>\{label\}<\/span>\s*<span class="doc-done">/);

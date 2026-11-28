@@ -43,7 +43,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Phone header sits closer to the top of the screen when CORSIA is added to the Home Screen.
 - Pressing a reply in the comment you are already reading no longer scrolls the document back to the comment's text; in a long thread the page used to jump when you pressed a later reply. Go to text still takes you to the text, and in a phone's comment list a press inside the comment you are reading now leaves the list and the document where they are.
 - Plan task details now show the reading of the goal the task works under and what done means.
-- Replies to your chat comments stay in their chat, where the new-replies button takes you to them; Activity lists replies in documents.
+- Replies to your chat comments appear alongside document replies in Activity, grouped by chat; you can read them there, mark them read, or go to the message.
 - Revoke host access in its drawer is now a plain button; before, it was red.
 - Skills brought over from another agent tool are no longer left out because their example code shows a placeholder such as YOUR_API_KEY or $API_KEY.
 - Starting CORSIA no longer logs an error for each project whose folder no longer exists.
