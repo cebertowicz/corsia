@@ -347,7 +347,7 @@ describe('Header glass layers', () => {
 	});
 
 	it('lets the installed iOS app draw the page under a translucent status bar', () => {
-		// With `default` iOS draws an opaque white bar above the page, white in dark mode too.
+		// With `default` iOS draws an opaque bar above the page: white in light mode, the page's own dark colour in dark mode.
 		expect(appHtml).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />');
 	});
 

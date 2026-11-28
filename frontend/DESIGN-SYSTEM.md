@@ -683,8 +683,8 @@ Two compensating patterns:
    the area behind the status bar seamless with the page. The installed
    iOS app uses `apple-mobile-web-app-status-bar-style=black-translucent`,
    so the page runs under the clock and content scrolls up behind it
-   (`default` draws an opaque white bar above the page, white in dark mode
-   too). In standalone mode `100vh` is the full screen height while the
+   (`default` draws an opaque bar above the page: white in light mode, the
+   page's own dark colour in dark mode). In standalone mode `100vh` is the full screen height while the
    layout viewport can be shorter, so the shell sizes to `100dvh` under
    `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
    iOS 27 draws its own soft blur over the top of the page, down to about
