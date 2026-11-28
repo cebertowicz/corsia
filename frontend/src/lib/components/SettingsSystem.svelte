@@ -14,6 +14,8 @@
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsDevices from './SettingsDevices.svelte';
+	import SettingsUrgentPush from './SettingsUrgentPush.svelte';
+	import SettingsConfirm from './SettingsConfirm.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 	import { connectOpen } from '$lib/stores/remoteConnect';
@@ -183,7 +185,7 @@
 		{/snippet}
 	</SettingsRow>
 	{#if remoteName}
-		<SettingsRow name="Computer" sub={`Connected to ${remoteName}`} wrap>
+		<SettingsRow name="Computer" sub={`Connected to ${remoteName}`} wrap confirming={accountConfirm === 'disconnect'}>
 			{#snippet actions()}
 				{#if accountConfirm !== 'disconnect'}
 					<Button variant="ghost" size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
@@ -195,10 +197,10 @@
 		</SettingsRow>
 		<!-- Three sentences get their own wrapping block under the row, never the row's non-wrapping actions. -->
 		{#if accountConfirm === 'disconnect'}
-			<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
-				<span class="confirm-text">Disconnect from {remoteName}?</span>
-				<span class="confirm-detail">{shell?.mode === 'remote' && shell.localConfigured ? `Your work stays on ${remoteName}. CORSIA on this computer starts again, with your work here as you left it.` : `Your work stays on ${remoteName}. This app signs out and returns to setup.`}</span>
-			</div>
+			<SettingsConfirm
+				question="Disconnect from {remoteName}?"
+				detail={shell?.mode === 'remote' && shell.localConfigured ? `Your work stays on ${remoteName}. CORSIA on this computer starts again, with your work here as you left it.` : `Your work stays on ${remoteName}. This app signs out and returns to setup.`}
+			/>
 		{/if}
 	{:else if shell && deviceConnectionsEnabled === false}
 		<SettingsRow name="Computer" sub="This computer">
@@ -210,6 +212,8 @@
 <ConfirmDialog open={confirmConnect} title="Connect to another computer?" description="CORSIA on this computer stops while you're connected. Its agents and scheduled work wait until you come back, and nothing here is deleted. To come back, choose Disconnect in Settings › System." confirmLabel="Connect" cancelLabel="Cancel" onConfirm={() => { confirmConnect = false; connectOpen.set(true); }} onCancel={() => confirmConnect = false} />
 
 <SettingsDevices onConnectionState={(enabled) => deviceConnectionsEnabled = enabled} />
+
+<SettingsUrgentPush />
 
 {#if systemStatus?.memory}
 	<SettingsGroup label="Resources">
@@ -231,6 +235,4 @@
 	/* Restart progress is announced on its own; the row's second line shows it. */
 	.live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.confirm-text { font-size: var(--text-caption); color: var(--text-secondary); }
-	.confirm-block { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); overflow-wrap: anywhere; }
-	.confirm-detail { font-size: var(--text-caption); color: var(--text-tertiary); }
 </style>

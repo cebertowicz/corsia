@@ -17,6 +17,7 @@
 		expanded,
 		stackActions = false,
 		wrapName = false,
+		confirming = false,
 		mark = null,
 		menuItems = [],
 		onOpen,
@@ -43,6 +44,8 @@
 		stackActions?: boolean;
 		/** An expanded title can wrap to preserve its complete identity. */
 		wrapName?: boolean;
+		/** The actions are a confirm and its Cancel: a touch target of space between them, so a tap meant for one cannot land on the other. */
+		confirming?: boolean;
 		/** A project's colour, drawn as its §0.1 project mark before the name. */
 		mark?: string | null;
 		menuItems?: MenuItem[];
@@ -78,7 +81,7 @@
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div class="face" tabindex={menuItems.length ? 0 : undefined}>{@render content()}</div>
 	{/if}
-	{#if actions}<span class="actions">{@render actions()}</span>{/if}
+	{#if actions}<span class="actions" class:confirming>{@render actions()}</span>{/if}
 	{#if chevron}
 		<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
 	{/if}
@@ -128,7 +131,7 @@
 	.sub { font-size: var(--text-caption); color: var(--text-tertiary); }
 	.sub.wrap { white-space: normal; line-height: 1.45; }
 	/* A drawn second line carries a status and a place; it wraps rather than hiding either. */
-	.sub.multi { white-space: normal; overflow-wrap: anywhere; }
+	.sub.multi { white-space: normal; overflow-wrap: anywhere; overflow: visible; }
 	.sub.failed { color: var(--red-text); }
 	.sub.attention { color: var(--amber-text); }
 	.trailing { flex-shrink: 0; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
@@ -139,5 +142,6 @@
 	   text action keeps its symmetric hit area, so its fill runs out to the row edge instead. */
 	/* Never wider than the row: a control that sizes to its content (a select holding a long model name) is cut to the row instead of widening the pane. */
 	.actions { flex-shrink: 0; min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-2); }
+	.actions.confirming { gap: var(--touch-target); }
 	.actions > :global(.btn.ghost:last-child) { margin-right: calc(-1 * var(--button-pad-x-sm)); }
 </style>

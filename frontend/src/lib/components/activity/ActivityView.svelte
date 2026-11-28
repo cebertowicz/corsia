@@ -136,6 +136,13 @@
 				tab = 'tasks';
 				moveTo(wanted.key);
 				if ($isMobile) phoneOpen = true;
+				goneNotice = false;
+			} else if (request?.externalId) {
+				// A notification named a to-do that is gone: Activity opens on its list, nothing selected, and says so.
+				arrived = true;
+				tab = 'tasks';
+				openKey = null;
+				goneNotice = true;
 			}
 			if (!arrived) {
 				arrived = true;
@@ -148,7 +155,7 @@
 					openKey = matches[0].key;
 					kept = null;
 				} else kept = lastOpen;
-			} else if (!openKey && lists[tab].length) openKey = lists[tab][0].key;
+			} else if (!openKey && lists[tab].length && !goneNotice) openKey = lists[tab][0].key;
 			else if (openKey && keys.includes(openKey)) kept = null;
 			const keptFor = (list: ActivityTab) => (kept && tabOf(kept) === list ? kept : null);
 			seen = {
@@ -173,6 +180,9 @@
 		const active = typeof document === 'undefined' ? null : document.activeElement;
 		if (!active || active === document.body) list?.focusOpen();
 	}
+
+	/** A tapped notification named a to-do that no longer exists: the list says so until the person opens a row. */
+	let goneNotice = $state(false);
 
 	/** Opening another row is moving on: a kept item is let go. */
 	function moveTo(key: string) {
@@ -228,6 +238,7 @@
 
 	function open(key: string) {
 		markAllFailed = false;
+		goneNotice = false;
 		const kind = [...tasks, ...notifications].find((item) => item.key === key)?.kind;
 		moveTo(key);
 		if (get(isMobile)) phoneOpen = true;
@@ -340,6 +351,7 @@
 				{dismissFailed}
 				{markingAll}
 				markAllFailed={markAllFailed ? 'Couldn’t mark these read. Try again.' : null}
+				notice={goneNotice ? 'That’s no longer waiting on you.' : null}
 				{loading}
 				failure={store.status === 'error' ? store.failure : null}
 				stale={store.status === 'ready' && store.failure !== null}
@@ -361,7 +373,7 @@
 				<ActivityItemPane item={openItem} {workspaceKey} phone={$isMobile} showBrowser={!$isMobile || phoneOpen} draft={decisionDrafts.get(mountedKey)} onDraft={(draft) => decisionDrafts.set(mountedKey, draft)} onClearDraft={() => decisionDrafts.delete(mountedKey)} allRead={allReadKey !== null} stale={$isMobile && phoneOpen && store.failure !== null} noLonger={openGone && kept?.kind !== 'document'} onActed={() => acted(mountedInstance)} onKeep={() => { if (mountedInstance === paneInstance) { kept = openItem; refusedKeep = true; } }} onOpenChat={openChat} />
 			{/key}
 		{:else if !loading && store.status === 'ready'}
-			<div class="nothing">{EMPTY_LINE[tab]}</div>
+			<div class="nothing">{(tab === 'tasks' ? tasks : notifications).length ? 'Choose one to open it.' : EMPTY_LINE[tab]}</div>
 		{/if}
 	</section>
 </div>

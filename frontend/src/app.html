@@ -62,7 +62,11 @@
 	<script>
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.getRegistrations().then(regs => {
-				regs.forEach(r => r.unregister());
+				// The push worker (R17) is the one registration that stays; every other worker is removed.
+				regs.forEach(r => {
+					const worker = r.active || r.waiting || r.installing;
+					if (!worker || !worker.scriptURL.endsWith('/push-sw.js')) r.unregister();
+				});
 			});
 		}
 	</script>

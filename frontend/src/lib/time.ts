@@ -60,8 +60,8 @@ export function bucketOf(iso: string, now: Date = new Date()): TimeBucket {
 export function formatMoment(
 	at: Date,
 	now: Date = new Date(),
-	{ zone = false, clock = false, plain = false, compact = false, absolute = false, locales = [] }: {
-		zone?: boolean; clock?: boolean; plain?: boolean; compact?: boolean; absolute?: boolean; locales?: Intl.LocalesArgument;
+	{ zone = false, clock = false, plain = false, compact = false, absolute = false, dateOnly = false, locales = [] }: {
+		zone?: boolean; clock?: boolean; plain?: boolean; compact?: boolean; absolute?: boolean; dateOnly?: boolean; locales?: Intl.LocalesArgument;
 	} = {},
 ): string {
 	if (Number.isNaN(at.getTime())) return '';
@@ -71,6 +71,11 @@ export function formatMoment(
 	const time = at.toLocaleTimeString(locales, {
 		hour: 'numeric', minute: '2-digit', ...(zone ? { timeZoneName: 'short' as const } : {}),
 	});
+	// A calendar date only, never relative: "Nov 24", with the year when it is not this year.
+	if (dateOnly) {
+		const year = at.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' as const };
+		return at.toLocaleDateString(locales, { month: 'short', day: 'numeric', ...year });
+	}
 	// A time stored in text never uses today/yesterday, which stop being true.
 	if (absolute) {
 		const year = at.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' as const };

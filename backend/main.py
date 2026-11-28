@@ -300,7 +300,7 @@ async def serve_frontend(path: str):
         headers = {}
         if "/_app/immutable/" in f"/{path}":
             headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif path in ("sw.js", "manifest.json"):
+        elif path in ("sw.js", "push-sw.js", "manifest.json"):
             headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             if path == "sw.js":
                 # Clear only HTTP/Cache-API entries; cookies/storage must survive SW updates.

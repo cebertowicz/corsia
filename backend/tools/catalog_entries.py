@@ -271,6 +271,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Run one Google Workspace CLI (gws) command on a connected Google account: Docs, Sheets, Drive and Calendar",
         activity="Using Google Workspace",
     ),
+    "urgent_push": _Entry(
+        "notifications", status="active", authority="corsia-agent", serious_effect=True,
+        summary="Send the person one urgent push to their phone or browser; only the CORSIA agent can",
+        activity="Sending urgent push",
+    ),
     "plan_read": _Entry(
         "plans", status="substrate", authority="plan-read", core=True,
         activity="Reading plan",

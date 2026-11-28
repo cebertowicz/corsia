@@ -24,6 +24,7 @@
 		dismissFailed = {},
 		markingAll = false,
 		markAllFailed = null,
+		notice = null,
 		loading = false,
 		failure = null,
 		stale = false,
@@ -48,6 +49,8 @@
 		dismissFailed?: Record<string, string>;
 		markingAll?: boolean;
 		markAllFailed?: string | null;
+		/** A passing line above the rows: a tapped notification's to-do is gone. */
+		notice?: string | null;
 		loading?: boolean;
 		/** Why the first read failed: 0 when it never reached the server, else the status the server answered. */
 		failure?: number | null;
@@ -147,6 +150,7 @@
 	</div>
 	<div class="panel" id="activity-panel" role="tabpanel" aria-labelledby="activity-tab-{tab}">
 		{#if stale}<p class="by" role="status">Showing last known items.</p>{/if}
+		{#if notice}<p class="by notice" role="status">{notice}</p>{/if}
 		{#if failure !== null}
 			<div class="empty" role="alert">
 				<b>Activity couldn’t load.</b>

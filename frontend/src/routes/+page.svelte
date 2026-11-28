@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { watchActivityOpenRequests } from '$lib/stores/activityOpen';
+	import { listenForOpenMessages, openActivityFromAddress } from '$lib/stores/activityAddress';
+	import { startHereSignal } from '$lib/ws/hereSignal';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
 	import { threads, coordinationThreads, activeThreadId, activeThread, draftAccountId, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
@@ -418,6 +420,9 @@
 	}
 
 	onMount(() => {
+		openActivityFromAddress();
+		startHereSignal();
+		const stopOpenMessages = listenForOpenMessages();
 		const stopConnectedAppLinks = listenForConnectedAppLinks(openSettings);
 		const stop = registerHomeLifecycle({
 			token: () => $token,
@@ -436,7 +441,7 @@
 			on,
 			connect,
 		});
-		return () => { stopConnectedAppLinks(); stop(); };
+		return () => { stopConnectedAppLinks(); stopOpenMessages(); stop(); };
 	});
 </script>
 
