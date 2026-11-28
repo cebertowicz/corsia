@@ -66,6 +66,15 @@ ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_bulk_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_bulk_ms DOUBLE;
+CREATE TABLE IF NOT EXISTS worker_wait_daily (
+    day DATE NOT NULL,
+    outcome VARCHAR NOT NULL,
+    count BIGINT NOT NULL,
+    sum_ms DOUBLE NOT NULL,
+    max_ms DOUBLE NOT NULL,
+    buckets INTEGER[] NOT NULL,
+    PRIMARY KEY (day, outcome)
+);
 -- Browser-side request timing (see infra/client_request_timing.py): one row per day, engine, method,
 -- route template and measure. A request whose browser left a measure unfilled adds no row for it.
 CREATE TABLE IF NOT EXISTS client_request_timing_daily (

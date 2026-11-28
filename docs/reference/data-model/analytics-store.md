@@ -76,3 +76,18 @@ Source: `backend/infra/analytics_db.py`.
 | `buckets` | INTEGER[] | No | Yes | — | — |
 
 Indexes: None.
+
+### `worker_wait_daily`
+
+Source: `backend/infra/analytics_db.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `day` | DATE | Yes | Yes | — | — |
+| `outcome` | VARCHAR | Yes | Yes | — | — |
+| `count` | BIGINT | No | Yes | — | — |
+| `sum_ms` | DOUBLE | No | Yes | — | — |
+| `max_ms` | DOUBLE | No | Yes | — | — |
+| `buckets` | INTEGER[] | No | Yes | — | — |
+
+Indexes: None.

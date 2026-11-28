@@ -303,6 +303,12 @@ async def _start_otlp_listener() -> None:
     await listener.start()
 
 
+async def _shutdown_mcp_sessions(logger):
+    from tools.mcp_runtime import stop_mcp_runtime
+
+    return await _run_cleanup_owner("MCP sessions", stop_mcp_runtime(), logger)
+
+
 async def _shutdown_runtime_services(
     startup_tasks: list[asyncio.Task | None],
 ) -> None:
@@ -310,9 +316,10 @@ async def _shutdown_runtime_services(
     from loguru import logger as _log_shutdown
 
     stop_watching_omlx()  # an oMLX exit during shutdown is never a crash
-    pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
-    from app_shutdown_runtime import shutdown_listeners
+    from app_shutdown_runtime import shutdown_agent_pool, shutdown_listeners
 
+    pool_failure, pending_cancel = await shutdown_agent_pool(_log_shutdown, None, _run_cleanup_owner)
+    pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown) or pending_cancel
     (devices_failure, otlp_failure), pending_cancel = await shutdown_listeners(
         _log_shutdown, pending_cancel, _run_cleanup_owner,
     )
@@ -333,11 +340,7 @@ async def _shutdown_runtime_services(
     harness_failure, harness_cancel = await _shutdown_harnesses(_log_shutdown)
     pending_cancel = pending_cancel or harness_cancel
 
-    from tools.mcp_runtime import stop_mcp_runtime
-
-    mcp_failure, mcp_cancel = await _run_cleanup_owner(
-        "MCP sessions", stop_mcp_runtime(), _log_shutdown,
-    )
+    mcp_failure, mcp_cancel = await _shutdown_mcp_sessions(_log_shutdown)
     pending_cancel = pending_cancel or mcp_cancel
 
     pending_cancel = await fold_idle_checkpoint_shutdown(_log_shutdown, pending_cancel)
@@ -374,6 +377,7 @@ async def _shutdown_runtime_services(
             fork_failure, fork_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
             process_failure, host_access_failure, devices_failure, otlp_failure, mcp_failure, handoff_failure,
+            pool_failure,
         ),
         process_failure=process_failure,
         pending_cancel=pending_cancel,
@@ -381,5 +385,6 @@ async def _shutdown_runtime_services(
     )
 
     from app_shutdown_storage import finish_storage_shutdown
-    await finish_storage_shutdown(_log_shutdown, pending_cancel,
-                                  run_cleanup_owner=_run_cleanup_owner, shutdown_pool=shutdown_pool)
+    await finish_storage_shutdown(
+        _log_shutdown, pending_cancel, run_cleanup_owner=_run_cleanup_owner, shutdown_pool=shutdown_pool,
+    )
