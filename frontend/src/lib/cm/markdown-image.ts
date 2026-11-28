@@ -5,6 +5,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
 import { placeTop } from '$lib/documentReadingPlace';
 import { FAILED_IMAGE, imageFailureReason, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE } from '$lib/imageFailure';
+import { markPortraitOnLoad } from './markdown-image-portrait';
 import { CELL_EDITOR } from './widget-cell-state';
 
 export { FAILED_IMAGE, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE };
@@ -74,6 +75,7 @@ export function drawImage(wrap: HTMLElement, alt: string, src: string): HTMLElem
 	const img = document.createElement('img');
 	img.alt = alt;
 	img.decoding = 'async';
+	markPortraitOnLoad(wrap, img);
 	img.addEventListener('error', async () => {
 		const reason = await imageFailureReason(src);
 		const note = document.createElement('div');

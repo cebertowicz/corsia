@@ -3,6 +3,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
 import { docScrollMargin, docTheme } from './theme';
+import { PORTRAIT_CAP_PX, PORTRAIT_CAP_SVH } from './markdown-image-portrait';
 
 function mountedCss(): string {
 	const sheets = [...document.styleSheets, ...(document.adoptedStyleSheets ?? [])];
@@ -11,6 +12,14 @@ function mountedCss(): string {
 }
 
 describe('document editor theme', () => {
+	it('holds a portrait image to the height the two shared cap numbers give, and no other image', () => {
+		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docTheme] }), parent: document.body });
+		const css = mountedCss().replace(/\s+/g, ' ');
+		view.destroy();
+		expect(css).toMatch(new RegExp(`\\.cm-md-image-portrait img ?\\{[^}]*max-height: ?min\\(${PORTRAIT_CAP_SVH}svh, ${PORTRAIT_CAP_PX}px\\)`));
+		expect(css).not.toMatch(/\.cm-md-image img ?\{[^}]*max-height/);
+	});
+
 	it('turns transitions off inside the editor under reduced motion', () => {
 		// CodeMirror measures in the task it writes in; a transition on every
 		// property, however short, leaves the old geometry in the layout.
