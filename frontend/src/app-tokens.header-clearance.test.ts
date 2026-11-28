@@ -41,7 +41,7 @@ const topRowSurfaces: [string, string][] = [
 	['lib/components/CommandPalette.svelte', 'padding-top: max(var(--safe-top), calc(var(--top-row-centre) - var(--space-7)));'],
 	['lib/components/Lightbox.svelte', 'top: max(var(--safe-top), calc(var(--top-row-centre) - var(--space-7)));'],
 	['lib/components/ui/Modal.svelte', '--modal-pad-top:    max(8px, var(--safe-top), calc(var(--top-row-centre) - 31px));'],
-	['lib/components/VersionOverlay.svelte', 'min(calc(var(--top-row-centre) * 100), calc(var(--header-bottom) + var(--space-px-2)))'],
+	['lib/components/VersionOverlay.svelte', 'top: max(2 * var(--space-px-2), calc(max(var(--top-row-clearance), var(--top-row-centre)) - 13 * var(--space-px-2)));'],
 ];
 
 describe('top-row centre under a top inset', () => {

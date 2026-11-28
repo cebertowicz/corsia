@@ -340,7 +340,7 @@
 			   top of the page down to about safe-top + 34px; the 18px row is sharp from there on, and
 			   fully sharp at this centre. The padding centres the row box on it, and the fade stops
 			   below start from it. */
-			--h-row-centre: max(var(--top-row-clearance), var(--top-row-centre));
+			--h-row-centre: max(var(--top-row-clearance), var(--top-row-centre)); --h-fade: 76px;
 			padding-top: calc(2 * var(--h-row-centre) - var(--header-bottom));
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
@@ -354,27 +354,27 @@
 			display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-1);
 		}
 		.h-leading { display: contents; }
-		/* One frosted surface from the top of the screen to the header bottom, with a progressive
-		   fade. WebKit masks the blurred backdrop too, so one masked layer lets the sharp
-		   transcript show through where it fades. Two layers instead: the full blur and tint
-		   (::before) fade out from the row centre to 6px above the bottom; a light blur over them
-		   (::after) runs 8px further, smoothing that fade and ending at the bottom edge. The masks'
-		   opaque stop is currentColor, the header's opaque --text-primary; only its alpha counts. */
+		/* One frosted surface from the top of the screen, fully frosted down to the row centre, then
+		   fading out over --h-fade with no edge: the layers run below the bar so text scrolling under
+		   it fades into the frost, not to a line. ::before is the full blur and tint through eased
+		   stops; ::after a light blur smoothing the hand-over. A mask's opaque stop is currentColor. */
 		.shell-header::before {
-			background-image: linear-gradient(
-				180deg,
-				color-mix(in srgb, var(--header-top-base) 72%, transparent) var(--h-row-centre),
-				transparent 100%
-			);
-			-webkit-mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));
-			mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));
+			inset: 0 0 calc(var(--header-bottom) - var(--h-row-centre) - var(--h-fade)) 0;
+			background-image: linear-gradient(180deg,
+				color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--h-row-centre) + 6px), color-mix(in srgb, var(--header-top-base) 56%, transparent) calc(var(--h-row-centre) + 22px),
+				color-mix(in srgb, var(--header-top-base) 32%, transparent) calc(var(--h-row-centre) + 40px), color-mix(in srgb, var(--header-top-base) 12%, transparent) calc(var(--h-row-centre) + 58px),
+				transparent calc(var(--h-row-centre) + var(--h-fade)));
+			--h-mask: linear-gradient(180deg, currentColor calc(var(--h-row-centre) + 6px),
+				color-mix(in srgb, currentColor 88%, transparent) calc(var(--h-row-centre) + 20px), color-mix(in srgb, currentColor 62%, transparent) calc(var(--h-row-centre) + 34px),
+				color-mix(in srgb, currentColor 34%, transparent) calc(var(--h-row-centre) + 48px), color-mix(in srgb, currentColor 12%, transparent) calc(var(--h-row-centre) + 62px), transparent calc(var(--h-row-centre) + var(--h-fade)));
+			-webkit-mask-image: var(--h-mask); mask-image: var(--h-mask);
 		}
 		.shell-header::after {
-			content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-			backdrop-filter: var(--glass-blur-soft);
-			-webkit-backdrop-filter: var(--glass-blur-soft);
-			-webkit-mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
-			mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);
+			content: ''; position: absolute; z-index: -1; pointer-events: none;
+			inset: 0 0 calc(var(--header-bottom) - var(--h-row-centre) - var(--h-fade)) 0;
+			backdrop-filter: var(--glass-blur-soft); -webkit-backdrop-filter: var(--glass-blur-soft);
+			--h-mask: linear-gradient(180deg, currentColor calc(var(--h-row-centre) + 20px), transparent calc(var(--h-row-centre) + var(--h-fade)));
+			-webkit-mask-image: var(--h-mask); mask-image: var(--h-mask);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }
@@ -395,6 +395,6 @@
 	}
 	/* With reduced transparency the blurs are none (app.css), so the phone bar is solid. */
 	@media (max-width: 768px) and (prefers-reduced-transparency: reduce) {
-		.shell-header::before { background-image: none; background-color: var(--header-top-base); -webkit-mask-image: none; mask-image: none; }
+		.shell-header::before { inset: 0; background-image: none; background-color: var(--header-top-base); -webkit-mask-image: none; mask-image: none; }
 	}
 </style>

@@ -351,18 +351,27 @@ describe('Header glass layers', () => {
 		expect(appHtml).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />');
 	});
 
-	it('fades the phone header out over two stacked blur layers', () => {
+	it('fades the phone header out over two stacked blur layers that run below the bar', () => {
 		// WebKit masks the blurred backdrop too, so one masked layer shows the sharp transcript
-		// where it fades. The full blur and tint fade from the row centre to 6px above the bottom;
-		// a light blur on top runs to the bottom edge and smooths that fade.
+		// where it fades. Both layers end --h-fade (76px) below the row centre, past the bar, so
+		// text scrolling under the bar fades into the frost with no edge. The full blur and tint
+		// step down through eased stops; a light blur on top runs to the same end.
+		expect(rule(phone, '.shell-header')).toContain('--h-fade: 76px;');
 		const full = rule(phone, '.shell-header::before');
-		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 72%, transparent) var(--h-row-centre)');
-		expect(full).toContain('-webkit-mask-image: linear-gradient(180deg, currentColor var(--h-row-centre), transparent calc(100% - 6px));');
-		expect(full).toMatch(/\n\t\t\tmask-image: linear-gradient\(180deg, currentColor var\(--h-row-centre\), transparent calc\(100% - 6px\)\);/);
+		const reach = 'inset: 0 0 calc(var(--header-bottom) - var(--h-row-centre) - var(--h-fade)) 0;';
+		expect(full).toContain(reach);
+		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 72%, transparent) calc(var(--h-row-centre) + 6px)');
+		expect(full).toContain('color-mix(in srgb, var(--header-top-base) 12%, transparent) calc(var(--h-row-centre) + 58px)');
+		expect(full).toContain('transparent calc(var(--h-row-centre) + var(--h-fade))');
+		expect(full).toContain('-webkit-mask-image: var(--h-mask); mask-image: var(--h-mask);');
+		expect(full).toContain('--h-mask: linear-gradient(');
+		expect(full).toContain('color-mix(in srgb, currentColor 62%, transparent) calc(var(--h-row-centre) + 34px)');
 		const soft = rule(phone, '.shell-header::after');
+		expect(soft).toContain(reach);
 		expect(soft).toContain('backdrop-filter: var(--glass-blur-soft);');
 		expect(soft).toContain('-webkit-backdrop-filter: var(--glass-blur-soft);');
-		expect(soft).toContain('mask-image: linear-gradient(180deg, currentColor calc(100% - 14px), transparent 100%);');
+		expect(soft).toContain('--h-mask: linear-gradient(180deg, currentColor calc(var(--h-row-centre) + 20px), transparent calc(var(--h-row-centre) + var(--h-fade)));');
+		expect(soft).toContain('-webkit-mask-image: var(--h-mask); mask-image: var(--h-mask);');
 		expect(soft).toContain('pointer-events: none;');
 	});
 
@@ -383,6 +392,8 @@ describe('Header glass layers', () => {
 		expect(at).toBeGreaterThan(-1);
 		const solid = rule(headerSource.slice(at), '.shell-header::before');
 		expect(solid).toContain('background-color: var(--header-top-base);');
+		// The solid bar ends at the bar's bottom; the fade below it exists only with the blur.
+		expect(solid).toContain('inset: 0;');
 		expect(solid).toContain('background-image: none;');
 		expect(solid).toContain('-webkit-mask-image: none;');
 	});

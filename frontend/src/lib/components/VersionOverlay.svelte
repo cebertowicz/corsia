@@ -58,10 +58,7 @@
 <style>
 	.version-overlay {
 		position: fixed;
-		/* On a phone with a top inset the system blurs the page above the header row and the row holds
-		   the title, so the badge sits just below the header. The min() keeps that term 0 wherever
-		   the shared --top-row-centre is 0 (a tab, a wider window, desktop). */
-		top: max(4px, calc(var(--safe-top) + 2px), min(calc(var(--top-row-centre) * 100), calc(var(--header-bottom) + var(--space-px-2))));
+		top: max(2 * var(--space-px-2), calc(var(--safe-top) + var(--space-px-2)));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: 11;
@@ -71,12 +68,21 @@
 		line-height: 1;
 		letter-spacing: -0.01em;
 		color: var(--text-secondary);
-		padding: 2px 8px;
+		padding: var(--space-px-2) 8px;
 		white-space: nowrap;
 		max-width: calc(100vw - 32px);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+	}
+	/* On a phone the header row holds the title and its icons and the transcript runs under the
+	   header, so the badge sits in the free band above the row: 26px above the row centre, about
+	   2px above the row's top. That is below the clock and the camera island in an installed app,
+	   and clear of the title, the icons and the transcript there and in a tab. */
+	@media (max-width: 768px) {
+		.version-overlay {
+			top: max(2 * var(--space-px-2), calc(max(var(--top-row-clearance), var(--top-row-centre)) - 13 * var(--space-px-2)));
+		}
 	}
 	.version-overlay.stale {
 		color: var(--amber);
