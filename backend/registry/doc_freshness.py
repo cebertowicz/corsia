@@ -127,22 +127,42 @@ def freshness(
     }
 
 
+# The one source for the line a read puts in front of a shared document: what it says, and the grammar that
+# recognises it again (`strip_read_banner`), so a write can drop a copy of it and cannot drift from the read.
+READ_BANNER_OPEN = "[Shared document · "
+_PHRASES = {
+    "archived": "Owner: {owner} · archived",
+    "as_of": "Owner: {owner} · as of {date}",
+    "never_verified": "Owner: {owner} · never verified",
+    "verified": "Owner: {owner} · verified {age} {unit} ago",
+    "overdue": "Owner: {owner} · verified {age} {unit} ago · review overdue",
+}
+_HINT = (
+    "Its owner clears this after checking it against current sources with "
+    '`artifact_update(artifact_id="{artifact_id}", mark_verified=true)`; '
+    "editing its Verified at header does not count."
+)
+# What each placeholder in the phrases above can be, for any owner, date, age or artifact. An owner never holds the
+# separator, so extra status text between the owner and the freshness words is not read as part of the owner.
+_FIELDS = {
+    "owner": r"[^\]\n·]+?", "date": r"\d{4}-\d{2}-\d{2}", "age": r"\d+", "unit": r"days?",
+    "artifact_id": r'[^"\n]+',
+}
+
+
 def format_freshness(value: Mapping[str, Any], owner_name: str) -> str:
     """Render the compact owner/freshness phrase shared by read surfaces."""
-    prefix = f"Owner: {owner_name}"
     state = value.get("state")
     if state == "archived":
-        return f"{prefix} · archived"
+        return _PHRASES["archived"].format(owner=owner_name)
     if state == "as_of":
-        return f"{prefix} · as of {value.get('verified_at')}"
+        return _PHRASES["as_of"].format(owner=owner_name, date=value.get("verified_at"))
     if state == "never_verified":
-        return f"{prefix} · never verified"
+        return _PHRASES["never_verified"].format(owner=owner_name)
     age = int(value.get("age_days") or 0)
     unit = "day" if age == 1 else "days"
-    phrase = f"{prefix} · verified {age} {unit} ago"
-    if state == "overdue":
-        phrase += " · review overdue"
-    return phrase
+    key = "overdue" if state == "overdue" else "verified"
+    return _PHRASES[key].format(owner=owner_name, age=age, unit=unit)
 
 
 def verification_hint(value: Mapping[str, Any], artifact_id: str) -> str | None:
@@ -153,11 +173,35 @@ def verification_hint(value: Mapping[str, Any], artifact_id: str) -> str | None:
     """
     if value.get("state") not in {"never_verified", "overdue"}:
         return None
-    return (
-        "Its owner clears this after checking it against current sources with "
-        f"`artifact_update(artifact_id=\"{artifact_id}\", mark_verified=true)`; "
-        "editing its Verified at header does not count."
-    )
+    return _HINT.format(artifact_id=artifact_id)
+
+
+def read_banner(phrase: str, hint: str | None) -> str:
+    """The line a read puts first for a shared document: the phrase in brackets, then the hint when there is one."""
+    banner = f"{READ_BANNER_OPEN}{phrase}]"
+    return f"{banner} {hint}" if hint else banner
+
+
+def _grammar(template: str) -> str:
+    """The pattern for the text a template can print, each placeholder standing for any value it can take."""
+    parts = re.split(r"(\{\w+\})", template)
+    return "".join(f"(?:{_FIELDS[part[1:-1]]})" if part.startswith("{") else re.escape(part) for part in parts)
+
+
+_READ_BANNER_LINE = re.compile(
+    re.escape(READ_BANNER_OPEN) + "(?:" + "|".join(_grammar(phrase) for phrase in _PHRASES.values()) + r")\]"
+    + "(?: " + _grammar(_HINT) + r")?(?:\r?\n|\Z)(?:[ \t]*\r?\n)?"
+)
+
+
+def strip_read_banner(text: str) -> str:
+    """Drop a first line that is a read's own banner, and one blank line after it, from text about to be written.
+
+    Only text the read could have printed matches (any owner, date, age or artifact, since a copy can come from an
+    older read). A first line with anything else in its brackets, and a banner anywhere after line 1, are kept as written.
+    """
+    match = _READ_BANNER_LINE.match(text)
+    return text[match.end():] if match else text
 
 
 def artifact_freshness(
