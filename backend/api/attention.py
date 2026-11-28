@@ -7,10 +7,11 @@ covered by backend tests while #921 decides whether raised rows receive a typed 
 from __future__ import annotations
 
 from dataclasses import asdict
+import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from api.attention_action_models import ClearBody, DisposeBody
 
 from infra.auth import authenticate, may_access_artifact, owns_thread, require_user
 from infra.database import get_db
@@ -218,16 +219,29 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     from infra.activity_ranking import apply_ranks
     from infra.activity_urgency import sort_key
 
+    total_start = time.perf_counter()
     if project_id:
         public.check_operator_project(project_id, public.PlanActor(None, user_id, None, kind='user'), db=db)
+    started = time.perf_counter()
     annotated = public.annotate_attention(_authorized_raised(None, user_id, db=db), db=db)
+    raised_ms = (time.perf_counter() - started) * 1000
+    started = time.perf_counter()
     rows = [shape(row) for row in _queue_for(user_id, db=db, raw=True, annotated=annotated)]
+    queue_ms = (time.perf_counter() - started) * 1000
+    plan_ms = documents_ms = dedupe_ms = 0.0
+    document_timings: dict = {}
     notifications: list[dict] = []
     if view == 'activity':
         from doceditor.activity_reply_rows import document_rows
+        started = time.perf_counter()
         projected = mark_activity_browser_steps(db, public.activity_plan_rows(db, user_id, annotated))
-        documents = document_rows(db, user_id)
+        plan_ms = (time.perf_counter() - started) * 1000
+        started = time.perf_counter()
+        documents = document_rows(db, user_id, timings=document_timings)
+        documents_ms = (time.perf_counter() - started) * 1000
+        started = time.perf_counter()
         rows.extend(public.dedupe_activity_comment_tasks(db, user_id, projected, documents))
+        dedupe_ms = (time.perf_counter() - started) * 1000
         # A reviewed document's replies ride on its review row; Approve ends the review and
         # the next read lists the document in Notifications.
         unread = {d['detail']['artifact_id']: d['detail']['unread'] for d in documents}
@@ -245,14 +259,20 @@ def activity_lists(db, user_id: str, *, project_id: str | None = None, view: str
     for row in notifications:
         row.pop('priority', None)
     rows.sort(key=sort_key)
+    started = time.perf_counter()
     scope, ranker = ranker_for(db, user_id, project_id)
     rows = apply_ranks(db, user_id, scope, rows)
+    rank_ms = (time.perf_counter() - started) * 1000
     for row in rows:
         row.pop('priority', None)
     counts = dict(Counter(row['kind'] for row in rows))
     ranked = sum(row['rank'] is not None for row in rows)
-    logger.info('activity queue scope={} kinds={} ranked={} unranked={} notifications={}',
-                scope, counts, ranked, len(rows)-ranked, len(notifications))
+    logger.info('activity queue scope={} kinds={} ranked={} unranked={} notifications={} '
+                'raised_ms={:.3f} queue_ms={:.3f} plan_ms={:.3f} documents_ms={:.3f} '
+                'dedupe_ms={:.3f} rank_ms={:.3f} total_ms={:.3f} document_timings={}',
+                scope, counts, ranked, len(rows)-ranked, len(notifications), raised_ms, queue_ms,
+                plan_ms, documents_ms, dedupe_ms, rank_ms, (time.perf_counter() - total_start) * 1000,
+                document_timings)
     return rows, notifications, ranker, scope
 
 
@@ -270,7 +290,11 @@ def _queue_response(user_id: str, project_id: str | None, view: str | None):
             # Document rows take the page's cut before their title read: a poll pays at
             # most one bounded head read per returned row, none for rows the cut drops.
             from doceditor.activity_reply_rows import resolve_row_titles
+            started = time.perf_counter()
             resolve_row_titles(page)
+            title_ms = (time.perf_counter() - started) * 1000
+            from loguru import logger
+            logger.info('activity title resolution ms={:.3f} rows={}', title_ms, len(page))
             response['notifications'] = {'count': len(notifications), 'items': page}
         return response
     finally:
@@ -317,16 +341,6 @@ async def get_review(artifact_id: str, user: dict = Depends(require_user),
 
 # ── Actions ──────────────────────────────────────────────────────────────────
 
-class ClearBody(BaseModel):
-    token: str
-    outcome: str
-    condition: dict | None = None
-    reason: str | None = None
-    verdict: str | None = None
-    note: str | None = None
-    hold_ids: list[str] | None = None
-
-
 @router.post("/{artifact_id}/clear")
 async def post_clear(artifact_id: str, body: ClearBody):
     """A user clearing action (S6a). Closing a viewer does NOT hit this.
@@ -352,20 +366,6 @@ async def post_clear(artifact_id: str, body: ClearBody):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await public.drive_threads(woken)
     return asdict(result)
-
-
-class DisposeBody(BaseModel):
-    token: str
-    outcome: str
-    reason: str | None = None
-    answer: str | None = None
-    authority: str | None = None
-    override_blocking: bool = False
-    new_owner: str | None = None
-    condition: dict | None = None
-    replacement_id: str | None = None
-    actor_thread: str | None = None
-    hold_ids: list[str] | None = None
 
 
 @router.post("/{artifact_id}/dispose")
